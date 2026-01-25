@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: panther-dashboard
+data:
+  LOG_LEVEL: "INFO"
+  CORS_ORIGINS: "https://panther-dashboard.example.com"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"

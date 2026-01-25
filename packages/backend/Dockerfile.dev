@@ -1,0 +1,29 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install git (needed for some dependencies)
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir watchfiles
+
+# Copy app
+COPY app ./app
+
+# Create startup script that installs SDK at runtime
+RUN echo '#!/bin/bash\n\
+if [ -d "/app/panther_sdk_repo" ]; then\n\
+    echo "Installing Panther SDK..."\n\
+    cp -r /app/panther_sdk_repo /tmp/panther_sdk\n\
+    pip install /tmp/panther_sdk --quiet\n\
+    echo "Panther SDK installed successfully"\n\
+fi\n\
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload\n\
+' > /app/start.sh && chmod +x /app/start.sh
+
+EXPOSE 8000
+
+CMD ["/app/start.sh"]

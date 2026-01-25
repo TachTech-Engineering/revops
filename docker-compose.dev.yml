@@ -1,0 +1,63 @@
+services:
+  frontend:
+    build:
+      context: ./packages/frontend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./packages/frontend/src:/app/src
+      - ./packages/frontend/public:/app/public
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000/api/v1
+    depends_on:
+      - backend
+
+  backend:
+    build:
+      context: ./packages/backend
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./packages/backend/app:/app/app
+      - C:/Source/panther_sdk:/app/panther_sdk_repo:ro
+    env_file: .env
+    environment:
+      - REDIS_HOST=redis
+      - DATABASE_URL=postgresql+asyncpg://panther:panther@postgres:5432/panther_dashboard
+      - LOG_LEVEL=DEBUG
+      - CORS_ORIGINS=http://localhost:3000
+      - PYTHONPATH=/app:/app/panther_sdk_repo
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=panther
+      - POSTGRES_PASSWORD=panther
+      - POSTGRES_DB=panther_dashboard
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U panther -d panther_dashboard"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
