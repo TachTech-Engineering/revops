@@ -88,7 +88,7 @@ const navSections: NavSection[] = [
       { path: '/queries', label: 'Query Explorer', icon: Database },
       { path: '/ioc-search', label: 'IOC Search', icon: Search },
       { path: '/threat-intel', label: 'Threat Intel', icon: Shield },
-      { path: '/converter', label: 'Rule Converter', icon: ArrowRightLeft },
+      { path: '/migration', label: 'Migration Hub', icon: ArrowRightLeft },
     ],
   },
   {
@@ -271,7 +271,7 @@ export default function Layout({ children }: LayoutProps) {
           else if (nextKey.key === 's') navigate('/settings')
           else if (nextKey.key === 'd') navigate('/')
           else if (nextKey.key === 'i') navigate('/ioc-search')
-          else if (nextKey.key === 'c') navigate('/converter')
+          else if (nextKey.key === 'm') navigate('/migration')
           window.removeEventListener('keydown', handleNav)
         }
         window.addEventListener('keydown', handleNav, { once: true })

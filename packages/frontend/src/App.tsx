@@ -4,7 +4,7 @@ import { RootState } from './store'
 import Layout from './components/common/Layout'
 import LoginPage from './pages/LoginPage'
 import Dashboard from './pages/Dashboard'
-import ConverterPage from './pages/ConverterPage'
+import MigrationPage from './pages/MigrationPage'
 import QueryExplorerPage from './pages/QueryExplorerPage'
 import AnalyticsDashboardPage from './pages/AnalyticsDashboardPage'
 import IOCSearchPage from './pages/IOCSearchPage'
@@ -78,7 +78,8 @@ function App() {
                 <Route path="/queries" element={<QueryExplorerPage />} />
                 <Route path="/ioc-search" element={<IOCSearchPage />} />
                 <Route path="/threat-intel" element={<ThreatIntelPage />} />
-                <Route path="/converter" element={<ConverterPage />} />
+                <Route path="/migration" element={<MigrationPage />} />
+                <Route path="/converter" element={<Navigate to="/migration" replace />} />
                 {/* Analytics */}
                 <Route path="/analytics" element={<AnalyticsDashboardPage />} />
                 <Route path="/mitre" element={<MitreCoveragePage />} />

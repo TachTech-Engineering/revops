@@ -5,6 +5,7 @@ from app.api.v1 import (
     alerts,
     rules,
     converter,
+    migrate,
     health,
     queries,
     analytics,
@@ -44,6 +45,7 @@ api_router.include_router(health.router, tags=["health"])
 api_router.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
 api_router.include_router(rules.router, prefix="/rules", tags=["rules"])
 api_router.include_router(converter.router, prefix="/converter", tags=["converter"])
+api_router.include_router(migrate.router, prefix="/migrate", tags=["migration"])
 api_router.include_router(queries.router, prefix="/queries", tags=["queries"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(saved_queries.router, prefix="/saved-queries", tags=["saved-queries"])
