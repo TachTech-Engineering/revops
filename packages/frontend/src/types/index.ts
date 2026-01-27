@@ -118,6 +118,7 @@ export interface SPLConvertRequest {
   ruleId: string
   className?: string
   severity?: string
+  sourceFormat?: 'spl' | 'yaral'
 }
 
 export interface PaginatedResponse<T> {

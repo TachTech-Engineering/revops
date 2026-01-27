@@ -3,7 +3,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.api.v1.deps import PantherServiceDep
+from app.api.v1.deps import PantherServiceDep, OrgUserDep, OrgIdDep, OrgAnalystDep
 
 router = APIRouter()
 
@@ -106,6 +106,8 @@ LIMIT 500"""
 async def search_ioc(
     request: IOCSearchRequest,
     panther: PantherServiceDep,
+    analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
 ) -> IOCSearchResult:
     """Search for an IOC across all log sources."""
     indicator_type = request.indicator_type or detect_indicator_type(request.indicator)
@@ -159,7 +161,10 @@ async def search_ioc(
 
 
 @router.get("/types")
-async def get_indicator_types() -> list[dict[str, str]]:
+async def get_indicator_types(
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+) -> list[dict[str, str]]:
     """Get list of supported indicator types."""
     return [
         {"value": "ip", "label": "IP Address"},

@@ -3,11 +3,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, UserRole, UserRoleType
-from app.api.v1.deps import RequireAdminDep
+from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAdminDep
 from app.config import settings
 
 router = APIRouter()
@@ -42,26 +42,31 @@ class CurrentUserRoleResponse(BaseModel):
 
 @router.get("/me")
 async def get_my_role(
-    admin_check: RequireAdminDep = None,
+    admin: OrgAdminDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> CurrentUserRoleResponse:
     """Get the current user's role. Requires admin to access (for role management page)."""
-    email, role = admin_check
-    is_whitelisted = email in settings.admin_emails_list
+    is_whitelisted = admin.email in settings.admin_emails_list
     return CurrentUserRoleResponse(
-        email=email,
-        role=role,
+        email=admin.email,
+        role=admin.role,
         is_admin_whitelisted=is_whitelisted,
     )
 
 
 @router.get("")
 async def list_user_roles(
-    admin_check: RequireAdminDep,
+    admin: OrgAdminDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[UserRoleResponse]:
     """List all user roles. Admin only."""
-    result = await db.execute(select(UserRole).order_by(UserRole.email))
+    result = await db.execute(
+        select(UserRole)
+        .where(UserRole.organization_id == org_id)
+        .order_by(UserRole.email)
+    )
     roles = result.scalars().all()
     return [
         UserRoleResponse(
@@ -79,15 +84,19 @@ async def list_user_roles(
 @router.post("")
 async def create_user_role(
     role_data: UserRoleCreate,
-    admin_check: RequireAdminDep,
+    admin: OrgAdminDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserRoleResponse:
     """Assign a role to a user. Admin only."""
-    admin_email, _ = admin_check
     email = role_data.email.lower()
 
-    # Check if user already has a role
-    result = await db.execute(select(UserRole).where(UserRole.email == email))
+    # Check if user already has a role in this organization
+    result = await db.execute(
+        select(UserRole).where(
+            and_(UserRole.email == email, UserRole.organization_id == org_id)
+        )
+    )
     existing = result.scalar_one_or_none()
     if existing:
         raise HTTPException(
@@ -105,7 +114,8 @@ async def create_user_role(
     db_role = UserRole(
         email=email,
         role=role_data.role,
-        created_by=admin_email,
+        created_by=admin.email,
+        organization_id=admin.organization_id,
     )
     db.add(db_role)
     await db.flush()
@@ -125,11 +135,16 @@ async def create_user_role(
 async def update_user_role(
     role_id: UUID,
     update: UserRoleUpdate,
-    admin_check: RequireAdminDep,
+    admin: OrgAdminDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> UserRoleResponse:
     """Update a user's role. Admin only."""
-    result = await db.execute(select(UserRole).where(UserRole.id == role_id))
+    result = await db.execute(
+        select(UserRole).where(
+            and_(UserRole.id == role_id, UserRole.organization_id == org_id)
+        )
+    )
     role = result.scalar_one_or_none()
     if not role:
         raise HTTPException(status_code=404, detail="User role not found")
@@ -151,11 +166,16 @@ async def update_user_role(
 @router.delete("/{role_id}")
 async def delete_user_role(
     role_id: UUID,
-    admin_check: RequireAdminDep,
+    admin: OrgAdminDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete a user role assignment. Admin only."""
-    result = await db.execute(select(UserRole).where(UserRole.id == role_id))
+    result = await db.execute(
+        select(UserRole).where(
+            and_(UserRole.id == role_id, UserRole.organization_id == org_id)
+        )
+    )
     role = result.scalar_one_or_none()
     if not role:
         raise HTTPException(status_code=404, detail="User role not found")

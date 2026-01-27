@@ -4,11 +4,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, desc, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, Case, CaseActivity, CaseStatus, CasePriority, CaseActivityType
-from app.api.v1.deps import RequireAnalystDep, CurrentUserDep
+from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
 from app.services.case_service import (
     generate_case_number,
     add_case_activity,
@@ -83,7 +83,8 @@ class LinkIncidentRequest(BaseModel):
 
 @router.get("")
 async def list_cases(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     status: Optional[CaseStatus] = None,
     priority: Optional[CasePriority] = None,
@@ -92,7 +93,7 @@ async def list_cases(
     page_size: int = Query(20, ge=1, le=100),
 ) -> dict:
     """List all cases with pagination."""
-    query = select(Case)
+    query = select(Case).where(Case.organization_id == org_id)
 
     if status:
         query = query.where(Case.status == status)
@@ -142,11 +143,12 @@ async def list_cases(
 @router.get("/{case_id}")
 async def get_case(
     case_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CaseDetailResponse:
     """Get case details."""
-    result = await db.execute(select(Case).where(Case.id == case_id))
+    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == org_id)))
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -172,13 +174,14 @@ async def get_case(
 @router.get("/{case_id}/timeline")
 async def get_case_timeline_endpoint(
     case_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = Query(50, ge=1, le=200),
 ) -> list[CaseActivityResponse]:
     """Get case activity timeline."""
     # Verify case exists
-    result = await db.execute(select(Case).where(Case.id == case_id))
+    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == org_id)))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Case not found")
 
@@ -201,12 +204,10 @@ async def get_case_timeline_endpoint(
 @router.post("")
 async def create_case(
     case_data: CaseCreate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CaseDetailResponse:
     """Create a new case. Requires analyst role."""
-    email, _ = analyst
-
     case_number = await generate_case_number(db)
 
     db_case = Case(
@@ -217,7 +218,8 @@ async def create_case(
         assignee=case_data.assignee,
         tags=case_data.tags,
         incident_ids=case_data.incident_ids,
-        created_by=email,
+        created_by=analyst.email,
+        organization_id=analyst.organization_id,
     )
     db.add(db_case)
     await db.flush()
@@ -229,7 +231,7 @@ async def create_case(
         case_id=db_case.id,
         activity_type=CaseActivityType.CREATED,
         description=f"Case {case_number} created",
-        user_email=email,
+        user_email=analyst.email,
     )
 
     # Add activity for linked incidents
@@ -239,7 +241,7 @@ async def create_case(
             case_id=db_case.id,
             activity_type=CaseActivityType.INCIDENT_LINKED,
             description=f"Linked incident {incident_id}",
-            user_email=email,
+            user_email=analyst.email,
             new_value=incident_id,
         )
 
@@ -267,13 +269,11 @@ async def create_case(
 async def update_case(
     case_id: UUID,
     update: CaseUpdate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CaseResponse:
     """Update a case. Requires analyst role."""
-    email, _ = analyst
-
-    result = await db.execute(select(Case).where(Case.id == case_id))
+    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == analyst.organization_id)))
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -296,7 +296,7 @@ async def update_case(
                     field_name=field,
                     old_value=old_str,
                     new_value=new_str,
-                    user_email=email,
+                    user_email=analyst.email,
                 )
 
     # Handle status change to closed
@@ -332,11 +332,11 @@ async def update_case(
 @router.delete("/{case_id}")
 async def delete_case(
     case_id: UUID,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete a case. Requires analyst role."""
-    result = await db.execute(select(Case).where(Case.id == case_id))
+    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == analyst.organization_id)))
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -354,13 +354,11 @@ async def delete_case(
 async def add_comment(
     case_id: UUID,
     request: AddCommentRequest,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CaseActivityResponse:
     """Add a comment to a case. Requires analyst role."""
-    email, _ = analyst
-
-    result = await db.execute(select(Case).where(Case.id == case_id))
+    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == analyst.organization_id)))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Case not found")
 
@@ -369,7 +367,7 @@ async def add_comment(
         case_id=case_id,
         activity_type=CaseActivityType.COMMENT_ADDED,
         description=request.comment,
-        user_email=email,
+        user_email=analyst.email,
     )
 
     await db.flush()
@@ -389,13 +387,11 @@ async def add_comment(
 async def link_incident(
     case_id: UUID,
     request: LinkIncidentRequest,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Link an incident to a case. Requires analyst role."""
-    email, _ = analyst
-
-    result = await db.execute(select(Case).where(Case.id == case_id))
+    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == analyst.organization_id)))
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -410,7 +406,7 @@ async def link_incident(
         case_id=case_id,
         activity_type=CaseActivityType.INCIDENT_LINKED,
         description=f"Linked incident {request.incident_id}",
-        user_email=email,
+        user_email=analyst.email,
         new_value=request.incident_id,
     )
 
@@ -422,13 +418,11 @@ async def link_incident(
 async def unlink_incident(
     case_id: UUID,
     incident_id: str,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Unlink an incident from a case. Requires analyst role."""
-    email, _ = analyst
-
-    result = await db.execute(select(Case).where(Case.id == case_id))
+    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == analyst.organization_id)))
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -443,7 +437,7 @@ async def unlink_incident(
         case_id=case_id,
         activity_type=CaseActivityType.INCIDENT_UNLINKED,
         description=f"Unlinked incident {incident_id}",
-        user_email=email,
+        user_email=analyst.email,
         old_value=incident_id,
     )
 

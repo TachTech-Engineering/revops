@@ -1,6 +1,10 @@
 from app.db.session import get_db, init_db, engine, AsyncSessionLocal
 from app.db.models import (
     Base,
+    # Authentication
+    Organization,
+    User,
+    RefreshToken,
     SavedQuery,
     ScheduledReport,
     ReportFrequency,
@@ -41,6 +45,22 @@ from app.db.models import (
     NoteResourceType,
     Notification,
     NotificationType,
+    # Connector Framework
+    Connector,
+    NormalizedAlert,
+    ConnectorCategory,
+    ConnectorStatus,
+    DataSourceType,
+    ActionConnectorType,
+    # Workflow Engine
+    Workflow,
+    WorkflowNode,
+    WorkflowEdge,
+    WorkflowExecution,
+    WorkflowStepExecution,
+    WorkflowStatus,
+    WorkflowExecutionStatus,
+    NodeType,
 )
 
 __all__ = [
@@ -49,6 +69,10 @@ __all__ = [
     "engine",
     "AsyncSessionLocal",
     "Base",
+    # Authentication
+    "Organization",
+    "User",
+    "RefreshToken",
     "SavedQuery",
     "ScheduledReport",
     "ReportFrequency",
@@ -89,4 +113,20 @@ __all__ = [
     "NoteResourceType",
     "Notification",
     "NotificationType",
+    # Connector Framework
+    "Connector",
+    "NormalizedAlert",
+    "ConnectorCategory",
+    "ConnectorStatus",
+    "DataSourceType",
+    "ActionConnectorType",
+    # Workflow Engine
+    "Workflow",
+    "WorkflowNode",
+    "WorkflowEdge",
+    "WorkflowExecution",
+    "WorkflowStepExecution",
+    "WorkflowStatus",
+    "WorkflowExecutionStatus",
+    "NodeType",
 ]

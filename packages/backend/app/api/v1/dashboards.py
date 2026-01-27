@@ -3,11 +3,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from sqlalchemy import select, or_
+from sqlalchemy import select, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, CustomDashboard, WidgetType
-from app.api.v1.deps import CurrentUserDep
+from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
 
 router = APIRouter()
 
@@ -64,19 +64,23 @@ class DashboardResponse(BaseModel):
 
 @router.get("")
 async def list_dashboards(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[DashboardResponse]:
     """List all dashboards accessible to the current user."""
     email, _ = user
 
-    # Get user's own dashboards and shared dashboards
+    # Get user's own dashboards and shared dashboards within the organization
     result = await db.execute(
         select(CustomDashboard)
         .where(
-            or_(
-                CustomDashboard.owner_email == email,
-                CustomDashboard.is_shared == True,
+            and_(
+                CustomDashboard.organization_id == org_id,
+                or_(
+                    CustomDashboard.owner_email == email,
+                    CustomDashboard.is_shared == True,
+                ),
             )
         )
         .order_by(CustomDashboard.is_default.desc(), CustomDashboard.created_at.desc())
@@ -101,7 +105,7 @@ async def list_dashboards(
 
 
 @router.get("/widget-types")
-async def get_widget_types(user: CurrentUserDep) -> list[dict]:
+async def get_widget_types(user: OrgUserDep) -> list[dict]:
     """Get available widget types."""
     widget_info = {
         WidgetType.ALERT_SUMMARY: {
@@ -170,14 +174,20 @@ async def get_widget_types(user: CurrentUserDep) -> list[dict]:
 @router.get("/{dashboard_id}")
 async def get_dashboard(
     dashboard_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> DashboardResponse:
     """Get a dashboard by ID."""
     email, _ = user
 
     result = await db.execute(
-        select(CustomDashboard).where(CustomDashboard.id == dashboard_id)
+        select(CustomDashboard).where(
+            and_(
+                CustomDashboard.id == dashboard_id,
+                CustomDashboard.organization_id == org_id,
+            )
+        )
     )
     dashboard = result.scalar_one_or_none()
 
@@ -205,19 +215,18 @@ async def get_dashboard(
 @router.post("")
 async def create_dashboard(
     dashboard: DashboardCreate,
-    user: CurrentUserDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> DashboardResponse:
     """Create a new dashboard."""
-    email, _ = user
-
     db_dashboard = CustomDashboard(
         name=dashboard.name,
         description=dashboard.description,
         is_shared=dashboard.is_shared,
         layout=[l.model_dump() for l in dashboard.layout],
         widgets=[w.model_dump() for w in dashboard.widgets],
-        owner_email=email,
+        owner_email=analyst.email,
+        organization_id=analyst.organization_id,
     )
     db.add(db_dashboard)
     await db.flush()
@@ -241,32 +250,40 @@ async def create_dashboard(
 async def update_dashboard(
     dashboard_id: UUID,
     update: DashboardUpdate,
-    user: CurrentUserDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> DashboardResponse:
     """Update a dashboard."""
-    email, _ = user
-
     result = await db.execute(
-        select(CustomDashboard).where(CustomDashboard.id == dashboard_id)
+        select(CustomDashboard).where(
+            and_(
+                CustomDashboard.id == dashboard_id,
+                CustomDashboard.organization_id == analyst.organization_id,
+            )
+        )
     )
     dashboard = result.scalar_one_or_none()
 
     if not dashboard:
         raise HTTPException(status_code=404, detail="Dashboard not found")
 
-    if dashboard.owner_email != email:
+    if dashboard.owner_email != analyst.email:
         raise HTTPException(status_code=403, detail="Only owner can update dashboard")
 
     update_data = update.model_dump(exclude_unset=True)
 
     # Handle setting as default
     if update_data.get("is_default"):
-        # Unset other default dashboards for this user
+        # Unset other default dashboards for this user within the organization
         await db.execute(
             CustomDashboard.__table__.update()
-            .where(CustomDashboard.owner_email == email)
-            .where(CustomDashboard.id != dashboard_id)
+            .where(
+                and_(
+                    CustomDashboard.owner_email == analyst.email,
+                    CustomDashboard.organization_id == analyst.organization_id,
+                    CustomDashboard.id != dashboard_id,
+                )
+            )
             .values(is_default=False)
         )
 
@@ -305,21 +322,24 @@ async def update_dashboard(
 @router.delete("/{dashboard_id}")
 async def delete_dashboard(
     dashboard_id: UUID,
-    user: CurrentUserDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete a dashboard."""
-    email, _ = user
-
     result = await db.execute(
-        select(CustomDashboard).where(CustomDashboard.id == dashboard_id)
+        select(CustomDashboard).where(
+            and_(
+                CustomDashboard.id == dashboard_id,
+                CustomDashboard.organization_id == analyst.organization_id,
+            )
+        )
     )
     dashboard = result.scalar_one_or_none()
 
     if not dashboard:
         raise HTTPException(status_code=404, detail="Dashboard not found")
 
-    if dashboard.owner_email != email:
+    if dashboard.owner_email != analyst.email:
         raise HTTPException(status_code=403, detail="Only owner can delete dashboard")
 
     await db.delete(dashboard)

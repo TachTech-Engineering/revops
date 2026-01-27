@@ -25,6 +25,29 @@ class Settings(BaseSettings):
     # Threat Intel API Keys (optional)
     virustotal_api_key: str = ""
     abuseipdb_api_key: str = ""
+    otx_api_key: str = ""  # AlienVault OTX
+
+    # LLM Providers (Phase 5)
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4"
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-3-sonnet-20240229"
+    default_llm_provider: str = "openai"
+
+    # Attack Simulation (Phase 5)
+    atomic_red_team_path: str = ""  # Local path or GitHub URL
+    stratus_red_team_path: str = ""
+
+    # Cloud credentials for Stratus Red Team execution
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_region: str = "us-east-1"
+    azure_subscription_id: str = ""
+    azure_tenant_id: str = ""
+    azure_client_id: str = ""
+    azure_client_secret: str = ""
+    gcp_project_id: str = ""
+    gcp_service_account_key: str = ""  # Path to service account JSON
 
     # RBAC
     admin_emails: str = ""  # Comma-separated list of admin emails
@@ -55,6 +78,13 @@ class Settings(BaseSettings):
     firewall_api_token: str = ""
     soar_webhook_url: str = ""
     soar_api_token: str = ""
+
+    # Connector Framework - Encryption
+    encryption_key: str = ""  # Fernet key for encrypting connector credentials
+
+    # Connector Framework - Alert Sync
+    alert_sync_batch_size: int = 100
+    alert_sync_max_age_days: int = 30
 
     # Logging
     log_level: str = "INFO"

@@ -4,25 +4,17 @@ import { RootState } from './store'
 import Layout from './components/common/Layout'
 import LoginPage from './pages/LoginPage'
 import Dashboard from './pages/Dashboard'
-import AlertsPage from './pages/AlertsPage'
-import AlertDetailPage from './pages/AlertDetailPage'
-import RulesPage from './pages/RulesPage'
-import RuleEditorPage from './pages/RuleEditorPage'
 import ConverterPage from './pages/ConverterPage'
 import QueryExplorerPage from './pages/QueryExplorerPage'
 import AnalyticsDashboardPage from './pages/AnalyticsDashboardPage'
 import IOCSearchPage from './pages/IOCSearchPage'
 import SettingsPage from './pages/SettingsPage'
-import SuppressionRulesPage from './pages/SuppressionRulesPage'
 import WebhooksPage from './pages/WebhooksPage'
 import RoleManagementPage from './pages/RoleManagementPage'
 import AuditLogPage from './pages/AuditLogPage'
-import PlaybooksPage from './pages/PlaybooksPage'
-import PlaybookEditorPage from './pages/PlaybookEditorPage'
 import ScheduledReportsPage from './pages/ScheduledReportsPage'
 import IncidentsPage from './pages/IncidentsPage'
 import IncidentDetailPage from './pages/IncidentDetailPage'
-import CorrelationRulesPage from './pages/CorrelationRulesPage'
 import CasesPage from './pages/CasesPage'
 import CaseDetailPage from './pages/CaseDetailPage'
 import EnrichmentPipelinesPage from './pages/EnrichmentPipelinesPage'
@@ -31,11 +23,20 @@ import CustomDashboardPage from './pages/CustomDashboardPage'
 import MitreCoveragePage from './pages/MitreCoveragePage'
 import SLADashboardPage from './pages/SLADashboardPage'
 import SLAPoliciesPage from './pages/SLAPoliciesPage'
+import ThreatIntelPage from './pages/ThreatIntelPage'
+import AISettingsPage from './pages/AISettingsPage'
+// SecOps Platform: Connectors & Workflows
+import ConnectorsPage from './pages/ConnectorsPage'
+import ConnectorEditorPage from './pages/ConnectorEditorPage'
+import WorkflowsPage from './pages/WorkflowsPage'
+import WorkflowEditorPage from './pages/WorkflowEditorPage'
+import AlertsPage from './pages/UnifiedAlertsPage'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const isAuthenticated = useSelector((state: RootState) => state.auth.isAuthenticated)
+  const { isAuthenticated, userEmail } = useSelector((state: RootState) => state.auth)
 
-  if (!isAuthenticated) {
+  // Require both authentication and userEmail for full functionality
+  if (!isAuthenticated || !userEmail) {
     return <Navigate to="/login" replace />
   }
 
@@ -58,36 +59,41 @@ function App() {
             <Layout>
               <Routes>
                 <Route path="/" element={<Dashboard />} />
+                {/* Security Operations */}
                 <Route path="/alerts" element={<AlertsPage />} />
-                <Route path="/alerts/:alertId" element={<AlertDetailPage />} />
-                <Route path="/rules" element={<RulesPage />} />
-                <Route path="/rules/new" element={<RuleEditorPage />} />
-                <Route path="/rules/:ruleId" element={<RuleEditorPage />} />
-                <Route path="/converter" element={<ConverterPage />} />
-                <Route path="/queries" element={<QueryExplorerPage />} />
-                <Route path="/analytics" element={<AnalyticsDashboardPage />} />
-                <Route path="/ioc-search" element={<IOCSearchPage />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/suppression" element={<SuppressionRulesPage />} />
-                <Route path="/webhooks" element={<WebhooksPage />} />
-                <Route path="/roles" element={<RoleManagementPage />} />
-                <Route path="/audit" element={<AuditLogPage />} />
-                <Route path="/playbooks" element={<PlaybooksPage />} />
-                <Route path="/playbooks/new" element={<PlaybookEditorPage />} />
-                <Route path="/playbooks/:playbookId" element={<PlaybookEditorPage />} />
-                <Route path="/playbooks/:playbookId/edit" element={<PlaybookEditorPage />} />
-                <Route path="/reports" element={<ScheduledReportsPage />} />
                 <Route path="/incidents" element={<IncidentsPage />} />
                 <Route path="/incidents/:id" element={<IncidentDetailPage />} />
-                <Route path="/correlation-rules" element={<CorrelationRulesPage />} />
                 <Route path="/cases" element={<CasesPage />} />
                 <Route path="/cases/:id" element={<CaseDetailPage />} />
-                <Route path="/enrichment" element={<EnrichmentPipelinesPage />} />
-                <Route path="/dashboards" element={<DashboardManagerPage />} />
-                <Route path="/dashboards/:id" element={<CustomDashboardPage />} />
+                {/* Automation */}
+                <Route path="/connectors" element={<ConnectorsPage />} />
+                <Route path="/connectors/new" element={<ConnectorEditorPage />} />
+                <Route path="/connectors/:connectorId" element={<ConnectorEditorPage />} />
+                <Route path="/connectors/:connectorId/edit" element={<ConnectorEditorPage />} />
+                <Route path="/workflows" element={<WorkflowsPage />} />
+                <Route path="/workflows/new" element={<WorkflowEditorPage />} />
+                <Route path="/workflows/:workflowId" element={<WorkflowEditorPage />} />
+                <Route path="/workflows/:workflowId/edit" element={<WorkflowEditorPage />} />
+                {/* Investigation */}
+                <Route path="/queries" element={<QueryExplorerPage />} />
+                <Route path="/ioc-search" element={<IOCSearchPage />} />
+                <Route path="/threat-intel" element={<ThreatIntelPage />} />
+                <Route path="/converter" element={<ConverterPage />} />
+                {/* Analytics */}
+                <Route path="/analytics" element={<AnalyticsDashboardPage />} />
                 <Route path="/mitre" element={<MitreCoveragePage />} />
                 <Route path="/sla" element={<SLADashboardPage />} />
                 <Route path="/sla/policies" element={<SLAPoliciesPage />} />
+                <Route path="/dashboards" element={<DashboardManagerPage />} />
+                <Route path="/dashboards/:id" element={<CustomDashboardPage />} />
+                <Route path="/reports" element={<ScheduledReportsPage />} />
+                {/* Administration */}
+                <Route path="/webhooks" element={<WebhooksPage />} />
+                <Route path="/enrichment" element={<EnrichmentPipelinesPage />} />
+                <Route path="/roles" element={<RoleManagementPage />} />
+                <Route path="/audit" element={<AuditLogPage />} />
+                <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/settings/ai" element={<AISettingsPage />} />
               </Routes>
             </Layout>
           </ProtectedRoute>

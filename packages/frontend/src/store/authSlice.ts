@@ -4,82 +4,142 @@ export type UserRole = 'admin' | 'analyst' | 'viewer'
 
 interface AuthState {
   isAuthenticated: boolean
-  pantherHost: string | null
-  pantherToken: string | null
   userEmail: string | null
+  userName: string | null
+  userId: string | null
+  organizationId: string | null
+  organizationName: string | null
+  accessToken: string | null
+  refreshToken: string | null
+  userRole: UserRole
+}
+
+const STORAGE_KEY = 'revops_auth'
+
+interface StoredAuth {
+  userEmail: string | null
+  userName: string | null
+  userId: string | null
+  organizationId: string | null
+  organizationName: string | null
+  accessToken: string | null
+  refreshToken: string | null
   userRole: UserRole
 }
 
 const loadFromStorage = (): AuthState => {
-  // Use sessionStorage - clears when browser tab closes for better security
-  const stored = sessionStorage.getItem('panther_auth')
+  const stored = localStorage.getItem(STORAGE_KEY)
   if (stored) {
     try {
-      const parsed = JSON.parse(stored)
+      const parsed: StoredAuth = JSON.parse(stored)
       return {
         isAuthenticated: true,
-        pantherHost: parsed.pantherHost,
-        pantherToken: parsed.pantherToken,
         userEmail: parsed.userEmail || null,
+        userName: parsed.userName || null,
+        userId: parsed.userId || null,
+        organizationId: parsed.organizationId || null,
+        organizationName: parsed.organizationName || null,
+        accessToken: parsed.accessToken || null,
+        refreshToken: parsed.refreshToken || null,
         userRole: parsed.userRole || 'viewer',
       }
     } catch {
-      return { isAuthenticated: false, pantherHost: null, pantherToken: null, userEmail: null, userRole: 'viewer' }
+      return {
+        isAuthenticated: false,
+        userEmail: null,
+        userName: null,
+        userId: null,
+        organizationId: null,
+        organizationName: null,
+        accessToken: null,
+        refreshToken: null,
+        userRole: 'viewer',
+      }
     }
   }
-  return { isAuthenticated: false, pantherHost: null, pantherToken: null, userEmail: null, userRole: 'viewer' }
+  return {
+    isAuthenticated: false,
+    userEmail: null,
+    userName: null,
+    userId: null,
+    organizationId: null,
+    organizationName: null,
+    accessToken: null,
+    refreshToken: null,
+    userRole: 'viewer',
+  }
+}
+
+const saveToStorage = (state: AuthState) => {
+  const toStore: StoredAuth = {
+    userEmail: state.userEmail,
+    userName: state.userName,
+    userId: state.userId,
+    organizationId: state.organizationId,
+    organizationName: state.organizationName,
+    accessToken: state.accessToken,
+    refreshToken: state.refreshToken,
+    userRole: state.userRole,
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(toStore))
 }
 
 const initialState: AuthState = loadFromStorage()
+
+interface LoginPayload {
+  userEmail: string
+  userName?: string | null
+  userId?: string | null
+  organizationId?: string | null
+  organizationName?: string | null
+  accessToken?: string | null
+  refreshToken?: string | null
+  userRole?: UserRole
+}
 
 const authSlice = createSlice({
   name: 'auth',
   initialState,
   reducers: {
-    login: (state, action: PayloadAction<{ pantherHost: string; pantherToken: string; userEmail?: string }>) => {
+    login: (state, action: PayloadAction<LoginPayload>) => {
       state.isAuthenticated = true
-      state.pantherHost = action.payload.pantherHost
-      state.pantherToken = action.payload.pantherToken
-      state.userEmail = action.payload.userEmail || null
-      sessionStorage.setItem('panther_auth', JSON.stringify({
-        pantherHost: action.payload.pantherHost,
-        pantherToken: action.payload.pantherToken,
-        userEmail: action.payload.userEmail,
-        userRole: state.userRole,
-      }))
+      state.userEmail = action.payload.userEmail
+      state.userName = action.payload.userName || null
+      state.userId = action.payload.userId || null
+      state.organizationId = action.payload.organizationId || null
+      state.organizationName = action.payload.organizationName || null
+      state.accessToken = action.payload.accessToken || null
+      state.refreshToken = action.payload.refreshToken || null
+      state.userRole = action.payload.userRole || 'viewer'
+      saveToStorage(state)
+    },
+    setTokens: (state, action: PayloadAction<{ accessToken: string; refreshToken: string }>) => {
+      state.accessToken = action.payload.accessToken
+      state.refreshToken = action.payload.refreshToken
+      saveToStorage(state)
     },
     setUserRole: (state, action: PayloadAction<UserRole>) => {
       state.userRole = action.payload
-      const stored = sessionStorage.getItem('panther_auth')
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        sessionStorage.setItem('panther_auth', JSON.stringify({
-          ...parsed,
-          userRole: action.payload,
-        }))
-      }
+      saveToStorage(state)
     },
     setUserEmail: (state, action: PayloadAction<string>) => {
       state.userEmail = action.payload
-      const stored = sessionStorage.getItem('panther_auth')
-      if (stored) {
-        const parsed = JSON.parse(stored)
-        sessionStorage.setItem('panther_auth', JSON.stringify({
-          ...parsed,
-          userEmail: action.payload,
-        }))
-      }
+      saveToStorage(state)
     },
     logout: (state) => {
       state.isAuthenticated = false
-      state.pantherHost = null
-      state.pantherToken = null
       state.userEmail = null
+      state.userName = null
+      state.userId = null
+      state.organizationId = null
+      state.organizationName = null
+      state.accessToken = null
+      state.refreshToken = null
       state.userRole = 'viewer'
-      sessionStorage.removeItem('panther_auth')
+      localStorage.removeItem(STORAGE_KEY)
     },
   },
 })
 
-export const { login, logout, setUserRole, setUserEmail } = authSlice.actions
+export const { login, logout, setUserRole, setUserEmail, setTokens } = authSlice.actions
 export default authSlice.reducer

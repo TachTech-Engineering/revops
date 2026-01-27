@@ -143,7 +143,18 @@ export function useWebSocket({
 }
 
 export function useAlertWebSocket(onAlert?: (alert: AlertNotification) => void) {
-  const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws/alerts`
+  // Use API base URL if set, otherwise fall back to window.location
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || ''
+  let wsUrl: string
+
+  if (apiBaseUrl) {
+    // Convert http(s) URL to ws(s) URL
+    const url = new URL(apiBaseUrl)
+    const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    wsUrl = `${wsProtocol}//${url.host}/api/v1/ws/alerts`
+  } else {
+    wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws/alerts`
+  }
 
   return useWebSocket({
     url: wsUrl,

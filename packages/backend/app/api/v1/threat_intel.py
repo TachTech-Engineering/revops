@@ -1,17 +1,19 @@
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 import httpx
 
 from app.config import settings
+from app.services.threat_intel_service import threat_intel_service
+from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
 
 router = APIRouter()
 
 
 class ThreatIntelRequest(BaseModel):
     indicator: str
-    indicator_type: str  # ip, domain, hash
+    indicator_type: str  # ip_address, domain, url, file_hash_md5, file_hash_sha1, file_hash_sha256
 
 
 class ThreatIntelResult(BaseModel):
@@ -25,6 +27,7 @@ class ThreatIntelResult(BaseModel):
 @router.post("/lookup")
 async def lookup_threat_intel(
     request: ThreatIntelRequest,
+    analyst: OrgAnalystDep,
 ) -> ThreatIntelResult:
     """Look up threat intelligence for an indicator."""
     result = ThreatIntelResult(
@@ -156,15 +159,60 @@ async def lookup_abuseipdb(
 
 
 @router.get("/status")
-async def get_threat_intel_status() -> dict[str, Any]:
+async def get_threat_intel_status(
+    user: OrgUserDep,
+) -> dict[str, Any]:
     """Check which threat intel services are configured."""
-    return {
-        "virustotal": {
-            "configured": bool(settings.virustotal_api_key),
-            "supported_types": ["ip", "domain", "hash"],
-        },
-        "abuseipdb": {
-            "configured": bool(settings.abuseipdb_api_key),
-            "supported_types": ["ip"],
-        },
+    # Get status from unified service
+    unified_status = await threat_intel_service.get_sources_status()
+
+    # Add legacy VirusTotal status
+    unified_status["virustotal"] = {
+        "configured": bool(settings.virustotal_api_key),
+        "supported_types": ["ip_address", "domain", "file_hash_md5", "file_hash_sha1", "file_hash_sha256"],
+        "description": "VirusTotal threat intelligence",
     }
+
+    return unified_status
+
+
+@router.get("/lookup")
+async def unified_lookup(
+    user: OrgUserDep,
+    indicator: str = Query(..., description="Indicator value"),
+    indicator_type: str = Query(..., description="Type: ip_address, domain, url, file_hash_md5, file_hash_sha1, file_hash_sha256"),
+) -> dict[str, Any]:
+    """
+    Unified threat intelligence lookup across all configured providers.
+
+    This endpoint queries all available threat intel sources in parallel and
+    returns aggregated results with a composite risk score.
+
+    Supported providers (free tier):
+    - AbuseIPDB: IP reputation
+    - AlienVault OTX: Multiple indicator types
+    - Abuse.ch: Malware hashes, malicious URLs, botnet C2 IPs
+    """
+    # Normalize indicator type
+    type_mapping = {
+        "ip": "ip_address",
+        "hash": "file_hash_sha256",
+        "md5": "file_hash_md5",
+        "sha1": "file_hash_sha1",
+        "sha256": "file_hash_sha256",
+    }
+    normalized_type = type_mapping.get(indicator_type, indicator_type)
+
+    try:
+        result = await threat_intel_service.lookup(indicator, normalized_type)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/sources")
+async def list_sources(
+    user: OrgUserDep,
+) -> dict[str, Any]:
+    """List available threat intelligence sources and their capabilities."""
+    return await threat_intel_service.get_sources_status()

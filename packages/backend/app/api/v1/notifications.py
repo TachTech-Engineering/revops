@@ -4,11 +4,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from sqlalchemy import select, func, update
+from sqlalchemy import select, func, update, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, Notification, NotificationType
-from app.api.v1.deps import CurrentUserDep
+from app.api.v1.deps import OrgUserDep, OrgIdDep
 
 router = APIRouter()
 
@@ -62,7 +62,8 @@ def format_notification(n: Notification) -> NotificationResponse:
 
 @router.get("")
 async def list_notifications(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     unread_only: bool = False,
     notification_type: Optional[NotificationType] = None,
@@ -70,9 +71,12 @@ async def list_notifications(
     page_size: int = 20,
 ) -> NotificationListResponse:
     """List notifications for the current user."""
-    email = user
-
-    query = select(Notification).where(Notification.user_email == email)
+    query = select(Notification).where(
+        and_(
+            Notification.organization_id == org_id,
+            Notification.user_email == user.email,
+        )
+    )
 
     if unread_only:
         query = query.where(Notification.is_read == False)
@@ -88,8 +92,11 @@ async def list_notifications(
     # Get unread count
     unread_result = await db.execute(
         select(func.count()).where(
-            Notification.user_email == email,
-            Notification.is_read == False,
+            and_(
+                Notification.organization_id == org_id,
+                Notification.user_email == user.email,
+                Notification.is_read == False,
+            )
         )
     )
     unread_count = unread_result.scalar() or 0
@@ -110,16 +117,18 @@ async def list_notifications(
 
 @router.get("/unread-count")
 async def get_unread_count(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Get the count of unread notifications."""
-    email = user
-
     result = await db.execute(
         select(func.count()).where(
-            Notification.user_email == email,
-            Notification.is_read == False,
+            and_(
+                Notification.organization_id == org_id,
+                Notification.user_email == user.email,
+                Notification.is_read == False,
+            )
         )
     )
     count = result.scalar() or 0
@@ -130,16 +139,18 @@ async def get_unread_count(
 @router.get("/{notification_id}")
 async def get_notification(
     notification_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> NotificationResponse:
     """Get a specific notification."""
-    email = user
-
     result = await db.execute(
         select(Notification).where(
-            Notification.id == notification_id,
-            Notification.user_email == email,
+            and_(
+                Notification.id == notification_id,
+                Notification.organization_id == org_id,
+                Notification.user_email == user.email,
+            )
         )
     )
     notification = result.scalar_one_or_none()
@@ -152,16 +163,18 @@ async def get_notification(
 @router.post("/{notification_id}/read")
 async def mark_as_read(
     notification_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> NotificationResponse:
     """Mark a notification as read."""
-    email = user
-
     result = await db.execute(
         select(Notification).where(
-            Notification.id == notification_id,
-            Notification.user_email == email,
+            and_(
+                Notification.id == notification_id,
+                Notification.organization_id == org_id,
+                Notification.user_email == user.email,
+            )
         )
     )
     notification = result.scalar_one_or_none()
@@ -179,18 +192,20 @@ async def mark_as_read(
 
 @router.post("/read-all")
 async def mark_all_as_read(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Mark all notifications as read."""
-    email = user
-
     now = datetime.utcnow()
     result = await db.execute(
         update(Notification)
         .where(
-            Notification.user_email == email,
-            Notification.is_read == False,
+            and_(
+                Notification.organization_id == org_id,
+                Notification.user_email == user.email,
+                Notification.is_read == False,
+            )
         )
         .values(is_read=True, read_at=now)
     )
@@ -201,16 +216,18 @@ async def mark_all_as_read(
 @router.delete("/{notification_id}")
 async def delete_notification(
     notification_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete a notification."""
-    email = user
-
     result = await db.execute(
         select(Notification).where(
-            Notification.id == notification_id,
-            Notification.user_email == email,
+            and_(
+                Notification.id == notification_id,
+                Notification.organization_id == org_id,
+                Notification.user_email == user.email,
+            )
         )
     )
     notification = result.scalar_one_or_none()
@@ -223,14 +240,18 @@ async def delete_notification(
 
 @router.delete("")
 async def clear_notifications(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     read_only: bool = True,
 ) -> dict:
     """Clear notifications. By default only clears read notifications."""
-    email = user
-
-    query = select(Notification).where(Notification.user_email == email)
+    query = select(Notification).where(
+        and_(
+            Notification.organization_id == org_id,
+            Notification.user_email == user.email,
+        )
+    )
 
     if read_only:
         query = query.where(Notification.is_read == True)
@@ -249,6 +270,7 @@ async def clear_notifications(
 @router.post("/internal/create")
 async def create_notification_internal(
     data: NotificationCreate,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> NotificationResponse:
     """Create a notification. Internal use only."""
@@ -259,6 +281,7 @@ async def create_notification_internal(
         message=data.message,
         resource_type=data.resource_type,
         resource_id=data.resource_id,
+        organization_id=org_id,
     )
     db.add(notification)
     await db.flush()

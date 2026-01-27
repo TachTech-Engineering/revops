@@ -3,11 +3,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, EnrichmentPipeline, EnrichmentType
-from app.api.v1.deps import RequireAnalystDep, CurrentUserDep
+from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep, OrgAdminDep
 from app.services.enrichment_service import (
     run_enrichment,
     enrich_alert,
@@ -80,13 +80,16 @@ class EnrichAlertRequest(BaseModel):
 
 @router.get("")
 async def list_enrichment_pipelines(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     active_only: bool = False,
     enrichment_type: Optional[EnrichmentType] = None,
 ) -> list[EnrichmentPipelineResponse]:
     """List all enrichment pipelines."""
-    query = select(EnrichmentPipeline).order_by(EnrichmentPipeline.created_at.desc())
+    query = select(EnrichmentPipeline).where(
+        EnrichmentPipeline.organization_id == org_id
+    ).order_by(EnrichmentPipeline.created_at.desc())
 
     if active_only:
         query = query.where(EnrichmentPipeline.is_active == True)
@@ -120,7 +123,7 @@ async def list_enrichment_pipelines(
 
 
 @router.get("/types")
-async def get_enrichment_types(user: CurrentUserDep) -> list[dict]:
+async def get_enrichment_types(user: OrgUserDep) -> list[dict]:
     """Get available enrichment types."""
     return [
         {"value": t.value, "label": t.value.replace("_", " ").title()}
@@ -131,12 +134,18 @@ async def get_enrichment_types(user: CurrentUserDep) -> list[dict]:
 @router.get("/{pipeline_id}")
 async def get_enrichment_pipeline(
     pipeline_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> EnrichmentPipelineResponse:
     """Get an enrichment pipeline by ID."""
     result = await db.execute(
-        select(EnrichmentPipeline).where(EnrichmentPipeline.id == pipeline_id)
+        select(EnrichmentPipeline).where(
+            and_(
+                EnrichmentPipeline.id == pipeline_id,
+                EnrichmentPipeline.organization_id == org_id
+            )
+        )
     )
     pipeline = result.scalar_one_or_none()
     if not pipeline:
@@ -165,12 +174,10 @@ async def get_enrichment_pipeline(
 @router.post("")
 async def create_enrichment_pipeline(
     pipeline: EnrichmentPipelineCreate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> EnrichmentPipelineResponse:
     """Create a new enrichment pipeline. Requires analyst role."""
-    email, _ = analyst
-
     db_pipeline = EnrichmentPipeline(
         name=pipeline.name,
         description=pipeline.description,
@@ -184,7 +191,8 @@ async def create_enrichment_pipeline(
         is_active=pipeline.is_active,
         auto_enrich=pipeline.auto_enrich,
         severity_filter=pipeline.severity_filter,
-        created_by=email,
+        created_by=analyst.email,
+        organization_id=analyst.organization_id,
     )
     db.add(db_pipeline)
     await db.flush()
@@ -214,12 +222,17 @@ async def create_enrichment_pipeline(
 async def update_enrichment_pipeline(
     pipeline_id: UUID,
     update: EnrichmentPipelineUpdate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> EnrichmentPipelineResponse:
     """Update an enrichment pipeline. Requires analyst role."""
     result = await db.execute(
-        select(EnrichmentPipeline).where(EnrichmentPipeline.id == pipeline_id)
+        select(EnrichmentPipeline).where(
+            and_(
+                EnrichmentPipeline.id == pipeline_id,
+                EnrichmentPipeline.organization_id == analyst.organization_id
+            )
+        )
     )
     pipeline = result.scalar_one_or_none()
     if not pipeline:
@@ -254,12 +267,17 @@ async def update_enrichment_pipeline(
 @router.delete("/{pipeline_id}")
 async def delete_enrichment_pipeline(
     pipeline_id: UUID,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete an enrichment pipeline. Requires analyst role."""
     result = await db.execute(
-        select(EnrichmentPipeline).where(EnrichmentPipeline.id == pipeline_id)
+        select(EnrichmentPipeline).where(
+            and_(
+                EnrichmentPipeline.id == pipeline_id,
+                EnrichmentPipeline.organization_id == analyst.organization_id
+            )
+        )
     )
     pipeline = result.scalar_one_or_none()
     if not pipeline:
@@ -273,12 +291,17 @@ async def delete_enrichment_pipeline(
 async def test_enrichment_pipeline(
     pipeline_id: UUID,
     request: EnrichValueRequest,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Test an enrichment pipeline with a value."""
     result = await db.execute(
-        select(EnrichmentPipeline).where(EnrichmentPipeline.id == pipeline_id)
+        select(EnrichmentPipeline).where(
+            and_(
+                EnrichmentPipeline.id == pipeline_id,
+                EnrichmentPipeline.organization_id == analyst.organization_id
+            )
+        )
     )
     pipeline = result.scalar_one_or_none()
     if not pipeline:
@@ -298,12 +321,10 @@ async def test_enrichment_pipeline(
 @router.post("/enrich-alert")
 async def enrich_alert_endpoint(
     request: EnrichAlertRequest,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Enrich an alert using active enrichment pipelines."""
-    email, _ = analyst
-
     pipeline_ids = None
     if request.pipeline_ids:
         pipeline_ids = [UUID(pid) for pid in request.pipeline_ids]
@@ -312,8 +333,9 @@ async def enrich_alert_endpoint(
         db=db,
         alert_id=request.alert_id,
         alert_data=request.alert_data,
-        user_email=email,
+        user_email=analyst.email,
         pipeline_ids=pipeline_ids,
+        organization_id=analyst.organization_id,
     )
 
     return {
@@ -326,11 +348,12 @@ async def enrich_alert_endpoint(
 @router.get("/alerts/{alert_id}")
 async def get_alert_enrichments_endpoint(
     alert_id: str,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Get all enrichments for an alert."""
-    enrichments = await get_alert_enrichments(db, alert_id)
+    enrichments = await get_alert_enrichments(db, alert_id, organization_id=org_id)
 
     return {
         "alert_id": alert_id,

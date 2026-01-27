@@ -1,12 +1,24 @@
-"""Service for Splunk SPL (Search Processing Language) to Panther rule conversion.
+"""Service for detection rule conversion to Panther.
 
-Converts Splunk queries into Panther detection rules, supporting both streaming
-rules (real-time detection) and scheduled rules (periodic aggregation queries).
+Converts detection rules from various formats into Panther Python detection rules:
+- Splunk SPL (Search Processing Language)
+- Google SecOps YARA-L
+
+Supports both streaming rules (real-time detection) and scheduled rules
+(periodic aggregation queries).
 """
 import logging
 from typing import Any, Optional
+from enum import Enum
 
 from app.services.spl_enhanced_converter import EnhancedSPLConverter, RuleType
+from app.services.yaral_converter import YARALConverter, yaral_converter
+
+
+class SourceFormat(str, Enum):
+    """Supported source formats for conversion."""
+    SPL = "spl"
+    YARAL = "yaral"
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +36,12 @@ except ImportError:
 
 
 class ConverterService:
-    """Service for Splunk SPL to Panther rule conversion.
+    """Service for detection rule conversion to Panther.
 
-    Uses the Panther SDK converter when available, with fallback to an enhanced
-    converter for complex Splunk queries with advanced commands like eval, stats,
-    bin, timechart, etc.
+    Supports multiple source formats:
+    - SPL: Uses Panther SDK converter when available, with fallback to enhanced converter
+    - YARA-L: Uses custom YARA-L converter for Google SecOps migration
+
     """
 
     def __init__(self) -> None:
@@ -37,6 +50,7 @@ class ConverterService:
         else:
             self._converter = None
         self._enhanced_converter = EnhancedSPLConverter()
+        self._yaral_converter = yaral_converter
 
     async def convert(
         self,
@@ -44,13 +58,25 @@ class ConverterService:
         rule_id: str,
         class_name: Optional[str] = None,
         severity: Optional[str] = None,
+        source_format: SourceFormat = SourceFormat.SPL,
     ) -> dict[str, Any]:
         """
-        Convert a single SPL query to a Panther rule.
+        Convert a detection rule to a Panther rule.
+
+        Args:
+            spl: The source rule (SPL query or YARA-L rule)
+            rule_id: Identifier for the generated rule
+            class_name: Optional class name for the rule
+            severity: Optional severity level
+            source_format: Source format (spl or yaral)
 
         Returns the generated rule with source code and metadata.
-        Uses SDK converter first, falls back to enhanced converter for complex queries.
         """
+        # Handle YARA-L conversion
+        if source_format == SourceFormat.YARAL:
+            return await self._convert_yaral(spl, rule_id, class_name, severity)
+
+        # SPL conversion
         sdk_result = None
         sdk_error = None
 
@@ -290,3 +316,90 @@ class ConverterService:
                 "valid": False,
                 "error": str(e),
             }
+
+    async def _convert_yaral(
+        self,
+        yaral: str,
+        rule_id: str,
+        class_name: Optional[str] = None,
+        severity: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Convert a YARA-L rule to a Panther rule."""
+        try:
+            result = self._yaral_converter.convert(
+                yaral=yaral,
+                rule_id=rule_id,
+                class_name=class_name,
+                severity=severity,
+            )
+
+            return {
+                "sourceCode": result.source_code,
+                "ruleId": result.rule_id,
+                "className": result.class_name,
+                "logTypes": result.log_types,
+                "severity": result.severity,
+                "isThresholdRule": result.is_threshold_rule,
+                "threshold": result.threshold,
+                "todos": result.todos,
+                "testCode": result.test_code,
+                "recommendedType": result.recommended_type.value,
+                "recommendationReasons": result.recommendation_reasons,
+            }
+        except Exception as e:
+            raise ValueError(f"YARA-L conversion error: {str(e)}") from e
+
+    async def validate_yaral(self, yaral: str) -> dict[str, Any]:
+        """Validate YARA-L syntax."""
+        try:
+            parsed = self._yaral_converter.parse_yaral(yaral)
+            return {
+                "valid": True,
+                "ruleName": parsed.rule_name,
+                "logTypes": parsed.log_types,
+                "severity": parsed.meta.get("severity", "MEDIUM"),
+                "isMultiEvent": parsed.is_multi_event,
+                "recommendedType": parsed.recommended_type.value,
+                "recommendationReasons": [
+                    "Multi-event correlation" if parsed.is_multi_event else "Single event rule"
+                ],
+                "parseDetails": {
+                    "meta": parsed.meta,
+                    "eventCount": len(parsed.events),
+                    "hasMatch": bool(parsed.match_section),
+                    "hasOutcome": bool(parsed.outcome_section),
+                },
+            }
+        except Exception as e:
+            return {
+                "valid": False,
+                "error": str(e),
+            }
+
+    def get_supported_formats(self) -> list[dict[str, Any]]:
+        """Get list of supported source formats."""
+        return [
+            {
+                "id": "spl",
+                "name": "Splunk SPL",
+                "description": "Splunk Search Processing Language queries",
+                "fileExtensions": [".spl", ".txt"],
+                "example": 'index=main sourcetype=access_combined status>=400 | stats count by src_ip',
+            },
+            {
+                "id": "yaral",
+                "name": "Google SecOps YARA-L",
+                "description": "YARA-L detection rules from Google Chronicle/SecOps",
+                "fileExtensions": [".yaral", ".yar"],
+                "example": '''rule suspicious_login {
+  meta:
+    description = "Detects suspicious login attempts"
+    severity = "HIGH"
+  events:
+    $login.metadata.event_type = "USER_LOGIN"
+    $login.security_result.action = "BLOCK"
+  condition:
+    $login
+}''',
+            },
+        ]

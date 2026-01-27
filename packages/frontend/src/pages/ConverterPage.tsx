@@ -28,9 +28,58 @@ interface ParseDetails {
 
 type InputMode = 'single' | 'bulk'
 type FileFormat = 'csv' | 'json' | 'conf' | 'text'
+type SourceFormat = 'spl' | 'yaral'
+
+const SOURCE_FORMATS = [
+  { value: 'spl' as SourceFormat, label: 'Splunk SPL', description: 'Splunk Search Processing Language' },
+  { value: 'yaral' as SourceFormat, label: 'Google SecOps YARA-L', description: 'Chronicle/SecOps detection rules' },
+]
+
+const YARAL_EXAMPLES = {
+  suspiciousLogin: `rule suspicious_login {
+  meta:
+    description = "Detects multiple failed login attempts"
+    severity = "HIGH"
+    author = "Security Team"
+  events:
+    $login.metadata.event_type = "USER_LOGIN"
+    $login.security_result.action = "BLOCK"
+    $login.target.user.userid = $user
+  match:
+    $user over 5m
+  condition:
+    #login > 5
+}`,
+  malwareDownload: `rule powershell_download {
+  meta:
+    description = "Detects PowerShell download cradle"
+    severity = "CRITICAL"
+  events:
+    $process.metadata.event_type = "PROCESS_LAUNCH"
+    $process.principal.process.file.full_path = /powershell/i
+    $process.principal.process.command_line = /downloadstring|downloadfile|wget|invoke-webrequest/i
+  condition:
+    $process
+}`,
+  cloudExfil: `rule suspicious_s3_access {
+  meta:
+    description = "Detects unusual S3 bucket access patterns"
+    severity = "HIGH"
+  events:
+    $s3.metadata.event_type = "RESOURCE_READ"
+    $s3.metadata.product_name = "AWS CloudTrail"
+    $s3.target.resource.name = /s3/
+    $s3.principal.user.userid = $user
+  match:
+    $user over 1h
+  condition:
+    #s3 > 100
+}`,
+}
 
 export default function ConverterPage() {
   const [mode, setMode] = useState<InputMode>('single')
+  const [sourceFormat, setSourceFormat] = useState<SourceFormat>('spl')
 
   // Single mode state
   const [splQuery, setSplQuery] = useState('')
@@ -55,6 +104,7 @@ export default function ConverterPage() {
         spl: splQuery,
         ruleId,
         severity,
+        sourceFormat,
       }).unwrap()
     } catch (err) {
       console.error('Conversion failed:', err)
@@ -274,8 +324,35 @@ export default function ConverterPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Splunk SPL to Panther Converter</h1>
-        <p className="text-muted-foreground">Convert Splunk Search Processing Language (SPL) queries to Panther detection rules</p>
+        <h1 className="text-3xl font-bold">Detection Rule Converter</h1>
+        <p className="text-muted-foreground">Convert detection rules from Splunk SPL or Google SecOps YARA-L to Panther Python rules</p>
+      </div>
+
+      {/* Source Format Selector */}
+      <div className="flex gap-4 items-center">
+        <span className="text-sm font-medium">Source Format:</span>
+        <div className="flex gap-2">
+          {SOURCE_FORMATS.map((format) => (
+            <button
+              key={format.value}
+              onClick={() => {
+                setSourceFormat(format.value)
+                setSplQuery('')
+              }}
+              className={cn(
+                'px-4 py-2 rounded-md text-sm font-medium transition-colors',
+                sourceFormat === format.value
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted hover:bg-muted/80'
+              )}
+            >
+              {format.label}
+            </button>
+          ))}
+        </div>
+        <span className="text-sm text-muted-foreground">
+          {SOURCE_FORMATS.find(f => f.value === sourceFormat)?.description}
+        </span>
       </div>
 
       {/* Mode Toggle */}
@@ -288,7 +365,7 @@ export default function ConverterPage() {
               : 'bg-muted hover:bg-muted/80'
           }`}
         >
-          Single Query
+          Single {sourceFormat === 'spl' ? 'Query' : 'Rule'}
         </button>
         <button
           onClick={() => setMode('bulk')}
@@ -307,7 +384,7 @@ export default function ConverterPage() {
           {/* Single Input */}
           <div className="space-y-4">
             <div className="rounded-lg border bg-background p-6 space-y-4">
-              <h2 className="font-semibold">SPL Query</h2>
+              <h2 className="font-semibold">{sourceFormat === 'spl' ? 'SPL Query' : 'YARA-L Rule'}</h2>
 
               <div>
                 <label className="block text-sm font-medium mb-1">Rule ID</label>
@@ -337,63 +414,102 @@ export default function ConverterPage() {
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-sm font-medium">SPL Query</label>
+                  <label className="block text-sm font-medium">{sourceFormat === 'spl' ? 'SPL Query' : 'YARA-L Rule'}</label>
                   <div className="relative group">
                     <button className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-                      Example queries ▾
+                      Example {sourceFormat === 'spl' ? 'queries' : 'rules'} ▾
                     </button>
                     <div className="absolute right-0 top-full mt-1 w-80 bg-card border border-border rounded-lg shadow-lg z-10 hidden group-hover:block">
-                      <div className="p-2 space-y-1 text-xs">
-                        <button
-                          onClick={() => setSplQuery(`sourcetype=okta eventType="user.session.start" outcome.result=FAILURE
+                      {sourceFormat === 'spl' ? (
+                        <div className="p-2 space-y-1 text-xs">
+                          <button
+                            onClick={() => setSplQuery(`sourcetype=okta eventType="user.session.start" outcome.result=FAILURE
 | stats count by actor.alternateId
 | where count > 5`)}
-                          className="block w-full text-left p-2 hover:bg-accent rounded transition-colors"
-                        >
-                          <span className="font-medium text-foreground">Failed Logins (Okta)</span>
-                          <span className="block text-muted-foreground">Threshold-based detection</span>
-                        </button>
-                        <button
-                          onClick={() => setSplQuery(`index=edr earliest=-1h
+                            className="block w-full text-left p-2 hover:bg-accent rounded transition-colors"
+                          >
+                            <span className="font-medium text-foreground">Failed Logins (Okta)</span>
+                            <span className="block text-muted-foreground">Threshold-based detection</span>
+                          </button>
+                          <button
+                            onClick={() => setSplQuery(`index=edr earliest=-1h
 | eval host=coalesce(hostname, ComputerName, HostName)
 | eval is_download = if(match(lower(process_name),"powershell") AND match(lower(command_line),"downloadstring|downloadfile|wget|curl"), 1, 0)
 | stats max(is_download) as download_detected by host
 | where download_detected=1`)}
-                          className="block w-full text-left p-2 hover:bg-accent rounded transition-colors"
-                        >
-                          <span className="font-medium text-foreground">PowerShell Download (EDR)</span>
-                          <span className="block text-muted-foreground">Complex eval with coalesce/match</span>
-                        </button>
-                        <button
-                          onClick={() => setSplQuery(`index=crowdstrike earliest=-24h
+                            className="block w-full text-left p-2 hover:bg-accent rounded transition-colors"
+                          >
+                            <span className="font-medium text-foreground">PowerShell Download (EDR)</span>
+                            <span className="block text-muted-foreground">Complex eval with coalesce/match</span>
+                          </button>
+                          <button
+                            onClick={() => setSplQuery(`index=crowdstrike earliest=-24h
 | eval severity_score=if(Severity="Critical", 4, if(Severity="High", 3, if(Severity="Medium", 2, 1)))
 | stats count as alert_count, sum(severity_score) as total_score by ComputerName
 | where alert_count > 10 OR total_score > 20`)}
-                          className="block w-full text-left p-2 hover:bg-accent rounded transition-colors"
-                        >
-                          <span className="font-medium text-foreground">Alert Scoring (CrowdStrike)</span>
-                          <span className="block text-muted-foreground">Nested if statements</span>
-                        </button>
-                        <button
-                          onClick={() => setSplQuery(`index=aws_cloudtrail eventName=ConsoleLogin
+                            className="block w-full text-left p-2 hover:bg-accent rounded transition-colors"
+                          >
+                            <span className="font-medium text-foreground">Alert Scoring (CrowdStrike)</span>
+                            <span className="block text-muted-foreground">Nested if statements</span>
+                          </button>
+                          <button
+                            onClick={() => setSplQuery(`index=aws_cloudtrail eventName=ConsoleLogin
 | stats dc(sourceIPAddress) as unique_ips, values(sourceIPAddress) as ip_list by userIdentity.arn
 | where unique_ips > 3`)}
-                          className="block w-full text-left p-2 hover:bg-accent rounded transition-colors"
-                        >
-                          <span className="font-medium text-foreground">Multi-IP Login (AWS)</span>
-                          <span className="block text-muted-foreground">Distinct count aggregation</span>
-                        </button>
-                      </div>
+                            className="block w-full text-left p-2 hover:bg-accent rounded transition-colors"
+                          >
+                            <span className="font-medium text-foreground">Multi-IP Login (AWS)</span>
+                            <span className="block text-muted-foreground">Distinct count aggregation</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="p-2 space-y-1 text-xs">
+                          <button
+                            onClick={() => setSplQuery(YARAL_EXAMPLES.suspiciousLogin)}
+                            className="block w-full text-left p-2 hover:bg-accent rounded transition-colors"
+                          >
+                            <span className="font-medium text-foreground">Failed Logins</span>
+                            <span className="block text-muted-foreground">Multi-event correlation with threshold</span>
+                          </button>
+                          <button
+                            onClick={() => setSplQuery(YARAL_EXAMPLES.malwareDownload)}
+                            className="block w-full text-left p-2 hover:bg-accent rounded transition-colors"
+                          >
+                            <span className="font-medium text-foreground">PowerShell Download</span>
+                            <span className="block text-muted-foreground">Process execution with regex</span>
+                          </button>
+                          <button
+                            onClick={() => setSplQuery(YARAL_EXAMPLES.cloudExfil)}
+                            className="block w-full text-left p-2 hover:bg-accent rounded transition-colors"
+                          >
+                            <span className="font-medium text-foreground">S3 Data Exfiltration</span>
+                            <span className="block text-muted-foreground">Cloud resource access pattern</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
                 <textarea
                   value={splQuery}
                   onChange={(e) => setSplQuery(e.target.value)}
-                  placeholder={`sourcetype=okta eventType="user.session.start" outcome.result=FAILURE
+                  placeholder={sourceFormat === 'spl'
+                    ? `sourcetype=okta eventType="user.session.start" outcome.result=FAILURE
 | stats count by actor.alternateId
-| where count > 5`}
-                  className="w-full h-40 rounded-md border bg-background px-3 py-2 text-sm font-mono resize-none"
+| where count > 5`
+                    : `rule example_rule {
+  meta:
+    description = "Example detection rule"
+    severity = "HIGH"
+  events:
+    $event.metadata.event_type = "USER_LOGIN"
+  condition:
+    $event
+}`}
+                  className={cn(
+                    "w-full rounded-md border bg-background px-3 py-2 text-sm font-mono resize-none",
+                    sourceFormat === 'yaral' ? 'h-64' : 'h-40'
+                  )}
                 />
               </div>
 
@@ -403,7 +519,7 @@ export default function ConverterPage() {
                 className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
               >
                 <ArrowRightLeft size={16} />
-                {isLoading ? 'Converting...' : 'Convert to Panther Rule'}
+                {isLoading ? 'Converting...' : `Convert ${sourceFormat === 'spl' ? 'SPL' : 'YARA-L'} to Panther Rule`}
               </button>
             </div>
           </div>
@@ -561,7 +677,7 @@ export default function ConverterPage() {
             {!result && !error && (
               <div className="rounded-lg border bg-background p-6 text-center text-muted-foreground">
                 <ArrowRightLeft size={48} className="mx-auto mb-4 opacity-20" />
-                <p>Enter an SPL query and click Convert to generate a Panther detection rule</p>
+                <p>Enter {sourceFormat === 'spl' ? 'an SPL query' : 'a YARA-L rule'} and click Convert to generate a Panther detection rule</p>
               </div>
             )}
           </div>

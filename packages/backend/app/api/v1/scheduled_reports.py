@@ -4,11 +4,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, ScheduledReport, ReportFrequency
-from app.api.v1.deps import RequireAnalystDep, CurrentUserDep
+from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep, OrgAdminDep
 from app.services.report_service import ReportService
 from app.services.email_service import email_service
 from app.services.report_delivery_service import report_delivery_service
@@ -63,12 +63,15 @@ class ScheduledReportResponse(BaseModel):
 
 @router.get("")
 async def list_scheduled_reports(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     active_only: bool = False,
 ) -> list[ScheduledReportResponse]:
     """List all scheduled reports."""
-    query = select(ScheduledReport).order_by(ScheduledReport.created_at.desc())
+    query = select(ScheduledReport).where(
+        ScheduledReport.organization_id == org_id
+    ).order_by(ScheduledReport.created_at.desc())
     if active_only:
         query = query.where(ScheduledReport.is_active == True)
 
@@ -97,11 +100,19 @@ async def list_scheduled_reports(
 @router.get("/{report_id}")
 async def get_scheduled_report(
     report_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ScheduledReportResponse:
     """Get a scheduled report by ID."""
-    result = await db.execute(select(ScheduledReport).where(ScheduledReport.id == report_id))
+    result = await db.execute(
+        select(ScheduledReport).where(
+            and_(
+                ScheduledReport.id == report_id,
+                ScheduledReport.organization_id == org_id
+            )
+        )
+    )
     report = result.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="Scheduled report not found")
@@ -125,7 +136,7 @@ async def get_scheduled_report(
 @router.post("")
 async def create_scheduled_report(
     report: ScheduledReportCreate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ScheduledReportResponse:
     """Create a new scheduled report. Requires analyst role."""
@@ -137,6 +148,7 @@ async def create_scheduled_report(
         recipients=report.recipients,
         filters=report.filters,
         is_active=report.is_active,
+        organization_id=analyst.organization_id,
     )
     db.add(db_report)
     await db.flush()
@@ -162,11 +174,18 @@ async def create_scheduled_report(
 async def update_scheduled_report(
     report_id: UUID,
     update: ScheduledReportUpdate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ScheduledReportResponse:
     """Update a scheduled report. Requires analyst role."""
-    result = await db.execute(select(ScheduledReport).where(ScheduledReport.id == report_id))
+    result = await db.execute(
+        select(ScheduledReport).where(
+            and_(
+                ScheduledReport.id == report_id,
+                ScheduledReport.organization_id == analyst.organization_id
+            )
+        )
+    )
     report = result.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="Scheduled report not found")
@@ -196,11 +215,18 @@ async def update_scheduled_report(
 @router.delete("/{report_id}")
 async def delete_scheduled_report(
     report_id: UUID,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete a scheduled report. Requires analyst role."""
-    result = await db.execute(select(ScheduledReport).where(ScheduledReport.id == report_id))
+    result = await db.execute(
+        select(ScheduledReport).where(
+            and_(
+                ScheduledReport.id == report_id,
+                ScheduledReport.organization_id == analyst.organization_id
+            )
+        )
+    )
     report = result.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="Scheduled report not found")
@@ -212,11 +238,18 @@ async def delete_scheduled_report(
 @router.post("/{report_id}/run")
 async def run_report_now(
     report_id: UUID,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Run a scheduled report immediately. Requires analyst role."""
-    result = await db.execute(select(ScheduledReport).where(ScheduledReport.id == report_id))
+    result = await db.execute(
+        select(ScheduledReport).where(
+            and_(
+                ScheduledReport.id == report_id,
+                ScheduledReport.organization_id == analyst.organization_id
+            )
+        )
+    )
     report = result.scalar_one_or_none()
     if not report:
         raise HTTPException(status_code=404, detail="Scheduled report not found")

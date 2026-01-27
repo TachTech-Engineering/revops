@@ -3,7 +3,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.api.v1.deps import PantherServiceDep
+from app.api.v1.deps import OrgIdDep, OrgUserDep, PantherServiceDep
 
 router = APIRouter()
 
@@ -39,11 +39,13 @@ class AnalyticsResponse(BaseModel):
 @router.get("/alerts")
 async def get_alert_analytics(
     panther: PantherServiceDep,
+    current_user: OrgUserDep,
+    org_id: OrgIdDep,
     days: int = Query(7, ge=1, le=90, description="Number of days to analyze"),
 ) -> AnalyticsResponse:
     """Get alert analytics and statistics."""
     try:
-        stats = await panther.get_alert_stats(days=days)
+        stats = await panther.get_alert_stats(days=days, organization_id=org_id)
         return AnalyticsResponse(
             totalAlerts=stats["totalAlerts"],
             bySeverity=SeverityStats(**stats["bySeverity"]),

@@ -9,21 +9,17 @@ import {
   Menu,
   X,
   LogOut,
-  Server,
   Database,
   BarChart3,
   Search,
   Settings,
-  VolumeX,
   Webhook,
   Moon,
   Sun,
   Users,
   FileText,
-  Play,
   FileBarChart,
   AlertTriangle,
-  GitMerge,
   Briefcase,
   Sparkles,
   LayoutGrid,
@@ -33,12 +29,15 @@ import {
   Crosshair,
   Activity,
   Wrench,
+  Bot,
+  Plug,
+  GitBranch,
 } from 'lucide-react'
 import { RootState } from '../../store'
 import { toggleSidebar } from '../../store/uiSlice'
 import { logout } from '../../store/authSlice'
 import { cn } from '../../lib/utils'
-import PantherLogo from './PantherLogo'
+import RevOpsLogo from './RevOpsLogo'
 import AlertNotifications from '../alerts/AlertNotifications'
 import NotificationCenter from '../notifications/NotificationCenter'
 import MobileNav from '../mobile/MobileNav'
@@ -73,13 +72,12 @@ const navSections: NavSection[] = [
     ],
   },
   {
-    id: 'detection',
-    label: 'Detection',
-    icon: Shield,
+    id: 'automation',
+    label: 'Automation',
+    icon: GitBranch,
     items: [
-      { path: '/rules', label: 'Rules', icon: Shield },
-      { path: '/correlation-rules', label: 'Correlation Rules', icon: GitMerge },
-      { path: '/playbooks', label: 'Playbooks', icon: Play },
+      { path: '/connectors', label: 'Connectors', icon: Plug },
+      { path: '/workflows', label: 'Workflows', icon: GitBranch },
     ],
   },
   {
@@ -89,6 +87,8 @@ const navSections: NavSection[] = [
     items: [
       { path: '/queries', label: 'Query Explorer', icon: Database },
       { path: '/ioc-search', label: 'IOC Search', icon: Search },
+      { path: '/threat-intel', label: 'Threat Intel', icon: Shield },
+      { path: '/converter', label: 'Rule Converter', icon: ArrowRightLeft },
     ],
   },
   {
@@ -108,12 +108,12 @@ const navSections: NavSection[] = [
     label: 'Administration',
     icon: Wrench,
     items: [
-      { path: '/suppression', label: 'Suppression', icon: VolumeX },
       { path: '/webhooks', label: 'Webhooks', icon: Webhook },
       { path: '/enrichment', label: 'Enrichment', icon: Sparkles },
       { path: '/roles', label: 'Roles', icon: Users },
       { path: '/audit', label: 'Audit Logs', icon: FileText },
       { path: '/settings', label: 'Settings', icon: Settings },
+      { path: '/settings/ai', label: 'AI Settings', icon: Bot },
     ],
   },
 ]
@@ -186,7 +186,7 @@ export default function Layout({ children }: LayoutProps) {
   const navigate = useNavigate()
   const dispatch = useDispatch()
   const sidebarOpen = useSelector((state: RootState) => state.ui.sidebarOpen)
-  const { pantherHost } = useSelector((state: RootState) => state.auth)
+  const { userEmail, userName, refreshToken } = useSelector((state: RootState) => state.auth)
 
   // Theme state (stored in localStorage)
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark')
@@ -283,13 +283,24 @@ export default function Layout({ children }: LayoutProps) {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [navigate])
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    // Try to logout on backend if we have a refresh token
+    if (refreshToken) {
+      try {
+        await fetch(`${import.meta.env.VITE_API_BASE_URL || ''}/api/v1/auth/logout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        })
+      } catch (err) {
+        console.warn('Backend logout failed:', err)
+      }
+    }
     dispatch(logout())
     navigate('/login')
   }
 
   const isDashboardActive = location.pathname === '/'
-  const isSplConverterActive = location.pathname === '/converter'
 
   return (
     <div className="min-h-screen bg-background">
@@ -304,16 +315,15 @@ export default function Layout({ children }: LayoutProps) {
               {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
             <div className="flex items-center gap-2">
-              <PantherLogo size={32} />
-              <span className="font-semibold text-lg">PantherUtil</span>
+              <RevOpsLogo size={32} />
+              <span className="font-semibold text-lg">RevOps</span>
             </div>
           </div>
 
           <div className="flex items-center gap-2">
-            {pantherHost && (
+            {(userName || userEmail) && (
               <div className="hidden sm:flex items-center gap-2 text-sm text-muted-foreground">
-                <Server size={14} />
-                <span>{pantherHost}</span>
+                <span>{userName || userEmail}</span>
               </div>
             )}
             <AlertNotifications />
@@ -357,20 +367,6 @@ export default function Layout({ children }: LayoutProps) {
             >
               <LayoutDashboard size={16} />
               Dashboard
-            </Link>
-
-            {/* SPL Converter - Key feature */}
-            <Link
-              to="/converter"
-              className={cn(
-                'flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors mb-2',
-                isSplConverterActive
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-accent'
-              )}
-            >
-              <ArrowRightLeft size={16} />
-              SPL Converter
             </Link>
 
             <div className="h-px bg-border mb-2" />

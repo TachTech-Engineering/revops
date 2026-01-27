@@ -5,11 +5,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, Note, NoteResourceType, Notification, NotificationType
-from app.api.v1.deps import RequireAnalystDep, CurrentUserDep
+from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
 
 router = APIRouter()
 
@@ -56,6 +56,7 @@ async def create_mention_notifications(
     note: Note,
     mentions: list[str],
     created_by: str,
+    organization_id: UUID,
 ):
     """Create notifications for mentioned users."""
     resource_label = {
@@ -77,6 +78,7 @@ async def create_mention_notifications(
             resource_type=note.resource_type.value,
             resource_id=note.resource_id,
             created_by=created_by,
+            organization_id=organization_id,
         )
         db.add(notification)
 
@@ -85,14 +87,18 @@ async def create_mention_notifications(
 async def list_notes(
     resource_type: NoteResourceType,
     resource_id: str,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     include_replies: bool = True,
 ) -> list[NoteResponse]:
     """List notes for a resource."""
     query = select(Note).where(
-        Note.resource_type == resource_type,
-        Note.resource_id == resource_id,
+        and_(
+            Note.organization_id == org_id,
+            Note.resource_type == resource_type,
+            Note.resource_id == resource_id,
+        )
     )
 
     if not include_replies:
@@ -108,7 +114,12 @@ async def list_notes(
     if not include_replies:
         for note in notes:
             count_result = await db.execute(
-                select(func.count(Note.id)).where(Note.parent_id == note.id)
+                select(func.count(Note.id)).where(
+                    and_(
+                        Note.organization_id == org_id,
+                        Note.parent_id == note.id,
+                    )
+                )
             )
             reply_counts[note.id] = count_result.scalar() or 0
 
@@ -133,11 +144,19 @@ async def list_notes(
 @router.get("/{note_id}")
 async def get_note(
     note_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> NoteResponse:
     """Get a specific note."""
-    result = await db.execute(select(Note).where(Note.id == note_id))
+    result = await db.execute(
+        select(Note).where(
+            and_(
+                Note.organization_id == org_id,
+                Note.id == note_id,
+            )
+        )
+    )
     note = result.scalar_one_or_none()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
@@ -159,12 +178,18 @@ async def get_note(
 @router.get("/{note_id}/replies")
 async def get_note_replies(
     note_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[NoteResponse]:
     """Get replies to a note."""
     result = await db.execute(
-        select(Note).where(Note.parent_id == note_id).order_by(Note.created_at.asc())
+        select(Note).where(
+            and_(
+                Note.organization_id == org_id,
+                Note.parent_id == note_id,
+            )
+        ).order_by(Note.created_at.asc())
     )
     notes = result.scalars().all()
 
@@ -188,18 +213,23 @@ async def get_note_replies(
 @router.post("")
 async def create_note(
     note_data: NoteCreate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> NoteResponse:
     """Create a new note. Requires analyst role."""
-    email, _ = analyst
-
     # Extract mentions from content
     mentions = extract_mentions(note_data.content)
 
-    # If this is a reply, verify parent exists
+    # If this is a reply, verify parent exists within the same organization
     if note_data.parent_id:
-        result = await db.execute(select(Note).where(Note.id == note_data.parent_id))
+        result = await db.execute(
+            select(Note).where(
+                and_(
+                    Note.organization_id == analyst.organization_id,
+                    Note.id == note_data.parent_id,
+                )
+            )
+        )
         parent = result.scalar_one_or_none()
         if not parent:
             raise HTTPException(status_code=404, detail="Parent note not found")
@@ -210,7 +240,8 @@ async def create_note(
         content=note_data.content,
         mentions=mentions,
         parent_id=note_data.parent_id,
-        created_by=email,
+        created_by=analyst.email,
+        organization_id=analyst.organization_id,
     )
     db.add(note)
     await db.flush()
@@ -218,18 +249,19 @@ async def create_note(
 
     # Create notifications for mentions
     if mentions:
-        await create_mention_notifications(db, note, mentions, email)
+        await create_mention_notifications(db, note, mentions, analyst.email, analyst.organization_id)
 
     # If this is a reply, notify the parent note author
-    if note_data.parent_id and parent.created_by.lower() != email.lower():
+    if note_data.parent_id and parent.created_by.lower() != analyst.email.lower():
         notification = Notification(
             user_email=parent.created_by,
             notification_type=NotificationType.COMMENT_REPLY,
             title="Someone replied to your note",
-            message=f"{email} replied: {note.content[:100]}{'...' if len(note.content) > 100 else ''}",
+            message=f"{analyst.email} replied: {note.content[:100]}{'...' if len(note.content) > 100 else ''}",
             resource_type=note.resource_type.value,
             resource_id=note.resource_id,
-            created_by=email,
+            created_by=analyst.email,
+            organization_id=analyst.organization_id,
         )
         db.add(notification)
 
@@ -251,18 +283,23 @@ async def create_note(
 async def update_note(
     note_id: UUID,
     update: NoteUpdate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> NoteResponse:
     """Update a note. Can only edit your own notes."""
-    email, _ = analyst
-
-    result = await db.execute(select(Note).where(Note.id == note_id))
+    result = await db.execute(
+        select(Note).where(
+            and_(
+                Note.organization_id == analyst.organization_id,
+                Note.id == note_id,
+            )
+        )
+    )
     note = result.scalar_one_or_none()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    if note.created_by.lower() != email.lower():
+    if note.created_by.lower() != analyst.email.lower():
         raise HTTPException(status_code=403, detail="You can only edit your own notes")
 
     # Extract new mentions
@@ -279,7 +316,7 @@ async def update_note(
     # Notify newly mentioned users
     added_mentions = new_mentions - old_mentions
     if added_mentions:
-        await create_mention_notifications(db, note, list(added_mentions), email)
+        await create_mention_notifications(db, note, list(added_mentions), analyst.email, analyst.organization_id)
 
     return NoteResponse(
         id=note.id,
@@ -298,23 +335,34 @@ async def update_note(
 @router.delete("/{note_id}")
 async def delete_note(
     note_id: UUID,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete a note. Can only delete your own notes."""
-    email, _ = analyst
-
-    result = await db.execute(select(Note).where(Note.id == note_id))
+    result = await db.execute(
+        select(Note).where(
+            and_(
+                Note.organization_id == analyst.organization_id,
+                Note.id == note_id,
+            )
+        )
+    )
     note = result.scalar_one_or_none()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
 
-    if note.created_by.lower() != email.lower():
+    if note.created_by.lower() != analyst.email.lower():
         raise HTTPException(status_code=403, detail="You can only delete your own notes")
 
-    # Delete replies first
-    await db.execute(select(Note).where(Note.parent_id == note_id))
-    reply_result = await db.execute(select(Note).where(Note.parent_id == note_id))
+    # Delete replies first (within the same organization)
+    reply_result = await db.execute(
+        select(Note).where(
+            and_(
+                Note.organization_id == analyst.organization_id,
+                Note.parent_id == note_id,
+            )
+        )
+    )
     for reply in reply_result.scalars():
         await db.delete(reply)
 

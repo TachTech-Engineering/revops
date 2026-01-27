@@ -1,35 +1,137 @@
 import { useState } from 'react'
 import { useDispatch } from 'react-redux'
 import { useNavigate } from 'react-router-dom'
-import { Eye, EyeOff, LogIn } from 'lucide-react'
+import { Eye, EyeOff, LogIn, UserPlus } from 'lucide-react'
 import { login } from '../store/authSlice'
-import PantherLogo from '../components/common/PantherLogo'
+import RevOpsLogo from '../components/common/RevOpsLogo'
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+
+interface TokenResponse {
+  access_token: string
+  refresh_token: string
+  token_type: string
+  expires_in: number
+}
+
+interface UserResponse {
+  id: string
+  email: string
+  name: string | null
+  role: string
+  is_active: boolean
+  organization_id: string | null
+  organization_name: string | null
+}
 
 export default function LoginPage() {
   const dispatch = useDispatch()
   const navigate = useNavigate()
 
-  const [companyName, setCompanyName] = useState('')
-  const [pantherToken, setPantherToken] = useState('')
-  const [userEmail, setUserEmail] = useState('')
-  const [showToken, setShowToken] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [name, setName] = useState('')
+  const [organizationName, setOrganizationName] = useState('')
+  const [organizationSlug, setOrganizationSlug] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [isRegisterMode, setIsRegisterMode] = useState(false)
 
-  // Convert company name to full Panther host
-  const getFullHost = (input: string): string => {
-    const cleaned = input.trim().toLowerCase()
-
-    // If it already looks like a full URL, extract and use it
-    if (cleaned.includes('.')) {
-      // Remove protocol if present
-      let host = cleaned.replace(/^https?:\/\//, '')
-      host = host.replace(/\/$/, '')
-      return host
+  const fetchUserInfo = async (accessToken: string): Promise<UserResponse | null> => {
+    try {
+      const response = await fetch(`${API_BASE}/api/v1/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      })
+      if (response.ok) {
+        return await response.json()
+      }
+    } catch (err) {
+      console.warn('Failed to fetch user info:', err)
     }
+    return null
+  }
 
-    // Otherwise, construct the full URL from company name
-    return `api.${cleaned}.runpanther.net`
+  const handleLogin = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/v1/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+      })
+
+      if (response.ok) {
+        const tokenData: TokenResponse = await response.json()
+        const userInfo = await fetchUserInfo(tokenData.access_token)
+
+        dispatch(
+          login({
+            userEmail: userInfo?.email || email.trim().toLowerCase(),
+            userName: userInfo?.name || null,
+            userId: userInfo?.id || null,
+            organizationId: userInfo?.organization_id || null,
+            organizationName: userInfo?.organization_name || null,
+            accessToken: tokenData.access_token,
+            refreshToken: tokenData.refresh_token,
+            userRole: (userInfo?.role as 'admin' | 'analyst' | 'viewer') || 'viewer',
+          })
+        )
+        navigate('/')
+      } else {
+        const data = await response.json().catch(() => ({}))
+        setError(data.detail || 'Invalid email or password')
+      }
+    } catch (err) {
+      // Demo mode - allow login without backend auth
+      console.warn('Auth endpoint not available, using demo mode')
+      dispatch(login({ userEmail: email.trim().toLowerCase() }))
+      navigate('/')
+    }
+  }
+
+  const handleRegister = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/v1/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password,
+          name: name.trim() || null,
+          organization_name: organizationName.trim() || null,
+          organization_slug: organizationSlug.trim().toLowerCase() || null,
+        }),
+      })
+
+      if (response.ok) {
+        const tokenData: TokenResponse = await response.json()
+        const userInfo = await fetchUserInfo(tokenData.access_token)
+
+        dispatch(
+          login({
+            userEmail: userInfo?.email || email.trim().toLowerCase(),
+            userName: userInfo?.name || name.trim() || null,
+            userId: userInfo?.id || null,
+            organizationId: userInfo?.organization_id || null,
+            organizationName: userInfo?.organization_name || null,
+            accessToken: tokenData.access_token,
+            refreshToken: tokenData.refresh_token,
+            userRole: (userInfo?.role as 'admin' | 'analyst' | 'viewer') || 'viewer',
+          })
+        )
+        navigate('/')
+      } else {
+        const data = await response.json().catch(() => ({}))
+        setError(data.detail || 'Registration failed')
+      }
+    } catch (err) {
+      // Demo mode - allow registration without backend
+      console.warn('Auth endpoint not available, using demo mode')
+      dispatch(login({ userEmail: email.trim().toLowerCase(), userName: name.trim() || null }))
+      navigate('/')
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -38,139 +140,182 @@ export default function LoginPage() {
     setIsLoading(true)
 
     // Validate inputs
-    if (!companyName.trim() || !pantherToken.trim() || !userEmail.trim()) {
-      setError('Please enter your email, company name, and API token')
+    if (!email.trim() || !password.trim()) {
+      setError('Please enter your email and password')
       setIsLoading(false)
       return
     }
 
     // Basic email validation
-    if (!userEmail.includes('@')) {
+    if (!email.includes('@')) {
       setError('Please enter a valid email address')
       setIsLoading(false)
       return
     }
 
-    const fullHost = getFullHost(companyName)
+    // Password length validation for registration
+    if (isRegisterMode && password.length < 6) {
+      setError('Password must be at least 6 characters')
+      setIsLoading(false)
+      return
+    }
 
     try {
-      // Test the connection by making a health check
-      const response = await fetch('/api/v1/health', {
-        headers: {
-          'X-Panther-Host': fullHost,
-          'X-Panther-Token': pantherToken.trim(),
-        },
-      })
-
-      if (response.ok) {
-        dispatch(login({ pantherHost: fullHost, pantherToken: pantherToken.trim(), userEmail: userEmail.trim().toLowerCase() }))
-        navigate('/')
+      if (isRegisterMode) {
+        await handleRegister()
       } else {
-        // Try to get error details from response
-        try {
-          const data = await response.json()
-          setError(data.detail || 'Failed to connect. Please check your credentials.')
-        } catch {
-          setError('Failed to connect. Please check your credentials.')
-        }
+        await handleLogin()
       }
-    } catch (err) {
-      // Network error - backend might not be running
-      setError(`Connection error: ${err instanceof Error ? err.message : 'Unable to reach server'}`)
     } finally {
       setIsLoading(false)
     }
   }
-
-  // Show preview of the full host URL
-  const hostPreview = companyName.trim() ? getFullHost(companyName) : ''
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center mb-4">
-            <PantherLogo size={64} />
+            <RevOpsLogo size={64} />
           </div>
-          <h1 className="text-2xl font-bold">PantherUtil</h1>
-          <p className="text-muted-foreground mt-2">Connect to your Panther instance</p>
+          <h1 className="text-2xl font-bold">RevOps</h1>
+          <p className="text-muted-foreground mt-2">Multi-SIEM Security Operations Platform</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border bg-card p-6">
+          <div className="flex gap-2 mb-4">
+            <button
+              type="button"
+              onClick={() => {
+                setIsRegisterMode(false)
+                setError('')
+              }}
+              className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                !isRegisterMode
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setIsRegisterMode(true)
+                setError('')
+              }}
+              className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
+                isRegisterMode
+                  ? 'bg-primary text-primary-foreground'
+                  : 'bg-muted text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Register
+            </button>
+          </div>
+
           {error && (
-            <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">
-              {error}
-            </div>
+            <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">{error}</div>
+          )}
+
+          {isRegisterMode && (
+            <>
+              <div>
+                <label htmlFor="name" className="block text-sm font-medium mb-2">
+                  Name <span className="text-muted-foreground">(optional)</span>
+                </label>
+                <input
+                  id="name"
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Your name"
+                  className="w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  autoComplete="name"
+                />
+              </div>
+
+              <div className="border-t pt-4 mt-2">
+                <p className="text-xs text-muted-foreground mb-3">
+                  Create a new organization (you'll be the admin)
+                </p>
+                <div className="space-y-3">
+                  <div>
+                    <label htmlFor="orgName" className="block text-sm font-medium mb-2">
+                      Organization Name
+                    </label>
+                    <input
+                      id="orgName"
+                      type="text"
+                      value={organizationName}
+                      onChange={(e) => {
+                        setOrganizationName(e.target.value)
+                        // Auto-generate slug from name
+                        const slug = e.target.value
+                          .toLowerCase()
+                          .replace(/[^a-z0-9]+/g, '-')
+                          .replace(/^-|-$/g, '')
+                        setOrganizationSlug(slug)
+                      }}
+                      placeholder="Acme Corp"
+                      className="w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="orgSlug" className="block text-sm font-medium mb-2">
+                      Organization ID <span className="text-muted-foreground">(URL-friendly)</span>
+                    </label>
+                    <input
+                      id="orgSlug"
+                      type="text"
+                      value={organizationSlug}
+                      onChange={(e) => setOrganizationSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                      placeholder="acme-corp"
+                      className="w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
+                </div>
+              </div>
+            </>
           )}
 
           <div>
             <label htmlFor="email" className="block text-sm font-medium mb-2">
-              Your Email
+              Email
             </label>
             <input
               id="email"
               type="email"
-              value={userEmail}
-              onChange={(e) => setUserEmail(e.target.value)}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
               placeholder="you@company.com"
               className="w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               autoComplete="email"
             />
-            <p className="text-xs text-muted-foreground mt-1">
-              Used for audit logging and role-based access
-            </p>
           </div>
 
           <div>
-            <label htmlFor="company" className="block text-sm font-medium mb-2">
-              Company Name
-            </label>
-            <input
-              id="company"
-              type="text"
-              value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-              placeholder="acme"
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-              autoComplete="organization"
-            />
-            {hostPreview && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Connecting to: <span className="text-foreground font-mono">{hostPreview}</span>
-              </p>
-            )}
-            {!hostPreview && (
-              <p className="text-xs text-muted-foreground mt-1">
-                Enter your company name (e.g., "acme" for api.acme.runpanther.net)
-              </p>
-            )}
-          </div>
-
-          <div>
-            <label htmlFor="token" className="block text-sm font-medium mb-2">
-              API Token
+            <label htmlFor="password" className="block text-sm font-medium mb-2">
+              Password
             </label>
             <div className="relative">
               <input
-                id="token"
-                type={showToken ? 'text' : 'password'}
-                value={pantherToken}
-                onChange={(e) => setPantherToken(e.target.value)}
-                placeholder="Enter your Panther API token"
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={isRegisterMode ? 'Create a password (min 6 chars)' : 'Enter your password'}
                 className="w-full rounded-md border bg-background px-3 py-2 pr-10 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                autoComplete="current-password"
+                autoComplete={isRegisterMode ? 'new-password' : 'current-password'}
               />
               <button
                 type="button"
-                onClick={() => setShowToken(!showToken)}
+                onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
               >
-                {showToken ? <EyeOff size={16} /> : <Eye size={16} />}
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
-            <p className="text-xs text-muted-foreground mt-1">
-              Generate an API token in Panther Settings &gt; API Tokens
-            </p>
           </div>
 
           <button
@@ -181,17 +326,21 @@ export default function LoginPage() {
             {isLoading ? (
               <>
                 <div className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-                Connecting...
+                {isRegisterMode ? 'Creating account...' : 'Signing in...'}
+              </>
+            ) : isRegisterMode ? (
+              <>
+                <UserPlus size={16} />
+                Create Account
               </>
             ) : (
               <>
                 <LogIn size={16} />
-                Connect
+                Sign In
               </>
             )}
           </button>
         </form>
-
       </div>
     </div>
   )

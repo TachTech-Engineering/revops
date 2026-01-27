@@ -3,11 +3,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select, desc, func
+from sqlalchemy import select, desc, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, Incident, IncidentAlert, IncidentStatus, IncidentSeverity
-from app.api.v1.deps import RequireAnalystDep, CurrentUserDep
+from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
 
 router = APIRouter()
 
@@ -57,7 +57,8 @@ class AddAlertsRequest(BaseModel):
 
 @router.get("")
 async def list_incidents(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     status: Optional[IncidentStatus] = None,
     severity: Optional[IncidentSeverity] = None,
@@ -65,7 +66,7 @@ async def list_incidents(
     page_size: int = Query(20, ge=1, le=100),
 ) -> dict:
     """List all incidents with pagination."""
-    query = select(Incident)
+    query = select(Incident).where(Incident.organization_id == org_id)
 
     if status:
         query = query.where(Incident.status == status)
@@ -115,11 +116,14 @@ async def list_incidents(
 @router.get("/{incident_id}")
 async def get_incident(
     incident_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> IncidentDetailResponse:
     """Get incident details."""
-    result = await db.execute(select(Incident).where(Incident.id == incident_id))
+    result = await db.execute(
+        select(Incident).where(and_(Incident.id == incident_id, Incident.organization_id == org_id))
+    )
     incident = result.scalar_one_or_none()
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -149,19 +153,18 @@ async def get_incident(
 @router.post("")
 async def create_incident(
     incident: IncidentCreate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> IncidentDetailResponse:
     """Create a new incident. Requires analyst role."""
-    email, _ = analyst
-
     db_incident = Incident(
         title=incident.title,
         description=incident.description,
         severity=incident.severity,
         assignee=incident.assignee,
         tags=incident.tags,
-        created_by=email,
+        created_by=analyst.email,
+        organization_id=analyst.organization_id,
     )
     db.add(db_incident)
     await db.flush()
@@ -171,7 +174,7 @@ async def create_incident(
         db_alert = IncidentAlert(
             incident_id=db_incident.id,
             alert_id=alert_id,
-            added_by=email,
+            added_by=analyst.email,
         )
         db.add(db_alert)
 
@@ -198,11 +201,14 @@ async def create_incident(
 async def update_incident(
     incident_id: UUID,
     update: IncidentUpdate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> IncidentResponse:
     """Update an incident. Requires analyst role."""
-    result = await db.execute(select(Incident).where(Incident.id == incident_id))
+    result = await db.execute(
+        select(Incident).where(and_(Incident.id == incident_id, Incident.organization_id == org_id))
+    )
     incident = result.scalar_one_or_none()
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -236,11 +242,14 @@ async def update_incident(
 @router.delete("/{incident_id}")
 async def delete_incident(
     incident_id: UUID,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete an incident. Requires analyst role."""
-    result = await db.execute(select(Incident).where(Incident.id == incident_id))
+    result = await db.execute(
+        select(Incident).where(and_(Incident.id == incident_id, Incident.organization_id == org_id))
+    )
     incident = result.scalar_one_or_none()
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -258,13 +267,14 @@ async def delete_incident(
 async def add_alerts_to_incident(
     incident_id: UUID,
     request: AddAlertsRequest,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Add alerts to an incident. Requires analyst role."""
-    email, _ = analyst
-
-    result = await db.execute(select(Incident).where(Incident.id == incident_id))
+    result = await db.execute(
+        select(Incident).where(and_(Incident.id == incident_id, Incident.organization_id == org_id))
+    )
     incident = result.scalar_one_or_none()
     if not incident:
         raise HTTPException(status_code=404, detail="Incident not found")
@@ -282,7 +292,7 @@ async def add_alerts_to_incident(
             db_alert = IncidentAlert(
                 incident_id=incident_id,
                 alert_id=alert_id,
-                added_by=email,
+                added_by=analyst.email,
             )
             db.add(db_alert)
             added += 1
@@ -295,10 +305,18 @@ async def add_alerts_to_incident(
 async def remove_alert_from_incident(
     incident_id: UUID,
     alert_id: str,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Remove an alert from an incident. Requires analyst role."""
+    # First verify the incident belongs to this organization
+    incident_result = await db.execute(
+        select(Incident).where(and_(Incident.id == incident_id, Incident.organization_id == org_id))
+    )
+    if not incident_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Incident not found")
+
     result = await db.execute(
         select(IncidentAlert).where(
             IncidentAlert.incident_id == incident_id,

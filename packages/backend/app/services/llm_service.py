@@ -1,0 +1,416 @@
+"""
+LLM Service for AI-powered alert and incident summarization.
+Supports both OpenAI and Anthropic providers.
+"""
+import json
+from datetime import datetime, timedelta
+from typing import Optional
+import uuid
+
+import httpx
+from sqlalchemy import select, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.config import settings
+from app.db.models import AISummaryCache, LLMProvider
+
+
+class LLMService:
+    """Service for LLM-powered summarization."""
+
+    # Prompt templates
+    ALERT_SUMMARY_PROMPT = """Analyze the following security alert and provide a concise summary for a security analyst.
+
+Alert Data:
+{alert_data}
+
+Please provide:
+1. **Summary**: A 2-3 sentence overview of what this alert indicates
+2. **Risk Assessment**: The potential impact and urgency (Critical/High/Medium/Low)
+3. **Key Indicators**: The most important IOCs or suspicious patterns
+4. **Recommended Actions**: 2-3 immediate steps the analyst should take
+
+Keep the response focused and actionable. Use bullet points where appropriate."""
+
+    INCIDENT_SUMMARY_PROMPT = """Analyze the following security incident containing multiple related alerts and provide an executive summary.
+
+Incident Data:
+{incident_data}
+
+Please provide:
+1. **Executive Summary**: A brief overview of the incident suitable for management
+2. **Attack Timeline**: Key events in chronological order
+3. **Scope of Impact**: Systems, users, or data potentially affected
+4. **Root Cause Analysis**: Likely attack vector or vulnerability exploited
+5. **Containment Status**: Current state and any immediate actions taken
+6. **Recommendations**: Prioritized remediation steps
+
+Be concise but thorough. This summary should enable quick decision-making."""
+
+    async def summarize_alert(
+        self,
+        db: AsyncSession,
+        alert_id: str,
+        alert_data: dict,
+        provider: Optional[LLMProvider] = None,
+        force_refresh: bool = False,
+    ) -> dict:
+        """
+        Generate or retrieve a cached summary for an alert.
+
+        Args:
+            db: Database session
+            alert_id: Alert identifier
+            alert_data: Alert data to summarize
+            provider: LLM provider to use (defaults to configured default)
+            force_refresh: If True, bypass cache and generate new summary
+
+        Returns:
+            Dictionary with summary and metadata
+        """
+        provider = provider or LLMProvider(settings.default_llm_provider)
+
+        # Check cache first
+        if not force_refresh:
+            cached = await self._get_cached_summary(db, "alert", alert_id)
+            if cached:
+                return {
+                    "summary": cached.summary_text,
+                    "model": cached.model_used,
+                    "provider": cached.provider.value,
+                    "cached": True,
+                    "generated_at": cached.created_at.isoformat(),
+                    "input_tokens": cached.input_tokens,
+                    "output_tokens": cached.output_tokens,
+                }
+
+        # Generate new summary
+        prompt = self.ALERT_SUMMARY_PROMPT.format(
+            alert_data=json.dumps(self._sanitize_alert_data(alert_data), indent=2)
+        )
+
+        result = await self._call_llm(prompt, provider)
+
+        # Cache the result
+        await self._cache_summary(
+            db,
+            resource_type="alert",
+            resource_id=alert_id,
+            summary_text=result["summary"],
+            model_used=result["model"],
+            provider=provider,
+            input_tokens=result.get("input_tokens", 0),
+            output_tokens=result.get("output_tokens", 0),
+        )
+
+        return {
+            "summary": result["summary"],
+            "model": result["model"],
+            "provider": provider.value,
+            "cached": False,
+            "generated_at": datetime.utcnow().isoformat(),
+            "input_tokens": result.get("input_tokens", 0),
+            "output_tokens": result.get("output_tokens", 0),
+        }
+
+    async def summarize_incident(
+        self,
+        db: AsyncSession,
+        incident_id: str,
+        incident_data: dict,
+        provider: Optional[LLMProvider] = None,
+        force_refresh: bool = False,
+    ) -> dict:
+        """
+        Generate or retrieve a cached summary for an incident.
+
+        Args:
+            db: Database session
+            incident_id: Incident identifier
+            incident_data: Incident data including related alerts
+            provider: LLM provider to use
+            force_refresh: If True, bypass cache
+
+        Returns:
+            Dictionary with summary and metadata
+        """
+        provider = provider or LLMProvider(settings.default_llm_provider)
+
+        # Check cache first
+        if not force_refresh:
+            cached = await self._get_cached_summary(db, "incident", incident_id)
+            if cached:
+                return {
+                    "summary": cached.summary_text,
+                    "model": cached.model_used,
+                    "provider": cached.provider.value,
+                    "cached": True,
+                    "generated_at": cached.created_at.isoformat(),
+                    "input_tokens": cached.input_tokens,
+                    "output_tokens": cached.output_tokens,
+                }
+
+        # Generate new summary
+        prompt = self.INCIDENT_SUMMARY_PROMPT.format(
+            incident_data=json.dumps(self._sanitize_incident_data(incident_data), indent=2)
+        )
+
+        result = await self._call_llm(prompt, provider)
+
+        # Cache the result
+        await self._cache_summary(
+            db,
+            resource_type="incident",
+            resource_id=incident_id,
+            summary_text=result["summary"],
+            model_used=result["model"],
+            provider=provider,
+            input_tokens=result.get("input_tokens", 0),
+            output_tokens=result.get("output_tokens", 0),
+        )
+
+        return {
+            "summary": result["summary"],
+            "model": result["model"],
+            "provider": provider.value,
+            "cached": False,
+            "generated_at": datetime.utcnow().isoformat(),
+            "input_tokens": result.get("input_tokens", 0),
+            "output_tokens": result.get("output_tokens", 0),
+        }
+
+    async def _call_llm(self, prompt: str, provider: LLMProvider) -> dict:
+        """Call the appropriate LLM provider."""
+        if provider == LLMProvider.OPENAI:
+            return await self._call_openai(prompt)
+        elif provider == LLMProvider.ANTHROPIC:
+            return await self._call_anthropic(prompt)
+        else:
+            raise ValueError(f"Unsupported LLM provider: {provider}")
+
+    async def _call_openai(self, prompt: str) -> dict:
+        """Call OpenAI API."""
+        if not settings.openai_api_key:
+            raise ValueError("OpenAI API key not configured")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.openai_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": settings.openai_model,
+                    "messages": [
+                        {"role": "system", "content": "You are a security analyst assistant that helps analyze and summarize security alerts and incidents."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "max_tokens": 1500,
+                    "temperature": 0.3,
+                },
+                timeout=60.0,
+            )
+
+            if response.status_code == 401:
+                raise ValueError("Invalid OpenAI API key")
+            elif response.status_code == 429:
+                raise ValueError("OpenAI rate limit exceeded")
+
+            response.raise_for_status()
+            data = response.json()
+
+            return {
+                "summary": data["choices"][0]["message"]["content"],
+                "model": settings.openai_model,
+                "input_tokens": data.get("usage", {}).get("prompt_tokens", 0),
+                "output_tokens": data.get("usage", {}).get("completion_tokens", 0),
+            }
+
+    async def _call_anthropic(self, prompt: str) -> dict:
+        """Call Anthropic API."""
+        if not settings.anthropic_api_key:
+            raise ValueError("Anthropic API key not configured")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": settings.anthropic_api_key,
+                    "Content-Type": "application/json",
+                    "anthropic-version": "2023-06-01",
+                },
+                json={
+                    "model": settings.anthropic_model,
+                    "max_tokens": 1500,
+                    "messages": [
+                        {"role": "user", "content": prompt},
+                    ],
+                    "system": "You are a security analyst assistant that helps analyze and summarize security alerts and incidents.",
+                },
+                timeout=60.0,
+            )
+
+            if response.status_code == 401:
+                raise ValueError("Invalid Anthropic API key")
+            elif response.status_code == 429:
+                raise ValueError("Anthropic rate limit exceeded")
+
+            response.raise_for_status()
+            data = response.json()
+
+            return {
+                "summary": data["content"][0]["text"],
+                "model": settings.anthropic_model,
+                "input_tokens": data.get("usage", {}).get("input_tokens", 0),
+                "output_tokens": data.get("usage", {}).get("output_tokens", 0),
+            }
+
+    async def _get_cached_summary(
+        self,
+        db: AsyncSession,
+        resource_type: str,
+        resource_id: str,
+    ) -> Optional[AISummaryCache]:
+        """Get a cached summary if it exists and hasn't expired."""
+        result = await db.execute(
+            select(AISummaryCache).where(
+                and_(
+                    AISummaryCache.resource_type == resource_type,
+                    AISummaryCache.resource_id == resource_id,
+                    AISummaryCache.expires_at > datetime.utcnow(),
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def _cache_summary(
+        self,
+        db: AsyncSession,
+        resource_type: str,
+        resource_id: str,
+        summary_text: str,
+        model_used: str,
+        provider: LLMProvider,
+        input_tokens: int,
+        output_tokens: int,
+        ttl_hours: int = 24,
+    ) -> AISummaryCache:
+        """Cache a generated summary."""
+        # Delete any existing cache entry
+        result = await db.execute(
+            select(AISummaryCache).where(
+                and_(
+                    AISummaryCache.resource_type == resource_type,
+                    AISummaryCache.resource_id == resource_id,
+                )
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            await db.delete(existing)
+
+        # Create new cache entry
+        cache_entry = AISummaryCache(
+            resource_type=resource_type,
+            resource_id=resource_id,
+            summary_text=summary_text,
+            model_used=model_used,
+            provider=provider,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            expires_at=datetime.utcnow() + timedelta(hours=ttl_hours),
+        )
+        db.add(cache_entry)
+        await db.commit()
+        await db.refresh(cache_entry)
+        return cache_entry
+
+    def _sanitize_alert_data(self, data: dict) -> dict:
+        """Remove sensitive or unnecessary fields from alert data."""
+        # Fields to include in the summary
+        include_fields = [
+            "id", "title", "severity", "status", "rule", "createdAt",
+            "description", "detection", "reference", "logTypes",
+            "firstEventMatch", "lastEventMatch", "alertCount",
+        ]
+
+        sanitized = {}
+        for field in include_fields:
+            if field in data:
+                sanitized[field] = data[field]
+
+        # Include first event data if available (limited)
+        if "events" in data and data["events"]:
+            # Only include first event with limited fields
+            first_event = data["events"][0] if isinstance(data["events"], list) else data["events"]
+            if isinstance(first_event, dict):
+                sanitized["sample_event"] = {
+                    k: v for k, v in list(first_event.items())[:20]  # Limit to 20 fields
+                }
+
+        return sanitized
+
+    def _sanitize_incident_data(self, data: dict) -> dict:
+        """Remove sensitive or unnecessary fields from incident data."""
+        sanitized = {
+            "id": data.get("id"),
+            "title": data.get("title"),
+            "description": data.get("description"),
+            "severity": data.get("severity"),
+            "status": data.get("status"),
+            "created_at": data.get("created_at"),
+            "alert_count": data.get("alert_count", 0),
+        }
+
+        # Include summary of alerts
+        if "alerts" in data:
+            alerts = data["alerts"][:10]  # Limit to 10 alerts
+            sanitized["alerts"] = [
+                {
+                    "title": a.get("title"),
+                    "severity": a.get("severity"),
+                    "rule": a.get("rule", {}).get("name") if isinstance(a.get("rule"), dict) else a.get("rule"),
+                    "createdAt": a.get("createdAt"),
+                }
+                for a in alerts
+            ]
+
+        return sanitized
+
+    async def get_settings(self) -> dict:
+        """Get current LLM configuration."""
+        return {
+            "default_provider": settings.default_llm_provider,
+            "openai": {
+                "configured": bool(settings.openai_api_key),
+                "model": settings.openai_model,
+            },
+            "anthropic": {
+                "configured": bool(settings.anthropic_api_key),
+                "model": settings.anthropic_model,
+            },
+        }
+
+    async def test_connection(self, provider: LLMProvider) -> dict:
+        """Test connection to an LLM provider."""
+        test_prompt = "Respond with 'Connection successful' if you can read this message."
+
+        try:
+            result = await self._call_llm(test_prompt, provider)
+            return {
+                "status": "success",
+                "provider": provider.value,
+                "model": result["model"],
+                "message": "Connection successful",
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "provider": provider.value,
+                "message": str(e),
+            }
+
+
+# Singleton instance
+llm_service = LLMService()

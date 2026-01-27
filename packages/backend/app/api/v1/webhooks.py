@@ -4,12 +4,13 @@ from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
 
 from app.db import get_db, WebhookConfig
 from app.db.models import WebhookType
+from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAdminDep
 
 router = APIRouter()
 
@@ -62,9 +63,15 @@ class WebhookTestResult(BaseModel):
 @router.get("")
 async def list_webhooks(
     db: Annotated[AsyncSession, Depends(get_db)],
+    user: OrgUserDep,
+    org_id: OrgIdDep,
 ) -> list[WebhookResponse]:
     """List all webhook configurations."""
-    result = await db.execute(select(WebhookConfig).order_by(WebhookConfig.created_at.desc()))
+    result = await db.execute(
+        select(WebhookConfig)
+        .where(WebhookConfig.organization_id == org_id)
+        .order_by(WebhookConfig.created_at.desc())
+    )
     webhooks = result.scalars().all()
     return [
         WebhookResponse(
@@ -88,6 +95,7 @@ async def list_webhooks(
 async def create_webhook(
     webhook: WebhookCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
+    admin: OrgAdminDep,
 ) -> WebhookResponse:
     """Create a new webhook configuration."""
     db_webhook = WebhookConfig(
@@ -99,6 +107,7 @@ async def create_webhook(
         headers=webhook.headers,
         severity_filter=webhook.severity_filter,
         is_active=webhook.is_active,
+        organization_id=admin.organization_id,
     )
     db.add(db_webhook)
     await db.flush()
@@ -123,9 +132,17 @@ async def update_webhook(
     webhook_id: UUID,
     update: WebhookUpdate,
     db: Annotated[AsyncSession, Depends(get_db)],
+    admin: OrgAdminDep,
 ) -> WebhookResponse:
     """Update a webhook configuration."""
-    result = await db.execute(select(WebhookConfig).where(WebhookConfig.id == webhook_id))
+    result = await db.execute(
+        select(WebhookConfig).where(
+            and_(
+                WebhookConfig.id == webhook_id,
+                WebhookConfig.organization_id == admin.organization_id,
+            )
+        )
+    )
     webhook = result.scalar_one_or_none()
     if not webhook:
         raise HTTPException(status_code=404, detail="Webhook not found")
@@ -154,9 +171,17 @@ async def update_webhook(
 async def delete_webhook(
     webhook_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    admin: OrgAdminDep,
 ) -> dict[str, str]:
     """Delete a webhook configuration."""
-    result = await db.execute(select(WebhookConfig).where(WebhookConfig.id == webhook_id))
+    result = await db.execute(
+        select(WebhookConfig).where(
+            and_(
+                WebhookConfig.id == webhook_id,
+                WebhookConfig.organization_id == admin.organization_id,
+            )
+        )
+    )
     webhook = result.scalar_one_or_none()
     if not webhook:
         raise HTTPException(status_code=404, detail="Webhook not found")
@@ -169,9 +194,17 @@ async def delete_webhook(
 async def test_webhook(
     webhook_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
+    admin: OrgAdminDep,
 ) -> WebhookTestResult:
     """Test a webhook by sending a test payload."""
-    result = await db.execute(select(WebhookConfig).where(WebhookConfig.id == webhook_id))
+    result = await db.execute(
+        select(WebhookConfig).where(
+            and_(
+                WebhookConfig.id == webhook_id,
+                WebhookConfig.organization_id == admin.organization_id,
+            )
+        )
+    )
     webhook = result.scalar_one_or_none()
     if not webhook:
         raise HTTPException(status_code=404, detail="Webhook not found")

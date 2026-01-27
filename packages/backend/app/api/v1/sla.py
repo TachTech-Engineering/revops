@@ -8,7 +8,7 @@ from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, SLAPolicy, SLAMetric, SLAStatus
-from app.api.v1.deps import RequireAnalystDep, CurrentUserDep
+from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
 
 router = APIRouter()
 
@@ -150,12 +150,13 @@ def format_metric(metric: SLAMetric) -> SLAMetricResponse:
 
 @router.get("/policies")
 async def list_policies(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     active_only: bool = False,
 ) -> list[SLAPolicyResponse]:
     """List all SLA policies."""
-    query = select(SLAPolicy).order_by(SLAPolicy.is_default.desc(), SLAPolicy.name)
+    query = select(SLAPolicy).where(SLAPolicy.organization_id == org_id).order_by(SLAPolicy.is_default.desc(), SLAPolicy.name)
 
     if active_only:
         query = query.where(SLAPolicy.is_active == True)
@@ -169,12 +170,13 @@ async def list_policies(
 @router.get("/policies/{policy_id}")
 async def get_policy(
     policy_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SLAPolicyResponse:
     """Get a specific SLA policy."""
     result = await db.execute(
-        select(SLAPolicy).where(SLAPolicy.id == policy_id)
+        select(SLAPolicy).where(and_(SLAPolicy.id == policy_id, SLAPolicy.organization_id == org_id))
     )
     policy = result.scalar_one_or_none()
     if not policy:
@@ -186,18 +188,16 @@ async def get_policy(
 @router.post("/policies")
 async def create_policy(
     policy: SLAPolicyCreate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SLAPolicyResponse:
     """Create a new SLA policy. Requires analyst role."""
-    email, _ = analyst
-
     # If setting as default, unset other defaults
     if policy.is_default:
         await db.execute(
-            select(SLAPolicy).where(SLAPolicy.is_default == True)
+            select(SLAPolicy).where(and_(SLAPolicy.is_default == True, SLAPolicy.organization_id == analyst.organization_id))
         )
-        result = await db.execute(select(SLAPolicy).where(SLAPolicy.is_default == True))
+        result = await db.execute(select(SLAPolicy).where(and_(SLAPolicy.is_default == True, SLAPolicy.organization_id == analyst.organization_id)))
         for existing in result.scalars():
             existing.is_default = False
 
@@ -215,7 +215,8 @@ async def create_policy(
         is_default=policy.is_default,
         is_active=policy.is_active,
         rule_ids=policy.rule_ids,
-        created_by=email,
+        created_by=analyst.email,
+        organization_id=analyst.organization_id,
     )
     db.add(db_policy)
     await db.flush()
@@ -228,12 +229,12 @@ async def create_policy(
 async def update_policy(
     policy_id: UUID,
     update: SLAPolicyUpdate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SLAPolicyResponse:
     """Update an SLA policy. Requires analyst role."""
     result = await db.execute(
-        select(SLAPolicy).where(SLAPolicy.id == policy_id)
+        select(SLAPolicy).where(and_(SLAPolicy.id == policy_id, SLAPolicy.organization_id == analyst.organization_id))
     )
     policy = result.scalar_one_or_none()
     if not policy:
@@ -243,7 +244,7 @@ async def update_policy(
     if update.is_default:
         result = await db.execute(
             select(SLAPolicy).where(
-                and_(SLAPolicy.is_default == True, SLAPolicy.id != policy_id)
+                and_(SLAPolicy.is_default == True, SLAPolicy.id != policy_id, SLAPolicy.organization_id == analyst.organization_id)
             )
         )
         for existing in result.scalars():
@@ -261,12 +262,12 @@ async def update_policy(
 @router.delete("/policies/{policy_id}")
 async def delete_policy(
     policy_id: UUID,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete an SLA policy. Requires analyst role."""
     result = await db.execute(
-        select(SLAPolicy).where(SLAPolicy.id == policy_id)
+        select(SLAPolicy).where(and_(SLAPolicy.id == policy_id, SLAPolicy.organization_id == analyst.organization_id))
     )
     policy = result.scalar_one_or_none()
     if not policy:
@@ -281,7 +282,8 @@ async def delete_policy(
 
 @router.get("/metrics")
 async def list_metrics(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     severity: Optional[str] = None,
     status: Optional[SLAStatus] = None,
@@ -292,7 +294,7 @@ async def list_metrics(
     """List SLA metrics with filtering."""
     since = datetime.utcnow() - timedelta(days=days)
 
-    query = select(SLAMetric).where(SLAMetric.created_at >= since)
+    query = select(SLAMetric).where(and_(SLAMetric.created_at >= since, SLAMetric.organization_id == org_id))
 
     if severity:
         query = query.where(SLAMetric.severity == severity.upper())
@@ -325,12 +327,13 @@ async def list_metrics(
 @router.get("/metrics/{alert_id}")
 async def get_alert_metric(
     alert_id: str,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SLAMetricResponse:
     """Get SLA metric for a specific alert."""
     result = await db.execute(
-        select(SLAMetric).where(SLAMetric.alert_id == alert_id)
+        select(SLAMetric).where(and_(SLAMetric.alert_id == alert_id, SLAMetric.organization_id == org_id))
     )
     metric = result.scalar_one_or_none()
     if not metric:
@@ -342,12 +345,10 @@ async def get_alert_metric(
 @router.post("/metrics/track")
 async def track_alert_sla(
     data: dict,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SLAMetricResponse:
     """Create or update SLA tracking for an alert."""
-    email, _ = analyst
-
     alert_id = data.get("alert_id")
     severity = data.get("severity", "MEDIUM").upper()
     alert_created_at = datetime.fromisoformat(data.get("created_at", datetime.utcnow().isoformat()))
@@ -357,7 +358,7 @@ async def track_alert_sla(
     if rule_id:
         result = await db.execute(
             select(SLAPolicy).where(
-                and_(SLAPolicy.is_active == True, SLAPolicy.rule_ids.contains([rule_id]))
+                and_(SLAPolicy.is_active == True, SLAPolicy.rule_ids.contains([rule_id]), SLAPolicy.organization_id == analyst.organization_id)
             )
         )
         policy = result.scalar_one_or_none()
@@ -368,7 +369,7 @@ async def track_alert_sla(
     if not policy:
         result = await db.execute(
             select(SLAPolicy).where(
-                and_(SLAPolicy.is_active == True, SLAPolicy.is_default == True)
+                and_(SLAPolicy.is_active == True, SLAPolicy.is_default == True, SLAPolicy.organization_id == analyst.organization_id)
             )
         )
         policy = result.scalar_one_or_none()
@@ -383,7 +384,7 @@ async def track_alert_sla(
 
     # Check if metric already exists
     result = await db.execute(
-        select(SLAMetric).where(SLAMetric.alert_id == alert_id)
+        select(SLAMetric).where(and_(SLAMetric.alert_id == alert_id, SLAMetric.organization_id == analyst.organization_id))
     )
     metric = result.scalar_one_or_none()
 
@@ -401,6 +402,7 @@ async def track_alert_sla(
             alert_created_at=alert_created_at,
             ack_target_minutes=ack_target,
             resolve_target_minutes=resolve_target,
+            organization_id=analyst.organization_id,
         )
         db.add(metric)
 
@@ -413,12 +415,12 @@ async def track_alert_sla(
 @router.post("/metrics/{alert_id}/acknowledge")
 async def acknowledge_alert(
     alert_id: str,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SLAMetricResponse:
     """Record acknowledgment time for an alert."""
     result = await db.execute(
-        select(SLAMetric).where(SLAMetric.alert_id == alert_id)
+        select(SLAMetric).where(and_(SLAMetric.alert_id == alert_id, SLAMetric.organization_id == analyst.organization_id))
     )
     metric = result.scalar_one_or_none()
     if not metric:
@@ -449,12 +451,12 @@ async def acknowledge_alert(
 @router.post("/metrics/{alert_id}/resolve")
 async def resolve_alert(
     alert_id: str,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SLAMetricResponse:
     """Record resolution time for an alert."""
     result = await db.execute(
-        select(SLAMetric).where(SLAMetric.alert_id == alert_id)
+        select(SLAMetric).where(and_(SLAMetric.alert_id == alert_id, SLAMetric.organization_id == analyst.organization_id))
     )
     metric = result.scalar_one_or_none()
     if not metric:
@@ -484,7 +486,8 @@ async def resolve_alert(
 
 @router.get("/dashboard")
 async def get_sla_dashboard(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     days: int = 7,
 ) -> SLADashboardResponse:
@@ -493,7 +496,7 @@ async def get_sla_dashboard(
 
     # Get all metrics in the time range
     result = await db.execute(
-        select(SLAMetric).where(SLAMetric.created_at >= since)
+        select(SLAMetric).where(and_(SLAMetric.created_at >= since, SLAMetric.organization_id == org_id))
     )
     metrics = result.scalars().all()
 
@@ -558,15 +561,15 @@ async def get_sla_dashboard(
 
 @router.post("/metrics/update-status")
 async def update_sla_statuses(
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Update SLA statuses for all active metrics (run periodically)."""
     now = datetime.utcnow()
 
-    # Get all unresolved metrics
+    # Get all unresolved metrics for this organization
     result = await db.execute(
-        select(SLAMetric).where(SLAMetric.resolved_at.is_(None))
+        select(SLAMetric).where(and_(SLAMetric.resolved_at.is_(None), SLAMetric.organization_id == analyst.organization_id))
     )
     metrics = result.scalars().all()
 

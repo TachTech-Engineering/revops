@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
+    auth,
     alerts,
     rules,
     converter,
@@ -27,10 +28,18 @@ from app.api.v1 import (
     sla,
     notes,
     notifications,
+    # Phase 5: Advanced Features
+    ai,
+    recommendations,
+    simulations,
+    # SecOps Platform: Connector Framework & Workflows
+    connectors,
+    workflows,
 )
 
 api_router = APIRouter()
 
+api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
 api_router.include_router(rules.router, prefix="/rules", tags=["rules"])
@@ -57,3 +66,12 @@ api_router.include_router(mitre.router, prefix="/mitre", tags=["mitre"])
 api_router.include_router(sla.router, prefix="/sla", tags=["sla"])
 api_router.include_router(notes.router, prefix="/notes", tags=["notes"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["notifications"])
+
+# Phase 5: Advanced Features
+api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
+api_router.include_router(recommendations.router, prefix="/recommendations", tags=["recommendations"])
+api_router.include_router(simulations.router, prefix="/simulations", tags=["simulations"])
+
+# SecOps Platform: Connector Framework & Workflows
+api_router.include_router(connectors.router, prefix="/connectors", tags=["connectors"])
+api_router.include_router(workflows.router, prefix="/workflows", tags=["workflows"])

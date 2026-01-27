@@ -1,0 +1,126 @@
+{
+  "version": "1.0.0",
+  "last_updated": "2024-01-15",
+  "rules": [
+    {
+      "id": "aws-cloudtrail-unauthorized-api",
+      "name": "AWS Unauthorized API Call",
+      "log_sources": ["AWS.CloudTrail"],
+      "description": "Detects unauthorized API calls in AWS CloudTrail logs",
+      "mitre_techniques": ["T1078", "T1098"],
+      "mitre_tactic": "initial-access",
+      "confidence_score": 0.85,
+      "rule_code": "def rule(event):\n    return event.get('errorCode') in [\n        'UnauthorizedAccess',\n        'AccessDenied',\n        'UnauthorizedOperation'\n    ]\n\ndef title(event):\n    return f\"Unauthorized API call: {event.get('eventName')} by {event.get('userIdentity', {}).get('arn', 'unknown')}\""
+    },
+    {
+      "id": "aws-root-login",
+      "name": "AWS Root Account Login",
+      "log_sources": ["AWS.CloudTrail"],
+      "description": "Detects usage of the AWS root account",
+      "mitre_techniques": ["T1078.004"],
+      "mitre_tactic": "initial-access",
+      "confidence_score": 0.95,
+      "rule_code": "def rule(event):\n    user_identity = event.get('userIdentity', {})\n    return (\n        user_identity.get('type') == 'Root' and\n        event.get('eventName') == 'ConsoleLogin'\n    )\n\ndef title(event):\n    return f\"AWS Root account login from {event.get('sourceIPAddress', 'unknown')}\""
+    },
+    {
+      "id": "aws-s3-public-access",
+      "name": "AWS S3 Bucket Made Public",
+      "log_sources": ["AWS.CloudTrail"],
+      "description": "Detects when an S3 bucket ACL is modified to allow public access",
+      "mitre_techniques": ["T1530"],
+      "mitre_tactic": "collection",
+      "confidence_score": 0.9,
+      "rule_code": "def rule(event):\n    if event.get('eventName') not in ['PutBucketAcl', 'PutBucketPolicy']:\n        return False\n    request_params = event.get('requestParameters', {})\n    acl = str(request_params).lower()\n    return 'allusers' in acl or 'authenticatedusers' in acl\n\ndef title(event):\n    bucket = event.get('requestParameters', {}).get('bucketName', 'unknown')\n    return f\"S3 bucket {bucket} ACL modified to allow public access\""
+    },
+    {
+      "id": "aws-iam-policy-change",
+      "name": "AWS IAM Policy Modified",
+      "log_sources": ["AWS.CloudTrail"],
+      "description": "Detects modifications to IAM policies",
+      "mitre_techniques": ["T1098"],
+      "mitre_tactic": "persistence",
+      "confidence_score": 0.75,
+      "rule_code": "def rule(event):\n    iam_write_events = [\n        'CreatePolicy', 'DeletePolicy', 'CreatePolicyVersion',\n        'DeletePolicyVersion', 'AttachUserPolicy', 'DetachUserPolicy',\n        'AttachRolePolicy', 'DetachRolePolicy', 'AttachGroupPolicy',\n        'DetachGroupPolicy', 'PutUserPolicy', 'PutRolePolicy', 'PutGroupPolicy'\n    ]\n    return event.get('eventName') in iam_write_events\n\ndef title(event):\n    return f\"IAM policy modified: {event.get('eventName')} by {event.get('userIdentity', {}).get('arn', 'unknown')}\""
+    },
+    {
+      "id": "okta-user-locked-out",
+      "name": "Okta User Account Lockout",
+      "log_sources": ["Okta.SystemLog"],
+      "description": "Detects when a user account is locked due to failed authentication attempts",
+      "mitre_techniques": ["T1110"],
+      "mitre_tactic": "credential-access",
+      "confidence_score": 0.9,
+      "rule_code": "def rule(event):\n    return event.get('eventType') == 'user.account.lock'\n\ndef title(event):\n    actor = event.get('actor', {}).get('alternateId', 'unknown')\n    return f\"Okta user account locked: {actor}\""
+    },
+    {
+      "id": "okta-admin-role-assigned",
+      "name": "Okta Admin Role Assignment",
+      "log_sources": ["Okta.SystemLog"],
+      "description": "Detects when admin privileges are assigned to a user",
+      "mitre_techniques": ["T1098.001"],
+      "mitre_tactic": "persistence",
+      "confidence_score": 0.85,
+      "rule_code": "def rule(event):\n    return (\n        event.get('eventType') == 'user.account.privilege.grant' or\n        (event.get('eventType') == 'group.user_membership.add' and\n         'admin' in event.get('target', [{}])[0].get('displayName', '').lower())\n    )\n\ndef title(event):\n    actor = event.get('actor', {}).get('alternateId', 'unknown')\n    target = event.get('target', [{}])[0].get('alternateId', 'unknown')\n    return f\"Admin privileges granted to {target} by {actor}\""
+    },
+    {
+      "id": "github-branch-protection-disabled",
+      "name": "GitHub Branch Protection Disabled",
+      "log_sources": ["GitHub.Audit"],
+      "description": "Detects when branch protection rules are disabled",
+      "mitre_techniques": ["T1562.001"],
+      "mitre_tactic": "defense-evasion",
+      "confidence_score": 0.9,
+      "rule_code": "def rule(event):\n    return event.get('action') == 'protected_branch.destroy'\n\ndef title(event):\n    repo = event.get('repo', 'unknown')\n    actor = event.get('actor', 'unknown')\n    return f\"Branch protection disabled on {repo} by {actor}\""
+    },
+    {
+      "id": "gcp-firewall-rule-modified",
+      "name": "GCP Firewall Rule Modified",
+      "log_sources": ["GCP.AuditLog"],
+      "description": "Detects modifications to GCP firewall rules",
+      "mitre_techniques": ["T1562.007"],
+      "mitre_tactic": "defense-evasion",
+      "confidence_score": 0.8,
+      "rule_code": "def rule(event):\n    method = event.get('protoPayload', {}).get('methodName', '')\n    return 'compute.firewalls' in method and any(\n        action in method for action in ['insert', 'update', 'patch', 'delete']\n    )\n\ndef title(event):\n    method = event.get('protoPayload', {}).get('methodName', 'unknown')\n    principal = event.get('protoPayload', {}).get('authenticationInfo', {}).get('principalEmail', 'unknown')\n    return f\"GCP firewall rule modified: {method} by {principal}\""
+    },
+    {
+      "id": "azure-ad-suspicious-signin",
+      "name": "Azure AD Suspicious Sign-in",
+      "log_sources": ["Azure.SignInLogs"],
+      "description": "Detects suspicious sign-in activity in Azure AD",
+      "mitre_techniques": ["T1078.004"],
+      "mitre_tactic": "initial-access",
+      "confidence_score": 0.85,
+      "rule_code": "def rule(event):\n    risk_level = event.get('riskLevelDuringSignIn', '').lower()\n    return risk_level in ['high', 'medium']\n\ndef title(event):\n    user = event.get('userPrincipalName', 'unknown')\n    risk = event.get('riskLevelDuringSignIn', 'unknown')\n    return f\"Suspicious Azure AD sign-in by {user} - Risk: {risk}\""
+    },
+    {
+      "id": "crowdstrike-malware-detected",
+      "name": "CrowdStrike Malware Detection",
+      "log_sources": ["CrowdStrike.FDREvent"],
+      "description": "Detects malware identified by CrowdStrike",
+      "mitre_techniques": ["T1204"],
+      "mitre_tactic": "execution",
+      "confidence_score": 0.95,
+      "rule_code": "def rule(event):\n    return (\n        event.get('ExternalApiType') == 'Event_DetectionSummaryEvent' and\n        event.get('Severity') >= 3\n    )\n\ndef title(event):\n    hostname = event.get('ComputerName', 'unknown')\n    detection = event.get('DetectDescription', 'Malware detected')\n    return f\"CrowdStrike detection on {hostname}: {detection}\""
+    },
+    {
+      "id": "windows-powershell-encoded-command",
+      "name": "PowerShell Encoded Command Execution",
+      "log_sources": ["Windows.EventLogs"],
+      "description": "Detects execution of base64 encoded PowerShell commands",
+      "mitre_techniques": ["T1059.001", "T1027"],
+      "mitre_tactic": "execution",
+      "confidence_score": 0.85,
+      "rule_code": "def rule(event):\n    command_line = event.get('CommandLine', '').lower()\n    return (\n        'powershell' in command_line and\n        any(flag in command_line for flag in ['-enc', '-encodedcommand', '-e '])\n    )\n\ndef title(event):\n    host = event.get('ComputerName', 'unknown')\n    user = event.get('UserName', 'unknown')\n    return f\"Encoded PowerShell execution on {host} by {user}\""
+    },
+    {
+      "id": "linux-suspicious-cron",
+      "name": "Linux Suspicious Cron Job",
+      "log_sources": ["Linux.Syslog", "Linux.AuditLog"],
+      "description": "Detects creation of suspicious cron jobs",
+      "mitre_techniques": ["T1053.003"],
+      "mitre_tactic": "persistence",
+      "confidence_score": 0.8,
+      "rule_code": "def rule(event):\n    message = event.get('message', '').lower()\n    return (\n        'crontab' in message and\n        any(cmd in message for cmd in ['wget', 'curl', 'bash -c', '/dev/tcp', 'nc -e'])\n    )\n\ndef title(event):\n    host = event.get('hostname', 'unknown')\n    return f\"Suspicious cron job created on {host}\""
+    }
+  ]
+}

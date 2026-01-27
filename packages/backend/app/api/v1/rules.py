@@ -50,7 +50,7 @@ async def list_rules(
     severity: Optional[str] = Query(None, description="Filter by severity"),
     logTypes: Optional[list[str]] = Query(None, description="Filter by log types"),
     tags: Optional[list[str]] = Query(None, description="Filter by tags"),
-    pageSize: int = Query(50, ge=1, le=100, description="Page size"),
+    pageSize: int = Query(50, ge=1, le=1000, description="Page size"),
 ) -> PaginatedResponse:
     """List detection rules with optional filtering."""
     try:

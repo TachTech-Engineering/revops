@@ -64,8 +64,8 @@ export default function Dashboard() {
               <ArrowRightLeft className="h-6 w-6 text-purple-400" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">SPL Converter</p>
-              <p className="text-sm font-medium">Convert Splunk rules</p>
+              <p className="text-sm text-muted-foreground">Rule Converter</p>
+              <p className="text-sm font-medium">Convert SPL & YARA-L</p>
             </div>
           </div>
         </Link>

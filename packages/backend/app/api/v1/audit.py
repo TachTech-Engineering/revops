@@ -4,11 +4,11 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, AuditLog
-from app.api.v1.deps import RequireAdminDep
+from app.api.v1.deps import OrgAdminDep, OrgIdDep
 
 router = APIRouter()
 
@@ -37,7 +37,8 @@ class AuditLogListResponse(BaseModel):
 
 @router.get("")
 async def list_audit_logs(
-    admin_check: RequireAdminDep,
+    admin: OrgAdminDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     user_email: Optional[str] = Query(None, description="Filter by user email"),
     action: Optional[str] = Query(None, description="Filter by action"),
@@ -49,7 +50,7 @@ async def list_audit_logs(
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
 ) -> AuditLogListResponse:
     """List audit logs with filtering. Admin only."""
-    query = select(AuditLog)
+    query = select(AuditLog).where(AuditLog.organization_id == org_id)
 
     # Apply filters
     if user_email:
@@ -101,21 +102,31 @@ async def list_audit_logs(
 
 @router.get("/actions")
 async def list_audit_actions(
-    admin_check: RequireAdminDep,
+    admin: OrgAdminDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[str]:
     """List distinct audit actions. Admin only."""
     from sqlalchemy import distinct
-    result = await db.execute(select(distinct(AuditLog.action)).order_by(AuditLog.action))
+    result = await db.execute(
+        select(distinct(AuditLog.action))
+        .where(AuditLog.organization_id == org_id)
+        .order_by(AuditLog.action)
+    )
     return [row[0] for row in result.all()]
 
 
 @router.get("/resource-types")
 async def list_audit_resource_types(
-    admin_check: RequireAdminDep,
+    admin: OrgAdminDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[str]:
     """List distinct resource types. Admin only."""
     from sqlalchemy import distinct
-    result = await db.execute(select(distinct(AuditLog.resource_type)).order_by(AuditLog.resource_type))
+    result = await db.execute(
+        select(distinct(AuditLog.resource_type))
+        .where(AuditLog.organization_id == org_id)
+        .order_by(AuditLog.resource_type)
+    )
     return [row[0] for row in result.all()]

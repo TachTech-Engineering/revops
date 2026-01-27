@@ -3,11 +3,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, MitreMapping, MitreTactic
-from app.api.v1.deps import RequireAnalystDep, CurrentUserDep
+from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
 
 router = APIRouter()
 
@@ -87,7 +87,7 @@ class MitreMappingResponse(BaseModel):
 
 
 @router.get("/tactics")
-async def get_tactics(user: CurrentUserDep) -> list[dict]:
+async def get_tactics(user: OrgUserDep) -> list[dict]:
     """Get all MITRE ATT&CK tactics in order."""
     return [
         {"value": t.value, "label": TACTIC_LABELS[t]}
@@ -97,13 +97,16 @@ async def get_tactics(user: CurrentUserDep) -> list[dict]:
 
 @router.get("/mappings")
 async def list_mappings(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     tactic: Optional[MitreTactic] = None,
     technique_id: Optional[str] = None,
 ) -> list[MitreMappingResponse]:
     """List all MITRE mappings."""
-    query = select(MitreMapping).order_by(MitreMapping.technique_id)
+    query = select(MitreMapping).where(
+        MitreMapping.organization_id == org_id
+    ).order_by(MitreMapping.technique_id)
 
     if tactic:
         query = query.where(MitreMapping.tactic == tactic)
@@ -134,13 +137,15 @@ async def list_mappings(
 
 @router.get("/coverage")
 async def get_coverage(
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Get MITRE ATT&CK coverage summary."""
     # Get counts by tactic
     result = await db.execute(
         select(MitreMapping.tactic, func.count(func.distinct(MitreMapping.technique_id)))
+        .where(MitreMapping.organization_id == org_id)
         .group_by(MitreMapping.tactic)
     )
     tactic_counts = {row[0]: row[1] for row in result.all()}
@@ -153,6 +158,7 @@ async def get_coverage(
             MitreMapping.technique_name,
             func.count(MitreMapping.rule_id).label('rule_count')
         )
+        .where(MitreMapping.organization_id == org_id)
         .group_by(MitreMapping.tactic, MitreMapping.technique_id, MitreMapping.technique_name)
     )
 
@@ -170,12 +176,14 @@ async def get_coverage(
     # Get total unique techniques
     total_result = await db.execute(
         select(func.count(func.distinct(MitreMapping.technique_id)))
+        .where(MitreMapping.organization_id == org_id)
     )
     total_techniques = total_result.scalar() or 0
 
     # Get total rules with mappings
     rules_result = await db.execute(
         select(func.count(func.distinct(MitreMapping.rule_id)))
+        .where(MitreMapping.organization_id == org_id)
     )
     total_mapped_rules = rules_result.scalar() or 0
 
@@ -197,13 +205,17 @@ async def get_coverage(
 @router.get("/rules/{rule_id}")
 async def get_rule_mappings(
     rule_id: str,
-    user: CurrentUserDep,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[MitreMappingResponse]:
     """Get MITRE mappings for a specific rule."""
     result = await db.execute(
         select(MitreMapping)
-        .where(MitreMapping.rule_id == rule_id)
+        .where(and_(
+            MitreMapping.organization_id == org_id,
+            MitreMapping.rule_id == rule_id
+        ))
         .order_by(MitreMapping.technique_id)
     )
     mappings = result.scalars().all()
@@ -230,12 +242,10 @@ async def get_rule_mappings(
 @router.post("/mappings")
 async def create_mapping(
     mapping: MitreMappingCreate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MitreMappingResponse:
     """Create a new MITRE mapping. Requires analyst role."""
-    email, _ = analyst
-
     db_mapping = MitreMapping(
         rule_id=mapping.rule_id,
         rule_name=mapping.rule_name,
@@ -245,7 +255,8 @@ async def create_mapping(
         subtechnique_name=mapping.subtechnique_name,
         tactic=mapping.tactic,
         notes=mapping.notes,
-        created_by=email,
+        created_by=analyst.email,
+        organization_id=analyst.organization_id,
     )
     db.add(db_mapping)
     await db.flush()
@@ -271,12 +282,15 @@ async def create_mapping(
 async def update_mapping(
     mapping_id: UUID,
     update: MitreMappingUpdate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MitreMappingResponse:
     """Update a MITRE mapping. Requires analyst role."""
     result = await db.execute(
-        select(MitreMapping).where(MitreMapping.id == mapping_id)
+        select(MitreMapping).where(and_(
+            MitreMapping.id == mapping_id,
+            MitreMapping.organization_id == analyst.organization_id
+        ))
     )
     mapping = result.scalar_one_or_none()
     if not mapping:
@@ -307,12 +321,15 @@ async def update_mapping(
 @router.delete("/mappings/{mapping_id}")
 async def delete_mapping(
     mapping_id: UUID,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete a MITRE mapping. Requires analyst role."""
     result = await db.execute(
-        select(MitreMapping).where(MitreMapping.id == mapping_id)
+        select(MitreMapping).where(and_(
+            MitreMapping.id == mapping_id,
+            MitreMapping.organization_id == analyst.organization_id
+        ))
     )
     mapping = result.scalar_one_or_none()
     if not mapping:

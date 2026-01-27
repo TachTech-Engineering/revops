@@ -3,10 +3,11 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db, SavedQuery
+from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
 
 router = APIRouter()
 
@@ -41,10 +42,16 @@ class SavedQueryResponse(BaseModel):
 
 @router.get("")
 async def list_saved_queries(
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[SavedQueryResponse]:
     """List all saved queries."""
-    result = await db.execute(select(SavedQuery).order_by(SavedQuery.updated_at.desc()))
+    result = await db.execute(
+        select(SavedQuery)
+        .where(SavedQuery.organization_id == org_id)
+        .order_by(SavedQuery.updated_at.desc())
+    )
     queries = result.scalars().all()
     return [
         SavedQueryResponse(
@@ -64,14 +71,17 @@ async def list_saved_queries(
 @router.post("")
 async def create_saved_query(
     query: SavedQueryCreate,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SavedQueryResponse:
-    """Create a new saved query."""
+    """Create a new saved query. Requires analyst role."""
     db_query = SavedQuery(
         name=query.name,
         description=query.description,
         sql=query.sql,
         is_shared=query.is_shared,
+        created_by=analyst.email,
+        organization_id=analyst.organization_id,
     )
     db.add(db_query)
     await db.flush()
@@ -91,10 +101,14 @@ async def create_saved_query(
 @router.get("/{query_id}")
 async def get_saved_query(
     query_id: UUID,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SavedQueryResponse:
     """Get a saved query by ID."""
-    result = await db.execute(select(SavedQuery).where(SavedQuery.id == query_id))
+    result = await db.execute(
+        select(SavedQuery).where(and_(SavedQuery.id == query_id, SavedQuery.organization_id == org_id))
+    )
     query = result.scalar_one_or_none()
     if not query:
         raise HTTPException(status_code=404, detail="Query not found")
@@ -114,10 +128,13 @@ async def get_saved_query(
 async def update_saved_query(
     query_id: UUID,
     update: SavedQueryUpdate,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SavedQueryResponse:
-    """Update a saved query."""
-    result = await db.execute(select(SavedQuery).where(SavedQuery.id == query_id))
+    """Update a saved query. Requires analyst role."""
+    result = await db.execute(
+        select(SavedQuery).where(and_(SavedQuery.id == query_id, SavedQuery.organization_id == analyst.organization_id))
+    )
     query = result.scalar_one_or_none()
     if not query:
         raise HTTPException(status_code=404, detail="Query not found")
@@ -148,10 +165,13 @@ async def update_saved_query(
 @router.delete("/{query_id}")
 async def delete_saved_query(
     query_id: UUID,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
-    """Delete a saved query."""
-    result = await db.execute(select(SavedQuery).where(SavedQuery.id == query_id))
+    """Delete a saved query. Requires analyst role."""
+    result = await db.execute(
+        select(SavedQuery).where(and_(SavedQuery.id == query_id, SavedQuery.organization_id == analyst.organization_id))
+    )
     query = result.scalar_one_or_none()
     if not query:
         raise HTTPException(status_code=404, detail="Query not found")
