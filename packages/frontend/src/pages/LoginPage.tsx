@@ -172,17 +172,17 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <div className="dark min-h-screen bg-zinc-950 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center mb-4">
             <RevOpsLogo size={64} />
           </div>
-          <h1 className="text-2xl font-bold">RevOps</h1>
-          <p className="text-muted-foreground mt-2">Multi-SIEM Security Operations Platform</p>
+          <h1 className="text-2xl font-bold text-zinc-100">RevOps</h1>
+          <p className="text-zinc-400 mt-2">Multi-SIEM Security Operations Platform</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border bg-card p-6">
+        <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border border-zinc-800 bg-zinc-900 p-6 shadow-xl">
           <div className="flex gap-2 mb-4">
             <button
               type="button"
@@ -192,8 +192,8 @@ export default function LoginPage() {
               }}
               className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
                 !isRegisterMode
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:text-foreground'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
               }`}
             >
               Sign In
@@ -206,8 +206,8 @@ export default function LoginPage() {
               }}
               className={`flex-1 py-2 text-sm font-medium rounded-md transition-colors ${
                 isRegisterMode
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:text-foreground'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
               }`}
             >
               Register
@@ -215,14 +215,14 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm">{error}</div>
+            <div className="p-3 rounded-md bg-red-500/10 text-red-400 text-sm">{error}</div>
           )}
 
           {isRegisterMode && (
             <>
               <div>
-                <label htmlFor="name" className="block text-sm font-medium mb-2">
-                  Name <span className="text-muted-foreground">(optional)</span>
+                <label htmlFor="name" className="block text-sm font-medium text-zinc-200 mb-2">
+                  Name <span className="text-zinc-500">(optional)</span>
                 </label>
                 <input
                   id="name"
@@ -230,18 +230,18 @@ export default function LoginPage() {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Your name"
-                  className="w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   autoComplete="name"
                 />
               </div>
 
-              <div className="border-t pt-4 mt-2">
-                <p className="text-xs text-muted-foreground mb-3">
+              <div className="border-t border-zinc-700 pt-4 mt-2">
+                <p className="text-xs text-zinc-400 mb-3">
                   Create a new organization (you'll be the admin)
                 </p>
                 <div className="space-y-3">
                   <div>
-                    <label htmlFor="orgName" className="block text-sm font-medium mb-2">
+                    <label htmlFor="orgName" className="block text-sm font-medium text-zinc-200 mb-2">
                       Organization Name
                     </label>
                     <input
@@ -258,12 +258,12 @@ export default function LoginPage() {
                         setOrganizationSlug(slug)
                       }}
                       placeholder="Acme Corp"
-                      className="w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
                   <div>
-                    <label htmlFor="orgSlug" className="block text-sm font-medium mb-2">
-                      Organization ID <span className="text-muted-foreground">(URL-friendly)</span>
+                    <label htmlFor="orgSlug" className="block text-sm font-medium text-zinc-200 mb-2">
+                      Organization ID <span className="text-zinc-500">(URL-friendly)</span>
                     </label>
                     <input
                       id="orgSlug"
@@ -271,7 +271,7 @@ export default function LoginPage() {
                       value={organizationSlug}
                       onChange={(e) => setOrganizationSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
                       placeholder="acme-corp"
-                      className="w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
                 </div>
@@ -280,7 +280,7 @@ export default function LoginPage() {
           )}
 
           <div>
-            <label htmlFor="email" className="block text-sm font-medium mb-2">
+            <label htmlFor="email" className="block text-sm font-medium text-zinc-200 mb-2">
               Email
             </label>
             <input
@@ -289,13 +289,13 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@company.com"
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               autoComplete="email"
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium mb-2">
+            <label htmlFor="password" className="block text-sm font-medium text-zinc-200 mb-2">
               Password
             </label>
             <div className="relative">
@@ -305,13 +305,13 @@ export default function LoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={isRegisterMode ? 'Create a password (min 6 chars)' : 'Enter your password'}
-                className="w-full rounded-md border bg-background px-3 py-2 pr-10 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 pr-10 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 autoComplete={isRegisterMode ? 'new-password' : 'current-password'}
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
+                className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-400 hover:text-zinc-200"
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
@@ -321,11 +321,11 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
           >
             {isLoading ? (
               <>
-                <div className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 {isRegisterMode ? 'Creating account...' : 'Signing in...'}
               </>
             ) : isRegisterMode ? (
