@@ -41,6 +41,22 @@ async def run_migrations(conn) -> None:
     """Run schema migrations to add any missing columns."""
     from sqlalchemy import text
 
+    # Migration: Add role column to users table
+    user_role_migration = """
+    DO $$
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='role') THEN
+            ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'viewer';
+        END IF;
+    END $$;
+    """
+
+    try:
+        await conn.execute(text(user_role_migration))
+        logger.info("User role migration applied successfully")
+    except Exception as e:
+        logger.warning(f"User role migration failed: {e}")
+
     # Migration: Add new columns to simulation_templates for Phase 5
     migration_sql = """
     DO $$
