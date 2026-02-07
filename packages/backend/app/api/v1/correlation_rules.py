@@ -113,7 +113,7 @@ async def create_correlation_rule(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CorrelationRuleResponse:
     """Create a new correlation rule. Requires analyst role."""
-    email, _ = analyst
+    email = analyst.email
 
     db_rule = CorrelationRule(
         name=rule.name,

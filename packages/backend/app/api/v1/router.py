@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     auth,
+    sso_config,
     alerts,
     rules,
     converter,
@@ -33,14 +34,31 @@ from app.api.v1 import (
     ai,
     recommendations,
     simulations,
-    # SecOps Platform: Connector Framework & Workflows
+    # SecOps Platform: Connector Framework, Pipelines & Workflows
     connectors,
+    pipelines,
     workflows,
+    # New Features: Rule Management, Triage, Clustering, Escalation, On-Call, Trends
+    rule_versions,
+    rule_health,
+    triage,
+    nl_queries,
+    alert_clusters,
+    playbook_templates,
+    escalation,
+    oncall,
+    trend_analytics,
+    fonoster,
+    twilio_webhook,
+    # SOC Collaboration Features
+    shift_handoff,
+    presence,
 )
 
 api_router = APIRouter()
 
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(sso_config.router, prefix="/organizations/{organization_id}/sso", tags=["sso-config"])
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
 api_router.include_router(rules.router, prefix="/rules", tags=["rules"])
@@ -74,6 +92,24 @@ api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
 api_router.include_router(recommendations.router, prefix="/recommendations", tags=["recommendations"])
 api_router.include_router(simulations.router, prefix="/simulations", tags=["simulations"])
 
-# SecOps Platform: Connector Framework & Workflows
+# SecOps Platform: Connector Framework, Pipelines & Workflows
 api_router.include_router(connectors.router, prefix="/connectors", tags=["connectors"])
+api_router.include_router(pipelines.router, prefix="/pipelines", tags=["pipelines"])
 api_router.include_router(workflows.router, prefix="/workflows", tags=["workflows"])
+
+# New Features
+api_router.include_router(rule_versions.router, prefix="/rules", tags=["rule-versions"])
+api_router.include_router(rule_health.router, prefix="/rules/health", tags=["rule-health"])
+api_router.include_router(triage.router, prefix="/triage", tags=["triage"])
+api_router.include_router(nl_queries.router, prefix="/queries", tags=["nl-queries"])
+api_router.include_router(alert_clusters.router, prefix="/alert-clusters", tags=["alert-clusters"])
+api_router.include_router(playbook_templates.router, prefix="/playbooks", tags=["playbook-templates"])
+api_router.include_router(escalation.router, prefix="/escalation-policies", tags=["escalation"])
+api_router.include_router(oncall.router, prefix="/oncall", tags=["oncall"])
+api_router.include_router(trend_analytics.router, prefix="/analytics", tags=["trend-analytics"])
+api_router.include_router(fonoster.router, prefix="/fonoster", tags=["fonoster"])
+api_router.include_router(twilio_webhook.router, prefix="/twilio", tags=["twilio-webhook"])
+
+# SOC Collaboration Features
+api_router.include_router(shift_handoff.router, prefix="/shift-handoffs", tags=["shift-handoff"])
+api_router.include_router(presence.router, prefix="/presence", tags=["presence"])

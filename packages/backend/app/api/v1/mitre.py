@@ -1,13 +1,18 @@
 from typing import Annotated, Optional
 from uuid import UUID
+from datetime import datetime, timedelta
+import re
+import logging
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, MitreMapping, MitreTactic
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
+from app.db import get_db, MitreMapping, MitreTactic, NormalizedAlert
+from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep, OptionalPantherServiceDep
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -199,6 +204,296 @@ async def get_coverage(
             }
             for t in TACTICS_ORDER
         ],
+    }
+
+
+def parse_mitre_tags(tags: list[str]) -> tuple[list[str], list[str]]:
+    """
+    Parse MITRE ATT&CK tactics and techniques from Panther tags.
+
+    Common formats:
+    - attack.t1003, attack.T1003
+    - attack.execution, attack.initial_access
+    - MITRE:T1003
+    - t1003.001 (subtechnique)
+
+    Returns (tactics, techniques)
+    """
+    tactics = []
+    techniques = []
+
+    # Technique pattern: T followed by 4 digits, optionally with .xxx subtechnique
+    technique_pattern = re.compile(r'[Tt](\d{4})(?:\.(\d{3}))?')
+
+    # Map common tactic names
+    tactic_names = {
+        'reconnaissance': 'reconnaissance',
+        'resource_development': 'resource_development',
+        'initial_access': 'initial_access',
+        'execution': 'execution',
+        'persistence': 'persistence',
+        'privilege_escalation': 'privilege_escalation',
+        'defense_evasion': 'defense_evasion',
+        'credential_access': 'credential_access',
+        'discovery': 'discovery',
+        'lateral_movement': 'lateral_movement',
+        'collection': 'collection',
+        'command_and_control': 'command_and_control',
+        'exfiltration': 'exfiltration',
+        'impact': 'impact',
+    }
+
+    for tag in tags:
+        tag_lower = tag.lower().replace('-', '_').replace(' ', '_')
+
+        # Check for technique ID
+        match = technique_pattern.search(tag)
+        if match:
+            tech_id = f"T{match.group(1)}"
+            if match.group(2):
+                tech_id += f".{match.group(2)}"
+            if tech_id not in techniques:
+                techniques.append(tech_id)
+
+        # Check for tactic name (e.g., attack.execution)
+        for tactic_key, tactic_value in tactic_names.items():
+            if tactic_key in tag_lower:
+                if tactic_value not in tactics:
+                    tactics.append(tactic_value)
+                break
+
+    return tactics, techniques
+
+
+@router.get("/coverage/alerts")
+async def get_alert_coverage(
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    panther: OptionalPantherServiceDep,
+    days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
+) -> dict:
+    """
+    Get MITRE ATT&CK coverage from ingested alerts.
+
+    Aggregates MITRE tactics and techniques from:
+    1. Panther alerts (via API)
+    2. Normalized alerts from connectors (via database)
+
+    This shows what techniques are being detected in your environment.
+    """
+    since = datetime.utcnow() - timedelta(days=days)
+
+    # Aggregate by tactic and technique
+    tactic_data = {}
+    technique_data = {}
+    technique_alerts = {}  # technique_id -> list of alert info
+    total_alerts_with_mitre = 0
+
+    # 1. Fetch Panther alerts and extract MITRE data from tags
+    panther_alerts_processed = 0
+    try:
+        if panther:
+            logger.info(f"Fetching Panther alerts for MITRE coverage (last {days} days)")
+            alerts_list, _ = await panther.list_alerts(
+                created_after=since,
+                page_size=100,
+                max_items=500,  # Limit to avoid too many API calls
+            )
+
+            for alert in alerts_list:
+                tags = alert.get('tags', []) or []
+                if not tags:
+                    continue
+
+                tactics, techniques = parse_mitre_tags(tags)
+                if not tactics and not techniques:
+                    continue
+
+                panther_alerts_processed += 1
+                total_alerts_with_mitre += 1
+
+                rule_name = alert.get('title') or alert.get('detectionId') or "Unknown"
+                severity = str(alert.get('severity', 'medium')).lower()
+
+                # Process tactics
+                for tactic in tactics:
+                    tactic_lower = tactic.lower().replace(' ', '_').replace('-', '_')
+                    if tactic_lower not in tactic_data:
+                        tactic_data[tactic_lower] = {
+                            'alert_count': 0,
+                            'techniques': set(),
+                            'rules': set(),
+                        }
+                    tactic_data[tactic_lower]['alert_count'] += 1
+                    tactic_data[tactic_lower]['rules'].add(rule_name)
+                    for tech in techniques:
+                        tactic_data[tactic_lower]['techniques'].add(tech)
+
+                # Process techniques
+                for technique in techniques:
+                    if technique not in technique_data:
+                        technique_data[technique] = {
+                            'alert_count': 0,
+                            'rules': set(),
+                            'severities': {},
+                        }
+                    technique_data[technique]['alert_count'] += 1
+                    technique_data[technique]['rules'].add(rule_name)
+                    technique_data[technique]['severities'][severity] = technique_data[technique]['severities'].get(severity, 0) + 1
+
+                    # Track alerts per technique
+                    if technique not in technique_alerts:
+                        technique_alerts[technique] = []
+                    technique_alerts[technique].append({
+                        'rule_name': rule_name,
+                        'alert_count': 1,
+                        'severity': severity,
+                        'tactics': tactics,
+                        'source': 'panther',
+                    })
+
+            logger.info(f"Processed {panther_alerts_processed} Panther alerts with MITRE tags out of {len(alerts_list)} total")
+    except Exception as e:
+        logger.warning(f"Failed to fetch Panther alerts for MITRE coverage: {e}")
+
+    # 2. Get connector alerts with MITRE data from database
+    # Fetch alerts individually (can't GROUP BY JSON columns in PostgreSQL)
+    result = await db.execute(
+        select(
+            NormalizedAlert.mitre_tactics,
+            NormalizedAlert.mitre_techniques,
+            NormalizedAlert.rule_name,
+            NormalizedAlert.severity,
+        )
+        .where(
+            NormalizedAlert.organization_id == org_id,
+            NormalizedAlert.created_at_source >= since,
+        )
+    )
+
+    for row in result.all():
+        tactics = row[0] or []
+        techniques = row[1] or []
+        rule_name = row[2]
+        severity = row[3]
+        alert_count = 1  # Each row is one alert
+
+        if not tactics and not techniques:
+            continue
+
+        total_alerts_with_mitre += alert_count
+
+        # Process tactics
+        for tactic in tactics:
+            tactic_lower = tactic.lower().replace(' ', '_').replace('-', '_')
+            if tactic_lower not in tactic_data:
+                tactic_data[tactic_lower] = {
+                    'alert_count': 0,
+                    'techniques': set(),
+                    'rules': set(),
+                }
+            tactic_data[tactic_lower]['alert_count'] += alert_count
+            tactic_data[tactic_lower]['rules'].add(rule_name)
+            for tech in techniques:
+                tactic_data[tactic_lower]['techniques'].add(tech)
+
+        # Process techniques
+        for technique in techniques:
+            if technique not in technique_data:
+                technique_data[technique] = {
+                    'alert_count': 0,
+                    'rules': set(),
+                    'severities': {},
+                }
+            technique_data[technique]['alert_count'] += alert_count
+            technique_data[technique]['rules'].add(rule_name)
+            if severity:
+                sev = severity.lower()
+                technique_data[technique]['severities'][sev] = technique_data[technique]['severities'].get(sev, 0) + alert_count
+
+            # Track alerts per technique
+            if technique not in technique_alerts:
+                technique_alerts[technique] = []
+            technique_alerts[technique].append({
+                'rule_name': rule_name,
+                'alert_count': alert_count,
+                'severity': severity,
+                'tactics': tactics,
+            })
+
+    # Map tactics to standard MITRE names
+    tactic_mapping = {
+        'reconnaissance': 'reconnaissance',
+        'resource_development': 'resource_development',
+        'initial_access': 'initial_access',
+        'execution': 'execution',
+        'persistence': 'persistence',
+        'privilege_escalation': 'privilege_escalation',
+        'defense_evasion': 'defense_evasion',
+        'credential_access': 'credential_access',
+        'discovery': 'discovery',
+        'lateral_movement': 'lateral_movement',
+        'collection': 'collection',
+        'command_and_control': 'command_and_control',
+        'exfiltration': 'exfiltration',
+        'impact': 'impact',
+    }
+
+    # Build response with tactics in order
+    by_tactic = []
+    for tactic in TACTICS_ORDER:
+        tactic_key = tactic.value
+        data = tactic_data.get(tactic_key, {'alert_count': 0, 'techniques': set(), 'rules': set()})
+
+        # Get techniques for this tactic
+        techniques_list = []
+        for tech_id in data['techniques']:
+            tech_info = technique_data.get(tech_id, {})
+            techniques_list.append({
+                'technique_id': tech_id,
+                'technique_name': tech_id,  # Would need MITRE data to get the name
+                'alert_count': tech_info.get('alert_count', 0),
+                'rule_count': len(tech_info.get('rules', set())),
+                'severities': tech_info.get('severities', {}),
+            })
+
+        by_tactic.append({
+            'tactic': tactic_key,
+            'label': TACTIC_LABELS[tactic],
+            'alert_count': data['alert_count'],
+            'technique_count': len(data['techniques']),
+            'rule_count': len(data['rules']),
+            'techniques': sorted(techniques_list, key=lambda x: x['alert_count'], reverse=True),
+        })
+
+    # Top techniques by alert count
+    top_techniques = sorted(
+        [
+            {
+                'technique_id': tech_id,
+                'alert_count': info['alert_count'],
+                'rule_count': len(info['rules']),
+                'rules': list(info['rules'])[:5],  # Top 5 rules
+                'severities': info['severities'],
+            }
+            for tech_id, info in technique_data.items()
+        ],
+        key=lambda x: x['alert_count'],
+        reverse=True
+    )[:20]  # Top 20 techniques
+
+    return {
+        'period_days': days,
+        'total_alerts_with_mitre': total_alerts_with_mitre,
+        'total_techniques_detected': len(technique_data),
+        'total_tactics_detected': len([t for t in tactic_data.values() if t['alert_count'] > 0]),
+        'by_tactic': by_tactic,
+        'top_techniques': top_techniques,
+        'sources': {
+            'panther_alerts': panther_alerts_processed,
+            'connector_alerts': total_alerts_with_mitre - panther_alerts_processed,
+        },
     }
 
 

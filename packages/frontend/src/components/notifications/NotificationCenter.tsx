@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Bell,
+  Inbox,
   Check,
   CheckCheck,
   Trash2,
@@ -106,7 +106,7 @@ export default function NotificationCenter() {
       case 'playbook_failed':
         return <XCircle className="w-4 h-4 text-red-500" />
       default:
-        return <Bell className="w-4 h-4 text-gray-500" />
+        return <Inbox className="w-4 h-4 text-gray-500" />
     }
   }
 
@@ -149,7 +149,7 @@ export default function NotificationCenter() {
         className="relative p-2 hover:bg-accent rounded-md transition-colors"
         title="Notifications"
       >
-        <Bell className="w-5 h-5" />
+        <Inbox className="w-5 h-5" />
         {unreadCount > 0 && (
           <span className="absolute top-0 right-0 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
             {unreadCount > 9 ? '9+' : unreadCount}
@@ -266,7 +266,7 @@ export default function NotificationCenter() {
               </div>
             ) : (
               <div className="p-8 text-center text-gray-500 dark:text-gray-400">
-                <Bell className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <Inbox className="w-8 h-8 mx-auto mb-2 opacity-50" />
                 <p>No notifications</p>
               </div>
             )}

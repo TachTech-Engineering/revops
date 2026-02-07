@@ -30,3 +30,13 @@ export function getStatusColor(status: string): string {
   }
   return colors[status] || 'bg-gray-500/20 text-gray-400 border border-gray-500/30'
 }
+
+// Generate unique node ID for React Flow
+export function generateNodeId(): string {
+  return `node_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+// Generate unique edge ID for React Flow
+export function generateEdgeId(source: string, target: string): string {
+  return `edge_${source}_${target}_${Date.now()}`
+}

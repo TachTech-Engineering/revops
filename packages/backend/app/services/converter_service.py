@@ -3,6 +3,7 @@
 Converts detection rules from various formats into Panther Python detection rules:
 - Splunk SPL (Search Processing Language)
 - Google SecOps YARA-L
+- IBM QRadar AQL (Ariel Query Language)
 
 Supports both streaming rules (real-time detection) and scheduled rules
 (periodic aggregation queries).
@@ -13,12 +14,14 @@ from enum import Enum
 
 from app.services.spl_enhanced_converter import EnhancedSPLConverter, RuleType
 from app.services.yaral_converter import YARALConverter, yaral_converter
+from app.services.aql_converter import AQLConverter, AQLTargetFormat, aql_converter
 
 
 class SourceFormat(str, Enum):
     """Supported source formats for conversion."""
     SPL = "spl"
     YARAL = "yaral"
+    AQL = "aql"
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,7 @@ class ConverterService:
             self._converter = None
         self._enhanced_converter = EnhancedSPLConverter()
         self._yaral_converter = yaral_converter
+        self._aql_converter = aql_converter
 
     async def convert(
         self,
@@ -59,22 +63,28 @@ class ConverterService:
         class_name: Optional[str] = None,
         severity: Optional[str] = None,
         source_format: SourceFormat = SourceFormat.SPL,
+        target_format: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Convert a detection rule to a Panther rule.
 
         Args:
-            spl: The source rule (SPL query or YARA-L rule)
+            spl: The source rule (SPL query, YARA-L rule, or AQL query)
             rule_id: Identifier for the generated rule
             class_name: Optional class name for the rule
             severity: Optional severity level
-            source_format: Source format (spl or yaral)
+            source_format: Source format (spl, yaral, or aql)
+            target_format: Target output format (python or sql) - only used for AQL
 
         Returns the generated rule with source code and metadata.
         """
         # Handle YARA-L conversion
         if source_format == SourceFormat.YARAL:
             return await self._convert_yaral(spl, rule_id, class_name, severity)
+
+        # Handle AQL conversion
+        if source_format == SourceFormat.AQL:
+            return await self._convert_aql(spl, rule_id, class_name, severity, target_format)
 
         # SPL conversion
         sdk_result = None
@@ -376,6 +386,75 @@ class ConverterService:
                 "error": str(e),
             }
 
+    async def _convert_aql(
+        self,
+        aql: str,
+        rule_id: str,
+        class_name: Optional[str] = None,
+        severity: Optional[str] = None,
+        target_format: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Convert an IBM QRadar AQL query to Python/Panther or SQL."""
+        try:
+            # Determine target format
+            aql_target = AQLTargetFormat.SQL if target_format == "sql" else AQLTargetFormat.PYTHON
+
+            result = self._aql_converter.convert(
+                aql=aql,
+                rule_id=rule_id,
+                class_name=class_name,
+                severity=severity,
+                target_format=aql_target,
+            )
+
+            return {
+                "sourceCode": result.source_code,
+                "ruleId": result.rule_id,
+                "className": result.class_name,
+                "logTypes": result.log_types,
+                "severity": result.severity,
+                "isThresholdRule": result.is_aggregation_rule,
+                "threshold": None,
+                "todos": result.todos,
+                "testCode": "",
+                "recommendedType": "SCHEDULED" if result.is_aggregation_rule else "STREAMING",
+                "recommendationReasons": [
+                    "Aggregation query detected" if result.is_aggregation_rule else "Simple filter query"
+                ],
+                "targetFormat": result.target_format.value,
+                "originalAql": result.original_aql,
+            }
+        except Exception as e:
+            raise ValueError(f"AQL conversion error: {str(e)}") from e
+
+    async def validate_aql(self, aql: str) -> dict[str, Any]:
+        """Validate AQL syntax."""
+        try:
+            parsed = self._aql_converter.parse(aql)
+            return {
+                "valid": True,
+                "fromTable": parsed.from_table,
+                "selectFields": parsed.select_fields,
+                "isAggregation": parsed.is_aggregation_query,
+                "recommendedType": "SCHEDULED" if parsed.is_aggregation_query else "STREAMING",
+                "recommendationReasons": [
+                    "Contains aggregation functions" if parsed.is_aggregation_query else "Simple filter query"
+                ],
+                "parseDetails": {
+                    "whereConditions": len(parsed.where_conditions),
+                    "groupBy": parsed.group_by,
+                    "orderBy": parsed.order_by,
+                    "timeRange": parsed.time_range,
+                    "referenceSets": parsed.reference_sets,
+                    "qradarFunctions": parsed.qradar_functions,
+                },
+            }
+        except Exception as e:
+            return {
+                "valid": False,
+                "error": str(e),
+            }
+
     def get_supported_formats(self) -> list[dict[str, Any]]:
         """Get list of supported source formats."""
         return [
@@ -385,6 +464,7 @@ class ConverterService:
                 "description": "Splunk Search Processing Language queries",
                 "fileExtensions": [".spl", ".txt"],
                 "example": 'index=main sourcetype=access_combined status>=400 | stats count by src_ip',
+                "targetFormats": ["python"],
             },
             {
                 "id": "yaral",
@@ -401,5 +481,14 @@ class ConverterService:
   condition:
     $login
 }''',
+                "targetFormats": ["python"],
+            },
+            {
+                "id": "aql",
+                "name": "IBM QRadar AQL",
+                "description": "Ariel Query Language from IBM QRadar SIEM",
+                "fileExtensions": [".aql", ".txt"],
+                "example": "SELECT sourceip, destinationip, username, COUNT(*) FROM events WHERE category = 'Authentication' AND LOGSOURCETYPENAME(logsourceid) ILIKE '%firewall%' GROUP BY sourceip, destinationip, username LAST 24 HOURS",
+                "targetFormats": ["python", "sql"],
             },
         ]

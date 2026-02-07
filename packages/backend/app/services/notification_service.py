@@ -1,6 +1,6 @@
 import json
 import asyncio
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, Set
 import logging
 
 import redis.asyncio as redis
@@ -19,7 +19,10 @@ class NotificationService:
     def __init__(self):
         self._redis: Optional[redis.Redis] = None
         self._pubsub: Optional[redis.client.PubSub] = None
-        self._subscribers: dict[str, list[Callable]] = {}
+        self._subscribers: dict[str, Set[Callable]] = {}
+        self._listen_task: Optional[asyncio.Task] = None
+        self._lock = asyncio.Lock()
+        self._started = False
 
     async def connect(self) -> None:
         """Connect to Redis."""
@@ -33,6 +36,13 @@ class NotificationService:
 
     async def disconnect(self) -> None:
         """Disconnect from Redis."""
+        if self._listen_task:
+            self._listen_task.cancel()
+            try:
+                await self._listen_task
+            except asyncio.CancelledError:
+                pass
+            self._listen_task = None
         if self._pubsub:
             await self._pubsub.close()
             self._pubsub = None
@@ -40,6 +50,7 @@ class NotificationService:
             await self._redis.close()
             self._redis = None
             logger.info("Disconnected from Redis")
+        self._started = False
 
     async def publish_alert(self, alert_data: dict) -> None:
         """Publish a new alert notification."""
@@ -64,37 +75,67 @@ class NotificationService:
 
     async def subscribe(self, channel: str, callback: Callable[[dict], Any]) -> None:
         """Subscribe to a channel with a callback."""
-        await self.connect()
-        if self._redis and not self._pubsub:
-            self._pubsub = self._redis.pubsub()
+        async with self._lock:
+            await self.connect()
 
-        if channel not in self._subscribers:
-            self._subscribers[channel] = []
-            if self._pubsub:
-                await self._pubsub.subscribe(channel)
+            if self._redis and not self._pubsub:
+                self._pubsub = self._redis.pubsub()
 
-        self._subscribers[channel].append(callback)
+            if channel not in self._subscribers:
+                self._subscribers[channel] = set()
+                if self._pubsub:
+                    await self._pubsub.subscribe(channel)
 
-    async def listen(self) -> None:
-        """Listen for messages on subscribed channels."""
+            self._subscribers[channel].add(callback)
+
+            # Start the listener if not already running
+            if not self._started and self._pubsub:
+                self._started = True
+                self._listen_task = asyncio.create_task(self._listen_loop())
+                logger.info("Started global Redis listener task")
+
+    async def unsubscribe(self, channel: str, callback: Callable[[dict], Any]) -> None:
+        """Unsubscribe a callback from a channel."""
+        async with self._lock:
+            if channel in self._subscribers:
+                self._subscribers[channel].discard(callback)
+                # If no more subscribers for this channel, unsubscribe from Redis
+                if not self._subscribers[channel] and self._pubsub:
+                    await self._pubsub.unsubscribe(channel)
+                    del self._subscribers[channel]
+
+    async def _listen_loop(self) -> None:
+        """Internal listener loop - runs as single background task."""
         if not self._pubsub:
             return
 
-        async for message in self._pubsub.listen():
-            if message["type"] == "message":
-                channel = message["channel"]
-                try:
-                    data = json.loads(message["data"])
-                    if channel in self._subscribers:
-                        for callback in self._subscribers[channel]:
+        logger.info("Redis listener loop started")
+        try:
+            async for message in self._pubsub.listen():
+                if message["type"] == "message":
+                    channel = message["channel"]
+                    try:
+                        data = json.loads(message["data"])
+                        # Get subscribers snapshot under lock
+                        async with self._lock:
+                            callbacks = list(self._subscribers.get(channel, set()))
+
+                        # Call callbacks outside lock
+                        for callback in callbacks:
                             try:
                                 result = callback(data)
                                 if asyncio.iscoroutine(result):
                                     await result
                             except Exception as e:
                                 logger.error(f"Error in subscriber callback: {e}")
-                except json.JSONDecodeError:
-                    logger.error(f"Invalid JSON in message: {message['data']}")
+                    except json.JSONDecodeError:
+                        logger.error(f"Invalid JSON in message: {message['data']}")
+        except asyncio.CancelledError:
+            logger.info("Redis listener loop cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Redis listener loop error: {e}")
+            self._started = False
 
 
 # Global notification service instance

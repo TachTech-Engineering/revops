@@ -69,7 +69,7 @@ async def list_dashboards(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[DashboardResponse]:
     """List all dashboards accessible to the current user."""
-    email, _ = user
+    email = user.email
 
     # Get user's own dashboards and shared dashboards within the organization
     result = await db.execute(
@@ -179,7 +179,7 @@ async def get_dashboard(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> DashboardResponse:
     """Get a dashboard by ID."""
-    email, _ = user
+    email = user.email
 
     result = await db.execute(
         select(CustomDashboard).where(

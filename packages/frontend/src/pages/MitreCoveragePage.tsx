@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Shield, Plus, Search, X, ChevronDown, ChevronRight, Edit, Trash2 } from 'lucide-react'
+import { Shield, Plus, Search, X, ChevronDown, ChevronRight, Edit, Trash2, AlertTriangle, Activity } from 'lucide-react'
 import {
   useGetMitreCoverageQuery,
+  useGetMitreAlertCoverageQuery,
   useGetMitreTacticsQuery,
   useGetMitreMappingsQuery,
   useCreateMitreMappingMutation,
@@ -11,10 +12,16 @@ import {
   type MitreMappingCreate,
   type MitreTactic,
   type TacticCoverage,
+  type AlertTacticCoverage,
 } from '../api/pantherApi'
 import { useListRulesQuery } from '../api/pantherApi'
+import { cn } from '../lib/utils'
+
+type CoverageTab = 'alerts' | 'rules'
 
 export default function MitreCoveragePage() {
+  const [activeTab, setActiveTab] = useState<CoverageTab>('alerts')
+  const [alertDays, setAlertDays] = useState(30)
   const [selectedTactic, setSelectedTactic] = useState<string | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [editingMapping, setEditingMapping] = useState<MitreMappingResponse | null>(null)
@@ -22,6 +29,7 @@ export default function MitreCoveragePage() {
   const [expandedTactics, setExpandedTactics] = useState<Set<string>>(new Set())
 
   const { data: coverage, isLoading: coverageLoading } = useGetMitreCoverageQuery()
+  const { data: alertCoverage, isLoading: alertCoverageLoading } = useGetMitreAlertCoverageQuery({ days: alertDays })
   const { data: tactics } = useGetMitreTacticsQuery()
   const { data: mappings, isLoading: mappingsLoading } = useGetMitreMappingsQuery({
     tactic: selectedTactic || undefined,
@@ -88,7 +96,9 @@ export default function MitreCoveragePage() {
     return 'text-green-700 dark:text-green-400'
   }
 
-  if (coverageLoading) {
+  const isLoading = activeTab === 'alerts' ? alertCoverageLoading : coverageLoading
+
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500" />
@@ -107,40 +117,259 @@ export default function MitreCoveragePage() {
               MITRE ATT&CK Coverage
             </h1>
             <p className="text-gray-600 dark:text-gray-400">
-              Map detection rules to MITRE ATT&CK techniques
+              Track MITRE coverage from alerts and rule mappings
             </p>
           </div>
         </div>
+        {activeTab === 'rules' && (
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Add Mapping
+          </button>
+        )}
+        {activeTab === 'alerts' && (
+          <select
+            value={alertDays}
+            onChange={(e) => setAlertDays(Number(e.target.value))}
+            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+          >
+            <option value={7}>Last 7 days</option>
+            <option value={14}>Last 14 days</option>
+            <option value={30}>Last 30 days</option>
+            <option value={90}>Last 90 days</option>
+          </select>
+        )}
+      </div>
+
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-gray-200 dark:border-gray-700">
         <button
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          onClick={() => setActiveTab('alerts')}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors',
+            activeTab === 'alerts'
+              ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+              : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'
+          )}
         >
-          <Plus className="w-4 h-4" />
-          Add Mapping
+          <Activity className="w-4 h-4" />
+          Alert Coverage
+        </button>
+        <button
+          onClick={() => setActiveTab('rules')}
+          className={cn(
+            'flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors',
+            activeTab === 'rules'
+              ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+              : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400'
+          )}
+        >
+          <Shield className="w-4 h-4" />
+          Rule Mappings
         </button>
       </div>
 
-      {/* Summary Stats */}
-      {coverage && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-            <div className="text-2xl font-bold text-blue-600">{coverage.total_techniques}</div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">Techniques Covered</div>
-          </div>
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-            <div className="text-2xl font-bold text-green-600">{coverage.total_mapped_rules}</div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">Rules Mapped</div>
-          </div>
-          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-            <div className="text-2xl font-bold text-purple-600">
-              {coverage.by_tactic.filter((t) => t.technique_count > 0).length}
+      {/* Alert Coverage Tab */}
+      {activeTab === 'alerts' && alertCoverage && (
+        <>
+          {/* Alert Coverage Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+              <div className="text-2xl font-bold text-orange-600">{alertCoverage.total_alerts_with_mitre.toLocaleString()}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">Alerts with MITRE Data</div>
             </div>
-            <div className="text-sm text-gray-600 dark:text-gray-400">
-              Tactics with Coverage (of {coverage.by_tactic.length})
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+              <div className="text-2xl font-bold text-blue-600">{alertCoverage.total_techniques_detected}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">Techniques Detected</div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+              <div className="text-2xl font-bold text-purple-600">{alertCoverage.total_tactics_detected}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">Tactics Detected</div>
+            </div>
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+              <div className="text-2xl font-bold text-gray-600">{alertCoverage.period_days}</div>
+              <div className="text-sm text-gray-600 dark:text-gray-400">Day Period</div>
             </div>
           </div>
-        </div>
+
+          {/* Alert Coverage Matrix */}
+          <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Detected Techniques by Tactic
+              </h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Based on alerts ingested from your connected data sources
+              </p>
+            </div>
+            <div className="p-4">
+              {alertCoverage.by_tactic.map((tactic: AlertTacticCoverage) => (
+                <div key={tactic.tactic} className="mb-2">
+                  <button
+                    onClick={() => toggleTacticExpansion(tactic.tactic)}
+                    className={cn(
+                      'w-full flex items-center justify-between p-3 rounded-lg transition-colors',
+                      tactic.alert_count > 0
+                        ? 'bg-orange-50 dark:bg-orange-900/20'
+                        : 'bg-gray-100 dark:bg-gray-800'
+                    )}
+                  >
+                    <div className="flex items-center gap-3">
+                      {expandedTactics.has(tactic.tactic) ? (
+                        <ChevronDown className="w-5 h-5 text-gray-500" />
+                      ) : (
+                        <ChevronRight className="w-5 h-5 text-gray-500" />
+                      )}
+                      <span className="font-medium text-gray-900 dark:text-white">
+                        {tactic.label}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-4 text-sm">
+                      <span className={cn(
+                        'font-semibold',
+                        tactic.alert_count > 0 ? 'text-orange-600' : 'text-gray-400'
+                      )}>
+                        {tactic.alert_count.toLocaleString()} alerts
+                      </span>
+                      <span className={cn(
+                        tactic.technique_count > 0 ? 'text-blue-600' : 'text-gray-400'
+                      )}>
+                        {tactic.technique_count} techniques
+                      </span>
+                    </div>
+                  </button>
+
+                  {expandedTactics.has(tactic.tactic) && tactic.techniques.length > 0 && (
+                    <div className="ml-8 mt-2 space-y-1">
+                      {tactic.techniques.map((tech) => (
+                        <div
+                          key={tech.technique_id}
+                          className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700/50 rounded"
+                        >
+                          <div>
+                            <span className="font-mono text-sm text-blue-600 dark:text-blue-400 mr-2">
+                              {tech.technique_id}
+                            </span>
+                            <span className="text-gray-900 dark:text-white">{tech.technique_name}</span>
+                          </div>
+                          <div className="flex items-center gap-4 text-sm">
+                            <span className="text-orange-600 font-medium">
+                              {tech.alert_count.toLocaleString()} alerts
+                            </span>
+                            <span className="text-gray-500">
+                              {tech.rule_count} rules
+                            </span>
+                            {tech.severities && Object.keys(tech.severities).length > 0 && (
+                              <div className="flex gap-1">
+                                {tech.severities.critical && (
+                                  <span className="px-1.5 py-0.5 text-xs bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 rounded">
+                                    {tech.severities.critical} crit
+                                  </span>
+                                )}
+                                {tech.severities.high && (
+                                  <span className="px-1.5 py-0.5 text-xs bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400 rounded">
+                                    {tech.severities.high} high
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Top Techniques */}
+          {alertCoverage.top_techniques.length > 0 && (
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Top Detected Techniques
+                </h2>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                  <thead className="bg-gray-50 dark:bg-gray-900/50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Technique</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Alerts</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rules</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Top Triggering Rules</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                    {alertCoverage.top_techniques.slice(0, 10).map((tech) => (
+                      <tr key={tech.technique_id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                        <td className="px-4 py-3">
+                          <span className="font-mono text-sm text-blue-600 dark:text-blue-400">
+                            {tech.technique_id}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="font-semibold text-orange-600">
+                            {tech.alert_count.toLocaleString()}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 dark:text-gray-400">
+                          {tech.rule_count}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {tech.rules.slice(0, 3).map((rule, idx) => (
+                              <span
+                                key={idx}
+                                className="px-2 py-0.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded truncate max-w-[200px]"
+                                title={rule}
+                              >
+                                {rule}
+                              </span>
+                            ))}
+                            {tech.rules.length > 3 && (
+                              <span className="text-xs text-gray-500">+{tech.rules.length - 3} more</span>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
       )}
+
+      {/* Rule Mappings Tab - Original Content */}
+      {activeTab === 'rules' && (
+        <>
+          {/* Summary Stats */}
+          {coverage && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                <div className="text-2xl font-bold text-blue-600">{coverage.total_techniques}</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">Techniques Covered</div>
+              </div>
+              <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                <div className="text-2xl font-bold text-green-600">{coverage.total_mapped_rules}</div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">Rules Mapped</div>
+              </div>
+              <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                <div className="text-2xl font-bold text-purple-600">
+                  {coverage.by_tactic.filter((t) => t.technique_count > 0).length}
+                </div>
+                <div className="text-sm text-gray-600 dark:text-gray-400">
+                  Tactics with Coverage (of {coverage.by_tactic.length})
+                </div>
+              </div>
+            </div>
+          )}
 
       {/* Coverage Matrix */}
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
@@ -333,6 +562,8 @@ export default function MitreCoveragePage() {
           </div>
         )}
       </div>
+        </>
+      )}
 
       {/* Create/Edit Modal */}
       {(showCreateModal || editingMapping) && (

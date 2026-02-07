@@ -7,7 +7,6 @@ import {
   Menu,
   X,
   AlertTriangle,
-  Briefcase,
   BarChart3,
   Settings,
   ChevronRight,
@@ -31,7 +30,6 @@ const primaryItems: NavItem[] = [
 ]
 
 const secondaryItems: NavItem[] = [
-  { path: '/cases', label: 'Cases', icon: Briefcase },
   { path: '/rules', label: 'Rules', icon: Shield },
   { path: '/analytics', label: 'Analytics', icon: BarChart3 },
   { path: '/mitre', label: 'MITRE', icon: Target },

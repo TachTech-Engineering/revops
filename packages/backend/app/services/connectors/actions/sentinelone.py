@@ -28,10 +28,10 @@ class SentinelOneActionConnector(ActionConnector):
     @classmethod
     def get_metadata(cls) -> ConnectorMetadata:
         return ConnectorMetadata(
-            connector_type="sentinelone",
+            connector_type="sentinelone_action",
             category=ConnectorCategory.ACTION,
-            display_name="SentinelOne",
-            description="SentinelOne - Autonomous endpoint protection",
+            display_name="SentinelOne (Actions)",
+            description="SentinelOne - EDR response actions (isolate, mitigate, scan)",
             icon="sentinelone",
             config_schema={
                 "type": "object",

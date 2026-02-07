@@ -308,17 +308,43 @@ def get_connector_registry() -> ConnectorRegistry:
 def _register_all_connectors(registry: ConnectorRegistry) -> None:
     """Register all available connector implementations."""
     # Import and register data sources
+    # SIEM
     from app.services.connectors.data_sources.panther import PantherDataSourceConnector
     from app.services.connectors.data_sources.google_secops import GoogleSecOpsConnector
     from app.services.connectors.data_sources.splunk import SplunkConnector
     from app.services.connectors.data_sources.sentinel import SentinelConnector
     from app.services.connectors.data_sources.elastic import ElasticConnector
+    # EDR
+    from app.services.connectors.data_sources.crowdstrike_falcon import CrowdStrikeFalconConnector
+    from app.services.connectors.data_sources.sentinelone import SentinelOneConnector
+    from app.services.connectors.data_sources.microsoft_defender import MicrosoftDefenderConnector
+    # Cloud Security
+    from app.services.connectors.data_sources.aws_security_hub import AWSSecurityHubConnector
+    from app.services.connectors.data_sources.gcp_security_command_center import GCPSecurityCommandCenterConnector
+    # Identity
+    from app.services.connectors.data_sources.okta import OktaConnector
+    from app.services.connectors.data_sources.entra_id import EntraIDConnector
+    # Network Security
+    from app.services.connectors.data_sources.cloudflare import CloudflareConnector
 
+    # SIEM
     registry.register_data_source("panther", PantherDataSourceConnector)
     registry.register_data_source("google_secops", GoogleSecOpsConnector)
     registry.register_data_source("splunk", SplunkConnector)
     registry.register_data_source("sentinel", SentinelConnector)
     registry.register_data_source("elastic", ElasticConnector)
+    # EDR
+    registry.register_data_source("crowdstrike_falcon", CrowdStrikeFalconConnector)
+    registry.register_data_source("sentinelone", SentinelOneConnector)
+    registry.register_data_source("microsoft_defender", MicrosoftDefenderConnector)
+    # Cloud Security
+    registry.register_data_source("aws_security_hub", AWSSecurityHubConnector)
+    registry.register_data_source("gcp_scc", GCPSecurityCommandCenterConnector)
+    # Identity
+    registry.register_data_source("okta", OktaConnector)
+    registry.register_data_source("entra_id", EntraIDConnector)
+    # Network Security
+    registry.register_data_source("cloudflare", CloudflareConnector)
 
     # Import and register action connectors
     from app.services.connectors.actions.jira import JiraActionConnector
@@ -336,7 +362,7 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     registry.register_action("pagerduty", PagerDutyActionConnector)
     registry.register_action("teams", TeamsActionConnector)
     registry.register_action("crowdstrike", CrowdStrikeActionConnector)
-    registry.register_action("sentinelone", SentinelOneActionConnector)
+    registry.register_action("sentinelone_action", SentinelOneActionConnector)
     registry.register_action("servicenow", ServiceNowActionConnector)
     registry.register_action("webhook", WebhookActionConnector)
     registry.register_action("http", HTTPActionConnector)

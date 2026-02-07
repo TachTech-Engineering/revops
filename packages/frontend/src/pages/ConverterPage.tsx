@@ -1,7 +1,8 @@
 import { useState, useRef } from 'react'
-import { ArrowRightLeft, Copy, Check, AlertTriangle, Upload, FileText, Download, Trash2, Info, ChevronDown, ChevronRight, Code2, Database } from 'lucide-react'
+import { ArrowRightLeft, Copy, Check, AlertTriangle, Upload, FileText, Download, Trash2, Info, ChevronDown, ChevronRight, Code2, Database, Sparkles, Lightbulb, Wand2, Bot } from 'lucide-react'
 import Editor from '@monaco-editor/react'
-import { useConvertSPLMutation } from '../api/pantherApi'
+import ReactMarkdown from 'react-markdown'
+import { useConvertSPLMutation, useGetAIConverterProvidersQuery, useAiConvertRuleMutation, useAiExplainRuleMutation, useAiEnhanceRuleMutation } from '../api/pantherApi'
 import { getSeverityColor, cn } from '../lib/utils'
 
 interface BulkRule {
@@ -97,6 +98,22 @@ export default function ConverterPage() {
 
   const [convertSPL, { data: result, isLoading, error }] = useConvertSPLMutation()
 
+  // AI state
+  const [aiProvider, setAiProvider] = useState<string>('claude')
+  const [showAIPanel, setShowAIPanel] = useState(false)
+  const [aiExplanation, setAiExplanation] = useState<string | null>(null)
+  const [aiSuggestions, setAiSuggestions] = useState<string | null>(null)
+  const [aiConvertedCode, setAiConvertedCode] = useState<string | null>(null)
+
+  // AI hooks
+  const { data: aiProvidersData } = useGetAIConverterProvidersQuery()
+  const [aiConvert, { isLoading: isAiConverting }] = useAiConvertRuleMutation()
+  const [aiExplain, { isLoading: isAiExplaining }] = useAiExplainRuleMutation()
+  const [aiEnhance, { isLoading: isAiEnhancing }] = useAiEnhanceRuleMutation()
+
+  const aiProviders = aiProvidersData?.providers || []
+  const hasAIConfigured = aiProviders.length > 0
+
   const handleConvert = async () => {
     if (!splQuery.trim()) return
     try {
@@ -117,6 +134,66 @@ export default function ConverterPage() {
     await navigator.clipboard.writeText(textToCopy)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
+  }
+
+  // AI Handler Functions
+  const handleAIConvert = async () => {
+    if (!splQuery.trim()) return
+    setAiConvertedCode(null)
+    try {
+      const res = await aiConvert({
+        source_code: splQuery,
+        source_format: sourceFormat,
+        target_format: 'panther',
+        provider: aiProvider,
+      }).unwrap()
+      if (res.success) {
+        setAiConvertedCode(res.converted_code)
+        setShowAIPanel(true)
+      }
+    } catch (err) {
+      console.error('AI conversion failed:', err)
+    }
+  }
+
+  const handleAIExplain = async () => {
+    const codeToExplain = result?.sourceCode || aiConvertedCode || splQuery
+    if (!codeToExplain.trim()) return
+    setAiExplanation(null)
+    try {
+      const format = result?.sourceCode || aiConvertedCode ? 'panther' : sourceFormat
+      const res = await aiExplain({
+        source_code: codeToExplain,
+        source_format: format,
+        provider: aiProvider,
+      }).unwrap()
+      if (res.success) {
+        setAiExplanation(res.explanation)
+        setShowAIPanel(true)
+      }
+    } catch (err) {
+      console.error('AI explanation failed:', err)
+    }
+  }
+
+  const handleAIEnhance = async () => {
+    const codeToEnhance = result?.sourceCode || aiConvertedCode || splQuery
+    if (!codeToEnhance.trim()) return
+    setAiSuggestions(null)
+    try {
+      const format = result?.sourceCode || aiConvertedCode ? 'panther' : sourceFormat
+      const res = await aiEnhance({
+        source_code: codeToEnhance,
+        source_format: format,
+        provider: aiProvider,
+      }).unwrap()
+      if (res.success) {
+        setAiSuggestions(res.suggestions)
+        setShowAIPanel(true)
+      }
+    } catch (err) {
+      console.error('AI enhancement failed:', err)
+    }
   }
 
   const parseFile = (content: string, format: FileFormat): BulkRule[] => {
@@ -522,6 +599,58 @@ export default function ConverterPage() {
                 {isLoading ? 'Converting...' : `Convert ${sourceFormat === 'spl' ? 'SPL' : 'YARA-L'} to Panther Rule`}
               </button>
             </div>
+
+            {/* AI Assistant Section */}
+            {hasAIConfigured && (
+              <div className="rounded-lg border bg-gradient-to-br from-purple-500/10 to-blue-500/10 p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles size={18} className="text-purple-400" />
+                    <h2 className="font-semibold">AI Assistant</h2>
+                  </div>
+                  <select
+                    value={aiProvider}
+                    onChange={(e) => setAiProvider(e.target.value)}
+                    className="rounded-md border bg-background px-3 py-1.5 text-sm"
+                  >
+                    {aiProviders.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <p className="text-sm text-muted-foreground">
+                  Use AI to convert complex rules, explain detection logic, or get improvement suggestions.
+                </p>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={handleAIConvert}
+                    disabled={isAiConverting || !splQuery.trim()}
+                    className="flex items-center justify-center gap-2 px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-sm font-medium disabled:opacity-50 transition-colors"
+                  >
+                    <Wand2 size={14} />
+                    {isAiConverting ? 'Converting...' : 'AI Convert'}
+                  </button>
+                  <button
+                    onClick={handleAIExplain}
+                    disabled={isAiExplaining || (!splQuery.trim() && !result?.sourceCode)}
+                    className="flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium disabled:opacity-50 transition-colors"
+                  >
+                    <Lightbulb size={14} />
+                    {isAiExplaining ? 'Explaining...' : 'Explain'}
+                  </button>
+                  <button
+                    onClick={handleAIEnhance}
+                    disabled={isAiEnhancing || (!splQuery.trim() && !result?.sourceCode)}
+                    className="flex items-center justify-center gap-2 px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md text-sm font-medium disabled:opacity-50 transition-colors"
+                  >
+                    <Bot size={14} />
+                    {isAiEnhancing ? 'Analyzing...' : 'Enhance'}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Single Output */}
@@ -674,10 +803,90 @@ export default function ConverterPage() {
               </>
             )}
 
-            {!result && !error && (
+            {!result && !error && !aiConvertedCode && (
               <div className="rounded-lg border bg-background p-6 text-center text-muted-foreground">
                 <ArrowRightLeft size={48} className="mx-auto mb-4 opacity-20" />
                 <p>Enter {sourceFormat === 'spl' ? 'an SPL query' : 'a YARA-L rule'} and click Convert to generate a Panther detection rule</p>
+              </div>
+            )}
+
+            {/* AI Results Panel */}
+            {showAIPanel && (aiConvertedCode || aiExplanation || aiSuggestions) && (
+              <div className="space-y-4">
+                {/* AI Converted Code */}
+                {aiConvertedCode && (
+                  <div className="rounded-lg border bg-card overflow-hidden">
+                    <div className="flex items-center justify-between border-b border-border px-4 py-2 bg-gradient-to-r from-purple-500/20 to-blue-500/20">
+                      <div className="flex items-center gap-2">
+                        <Wand2 size={16} className="text-purple-400" />
+                        <h3 className="font-semibold text-sm text-foreground">AI Generated Code</h3>
+                      </div>
+                      <button
+                        onClick={() => handleCopy(aiConvertedCode)}
+                        className="flex items-center gap-1 px-2 py-1 text-sm hover:bg-accent rounded transition-colors"
+                      >
+                        {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+                        {copied ? 'Copied!' : 'Copy'}
+                      </button>
+                    </div>
+                    <Editor
+                      height="350px"
+                      defaultLanguage="python"
+                      value={aiConvertedCode}
+                      theme="vs-dark"
+                      options={{
+                        readOnly: true,
+                        minimap: { enabled: false },
+                        fontSize: 13,
+                        lineNumbers: 'on',
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* AI Explanation */}
+                {aiExplanation && (
+                  <div className="rounded-lg border bg-card overflow-hidden">
+                    <div className="flex items-center justify-between border-b border-border px-4 py-2 bg-gradient-to-r from-blue-500/20 to-cyan-500/20">
+                      <div className="flex items-center gap-2">
+                        <Lightbulb size={16} className="text-blue-400" />
+                        <h3 className="font-semibold text-sm text-foreground">Rule Explanation</h3>
+                      </div>
+                      <button
+                        onClick={() => setAiExplanation(null)}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <ChevronDown size={16} />
+                      </button>
+                    </div>
+                    <div className="p-4 prose prose-sm prose-invert max-w-none">
+                      <ReactMarkdown>{aiExplanation}</ReactMarkdown>
+                    </div>
+                  </div>
+                )}
+
+                {/* AI Enhancement Suggestions */}
+                {aiSuggestions && (
+                  <div className="rounded-lg border bg-card overflow-hidden">
+                    <div className="flex items-center justify-between border-b border-border px-4 py-2 bg-gradient-to-r from-green-500/20 to-emerald-500/20">
+                      <div className="flex items-center gap-2">
+                        <Bot size={16} className="text-green-400" />
+                        <h3 className="font-semibold text-sm text-foreground">Improvement Suggestions</h3>
+                      </div>
+                      <button
+                        onClick={() => setAiSuggestions(null)}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <ChevronDown size={16} />
+                      </button>
+                    </div>
+                    <div className="p-4 prose prose-sm prose-invert max-w-none">
+                      <ReactMarkdown>{aiSuggestions}</ReactMarkdown>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

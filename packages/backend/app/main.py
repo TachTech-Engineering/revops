@@ -1,13 +1,16 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.v1.router import api_router
 from app.config import settings
 from app.db import init_db
+from app.jobs.connector_sync import start_connector_sync_scheduler, stop_connector_sync_scheduler
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -23,9 +26,21 @@ async def lifespan(app: FastAPI):
     logger.info("Initializing database...")
     await init_db()
     logger.info("Database initialized")
+
+    # Start connector sync scheduler in background
+    sync_task = asyncio.create_task(start_connector_sync_scheduler())
+    logger.info("Connector sync scheduler started")
+
     yield
+
     # Shutdown
     logger.info("Shutting down...")
+    stop_connector_sync_scheduler()
+    sync_task.cancel()
+    try:
+        await sync_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(
@@ -47,6 +62,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+# Session middleware for OAuth state management
+app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 
 # Routes
 app.include_router(api_router, prefix="/api/v1")

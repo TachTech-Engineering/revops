@@ -1,0 +1,360 @@
+"""
+CrowdStrike Falcon Data Source Connector
+
+Integrates with CrowdStrike Falcon to fetch and normalize detections/alerts.
+"""
+
+import time
+import uuid
+from datetime import datetime
+from typing import Any, Optional
+
+import httpx
+
+from app.db.models import NormalizedAlert, ConnectorCategory
+from app.services.connectors.base import (
+    DataSourceConnector,
+    ConnectorMetadata,
+    ConnectionTestResult,
+)
+
+
+class CrowdStrikeFalconConnector(DataSourceConnector):
+    """
+    CrowdStrike Falcon data source connector.
+
+    Fetches detections from CrowdStrike Falcon and normalizes them
+    to the unified alert schema.
+    """
+
+    _access_token: Optional[str] = None
+    _token_expires_at: float = 0
+
+    @classmethod
+    def get_metadata(cls) -> ConnectorMetadata:
+        return ConnectorMetadata(
+            connector_type="crowdstrike_falcon",
+            category=ConnectorCategory.DATA_SOURCE,
+            display_name="CrowdStrike Falcon",
+            description="CrowdStrike Falcon - Endpoint detection and response platform",
+            icon="crowdstrike",
+            config_schema={
+                "type": "object",
+                "properties": {
+                    "base_url": {
+                        "type": "string",
+                        "title": "API Base URL",
+                        "description": "CrowdStrike API base URL for your cloud region",
+                        "enum": [
+                            "https://api.crowdstrike.com",
+                            "https://api.us-2.crowdstrike.com",
+                            "https://api.eu-1.crowdstrike.com",
+                            "https://api.laggar.gcw.crowdstrike.com",
+                        ],
+                        "default": "https://api.crowdstrike.com",
+                    },
+                    "fetch_incidents": {
+                        "type": "boolean",
+                        "title": "Fetch Incidents",
+                        "description": "Also fetch Falcon Incidents (in addition to detections)",
+                        "default": True,
+                    },
+                    "min_severity": {
+                        "type": "integer",
+                        "title": "Minimum Severity",
+                        "description": "Minimum severity to fetch (1-5, where 5 is critical)",
+                        "minimum": 1,
+                        "maximum": 5,
+                        "default": 1,
+                    },
+                },
+                "required": ["base_url"],
+            },
+            credentials_schema={
+                "type": "object",
+                "properties": {
+                    "client_id": {
+                        "type": "string",
+                        "title": "Client ID",
+                        "description": "CrowdStrike API client ID (OAuth2)",
+                    },
+                    "client_secret": {
+                        "type": "string",
+                        "title": "Client Secret",
+                        "description": "CrowdStrike API client secret",
+                        "format": "password",
+                    },
+                },
+                "required": ["client_id", "client_secret"],
+            },
+        )
+
+    async def _get_access_token(self) -> str:
+        """Get OAuth2 access token from CrowdStrike (with caching)."""
+        # Return cached token if still valid
+        if self._access_token and time.time() < self._token_expires_at - 60:
+            return self._access_token
+
+        base_url = self.config.get("base_url", "https://api.crowdstrike.com")
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{base_url}/oauth2/token",
+                data={
+                    "client_id": self.credentials.get("client_id", ""),
+                    "client_secret": self.credentials.get("client_secret", ""),
+                },
+            )
+
+        if response.status_code != 201:
+            raise Exception(f"Failed to get access token: {response.status_code} - {response.text}")
+
+        data = response.json()
+        self._access_token = data.get("access_token", "")
+        # Token typically expires in 30 minutes
+        self._token_expires_at = time.time() + data.get("expires_in", 1800)
+
+        return self._access_token
+
+    async def test_connection(self) -> ConnectionTestResult:
+        """Test connection to CrowdStrike Falcon API."""
+        start_time = time.time()
+        try:
+            token = await self._get_access_token()
+            base_url = self.config.get("base_url", "https://api.crowdstrike.com")
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                # Test by querying sensor info
+                response = await client.get(
+                    f"{base_url}/sensors/queries/sensors/v1",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params={"limit": 1},
+                )
+
+            latency_ms = int((time.time() - start_time) * 1000)
+
+            if response.status_code == 200:
+                return ConnectionTestResult(
+                    success=True,
+                    message="Successfully connected to CrowdStrike Falcon",
+                    details={"api_url": base_url},
+                    latency_ms=latency_ms,
+                )
+            elif response.status_code == 403:
+                return ConnectionTestResult(
+                    success=False,
+                    message="Access denied - check API scopes (need Detections Read)",
+                    latency_ms=latency_ms,
+                )
+            else:
+                return ConnectionTestResult(
+                    success=False,
+                    message=f"API returned status {response.status_code}",
+                    latency_ms=latency_ms,
+                )
+
+        except Exception as e:
+            return ConnectionTestResult(
+                success=False,
+                message=f"Connection error: {str(e)}",
+            )
+
+    async def fetch_alerts(
+        self,
+        since: datetime,
+        limit: int = 100,
+        cursor: Optional[str] = None,
+    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        """Fetch detections from CrowdStrike Falcon."""
+        try:
+            token = await self._get_access_token()
+            base_url = self.config.get("base_url", "https://api.crowdstrike.com")
+            min_severity = self.config.get("min_severity", 1)
+
+            # Build filter for detections
+            since_timestamp = since.strftime("%Y-%m-%dT%H:%M:%SZ")
+            filter_query = f"created_timestamp:>'{since_timestamp}'"
+            if min_severity > 1:
+                filter_query += f"+max_severity_displayname:>={min_severity}"
+
+            params = {
+                "filter": filter_query,
+                "limit": limit,
+                "sort": "created_timestamp|asc",
+            }
+            if cursor:
+                params["offset"] = cursor
+
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                # Step 1: Query detection IDs
+                response = await client.get(
+                    f"{base_url}/detects/queries/detects/v1",
+                    headers={"Authorization": f"Bearer {token}"},
+                    params=params,
+                )
+
+                if response.status_code != 200:
+                    raise Exception(f"Failed to query detections: {response.status_code}")
+
+                query_data = response.json()
+                detection_ids = query_data.get("resources", [])
+
+                if not detection_ids:
+                    return [], None
+
+                # Step 2: Get detection details
+                response = await client.post(
+                    f"{base_url}/detects/entities/summaries/GET/v1",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={"ids": detection_ids},
+                )
+
+                if response.status_code != 200:
+                    raise Exception(f"Failed to get detection details: {response.status_code}")
+
+                details_data = response.json()
+                detections = details_data.get("resources", [])
+
+            # Normalize detections
+            normalized_alerts = []
+            for detection in detections:
+                normalized = self.normalize_alert(detection)
+                normalized_alerts.append(normalized)
+
+            # Calculate next cursor
+            next_cursor = None
+            meta = query_data.get("meta", {}).get("pagination", {})
+            if meta.get("offset") is not None and len(detection_ids) == limit:
+                next_cursor = str(meta.get("offset", 0) + limit)
+
+            return normalized_alerts, next_cursor
+
+        except Exception as e:
+            raise Exception(f"Failed to fetch alerts from CrowdStrike Falcon: {str(e)}")
+
+    def normalize_alert(self, raw_alert: dict[str, Any]) -> NormalizedAlert:
+        """Normalize a CrowdStrike detection to the unified schema."""
+        # Parse timestamps
+        created_at = datetime.utcnow()
+        created_timestamp = raw_alert.get("created_timestamp", "")
+        if created_timestamp:
+            try:
+                created_at = datetime.fromisoformat(created_timestamp.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+
+        updated_at = None
+        updated_timestamp = raw_alert.get("last_behavior", "")
+        if updated_timestamp:
+            try:
+                updated_at = datetime.fromisoformat(updated_timestamp.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                pass
+
+        # Build title from detection info
+        tactic = raw_alert.get("behaviors", [{}])[0].get("tactic", "") if raw_alert.get("behaviors") else ""
+        technique = raw_alert.get("behaviors", [{}])[0].get("technique", "") if raw_alert.get("behaviors") else ""
+        hostname = raw_alert.get("device", {}).get("hostname", "Unknown Host")
+
+        title = raw_alert.get("detection_id", "CrowdStrike Detection")
+        if tactic or technique:
+            title = f"{tactic}: {technique}" if tactic and technique else (tactic or technique)
+        title = f"{title} on {hostname}"
+
+        # Build description
+        description_parts = []
+        if raw_alert.get("behaviors"):
+            for behavior in raw_alert["behaviors"][:3]:  # Limit to 3 behaviors
+                desc = behavior.get("description", "")
+                if desc:
+                    description_parts.append(desc)
+        description = " | ".join(description_parts) if description_parts else ""
+
+        # Extract MITRE info from behaviors
+        mitre_tactics = []
+        mitre_techniques = []
+        for behavior in raw_alert.get("behaviors", []):
+            if behavior.get("tactic_id"):
+                mitre_tactics.append(behavior["tactic_id"])
+            if behavior.get("technique_id"):
+                mitre_techniques.append(behavior["technique_id"])
+
+        # Deduplicate
+        mitre_tactics = list(set(mitre_tactics))
+        mitre_techniques = list(set(mitre_techniques))
+
+        return NormalizedAlert(
+            id=uuid.uuid4(),
+            connector_id=self.connector_id,
+            source_type="crowdstrike_falcon",
+            external_id=raw_alert.get("detection_id", str(uuid.uuid4())),
+            title=title[:500],
+            description=description[:2000] if description else None,
+            severity=self.normalize_severity(raw_alert.get("max_severity_displayname", "Medium")),
+            status=self.normalize_status(raw_alert.get("status", "new")),
+            created_at_source=created_at,
+            updated_at_source=updated_at,
+            rule_id=raw_alert.get("behaviors", [{}])[0].get("rule_instance_id") if raw_alert.get("behaviors") else None,
+            rule_name=raw_alert.get("behaviors", [{}])[0].get("scenario") if raw_alert.get("behaviors") else None,
+            tags=self._extract_tags(raw_alert),
+            mitre_tactics=mitre_tactics,
+            mitre_techniques=mitre_techniques,
+            raw_data=raw_alert,
+            ingested_at=datetime.utcnow(),
+        )
+
+    def _extract_tags(self, raw_alert: dict[str, Any]) -> list[str]:
+        """Extract tags from CrowdStrike detection."""
+        tags = []
+
+        # Add device info as tags
+        device = raw_alert.get("device", {})
+        if device.get("platform_name"):
+            tags.append(f"platform:{device['platform_name']}")
+        if device.get("os_version"):
+            tags.append(f"os:{device['os_version']}")
+        if device.get("machine_domain"):
+            tags.append(f"domain:{device['machine_domain']}")
+
+        # Add quarantine status
+        if raw_alert.get("quarantined_files"):
+            tags.append("quarantined")
+
+        # Add behavior tags
+        for behavior in raw_alert.get("behaviors", []):
+            if behavior.get("objective"):
+                tags.append(f"objective:{behavior['objective']}")
+
+        return tags[:20]  # Limit tags
+
+    def normalize_severity(self, source_severity: str) -> str:
+        """Normalize CrowdStrike severity to standard values."""
+        severity_map = {
+            "critical": "critical",
+            "high": "high",
+            "medium": "medium",
+            "low": "low",
+            "informational": "info",
+            "5": "critical",
+            "4": "high",
+            "3": "medium",
+            "2": "low",
+            "1": "info",
+        }
+        return severity_map.get(source_severity.lower(), "medium")
+
+    def normalize_status(self, source_status: str) -> str:
+        """Normalize CrowdStrike status to standard values."""
+        status_map = {
+            "new": "open",
+            "in_progress": "acknowledged",
+            "true_positive": "acknowledged",
+            "false_positive": "resolved",
+            "ignored": "closed",
+            "closed": "closed",
+            "reopened": "open",
+        }
+        return status_map.get(source_status.lower(), "open")

@@ -7,7 +7,7 @@ Wraps the existing PantherService for connector framework compatibility.
 
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 import httpx
@@ -77,27 +77,32 @@ class PantherDataSourceConnector(DataSourceConnector):
 
     async def test_connection(self) -> ConnectionTestResult:
         """Test connection to Panther API."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         start_time = time.time()
         try:
-            # Simple query to verify connection
+            # Query users list - doesn't require date range
             query = """
-            query {
-                alerts(input: { pageSize: 1 }) {
-                    edges {
-                        node {
-                            id
-                        }
-                    }
+            query TestConnection {
+                users {
+                    id
                 }
             }
             """
 
+            url = self._get_api_url()
+            headers = self._get_headers()
+            logger.info(f"Testing Panther connection to: {url}")
+
             async with httpx.AsyncClient(timeout=30.0) as client:
                 response = await client.post(
-                    self._get_api_url(),
-                    headers=self._get_headers(),
+                    url,
+                    headers=headers,
                     json={"query": query},
                 )
+
+            logger.info(f"Panther response status: {response.status_code}")
 
             latency_ms = int((time.time() - start_time) * 1000)
 
@@ -129,11 +134,13 @@ class PantherDataSourceConnector(DataSourceConnector):
                 )
 
         except httpx.TimeoutException:
+            logger.error("Panther connection timed out")
             return ConnectionTestResult(
                 success=False,
                 message="Connection timed out",
             )
         except Exception as e:
+            logger.exception(f"Panther connection error: {e}")
             return ConnectionTestResult(
                 success=False,
                 message=f"Connection error: {str(e)}",
@@ -157,15 +164,6 @@ class PantherDataSourceConnector(DataSourceConnector):
                         status
                         createdAt
                         updatedAt
-                        detection {
-                            id
-                            displayName
-                        }
-                        description
-                        runbook
-                        reference
-                        assigneeId
-                        tags
                     }
                 }
                 pageInfo {
@@ -176,10 +174,12 @@ class PantherDataSourceConnector(DataSourceConnector):
         }
         """
 
+        # Panther requires both createdAtAfter and createdAtBefore
+        now = datetime.utcnow()
         variables = {
             "input": {
-                "pageSize": limit,
-                "createdAtAfter": since.isoformat(),
+                "createdAtAfter": since.isoformat() + "Z",
+                "createdAtBefore": now.isoformat() + "Z",
             }
         }
 
@@ -194,10 +194,15 @@ class PantherDataSourceConnector(DataSourceConnector):
                     json={"query": query, "variables": variables},
                 )
 
-            if response.status_code != 200:
-                raise Exception(f"API returned status {response.status_code}")
-
             data = response.json()
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Panther fetch_alerts response: status={response.status_code}, body={data}")
+
+            if response.status_code != 200:
+                error_msg = data.get("errors", [{}])[0].get("message", f"API returned status {response.status_code}")
+                raise Exception(error_msg)
+
             if "errors" in data:
                 raise Exception(data["errors"][0].get("message", "GraphQL error"))
 
@@ -222,13 +227,16 @@ class PantherDataSourceConnector(DataSourceConnector):
 
     def normalize_alert(self, raw_alert: dict[str, Any]) -> NormalizedAlert:
         """Normalize a Panther alert to the unified schema."""
-        detection = raw_alert.get("detection", {}) or {}
+        # Parse timestamps - convert to naive datetime (no timezone) for PostgreSQL
+        created_at_str = raw_alert.get("createdAt", "")
+        if created_at_str:
+            created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00")).replace(tzinfo=None)
+        else:
+            created_at = datetime.utcnow()
 
-        # Parse timestamps
-        created_at = datetime.fromisoformat(raw_alert.get("createdAt", "").replace("Z", "+00:00"))
         updated_at = None
         if raw_alert.get("updatedAt"):
-            updated_at = datetime.fromisoformat(raw_alert["updatedAt"].replace("Z", "+00:00"))
+            updated_at = datetime.fromisoformat(raw_alert["updatedAt"].replace("Z", "+00:00")).replace(tzinfo=None)
 
         return NormalizedAlert(
             id=uuid.uuid4(),
@@ -236,15 +244,15 @@ class PantherDataSourceConnector(DataSourceConnector):
             source_type="panther",
             external_id=raw_alert.get("id", ""),
             title=raw_alert.get("title", "Untitled Alert"),
-            description=raw_alert.get("description"),
+            description=None,
             severity=self.normalize_severity(raw_alert.get("severity", "MEDIUM")),
             status=self.normalize_status(raw_alert.get("status", "OPEN")),
             created_at_source=created_at,
             updated_at_source=updated_at,
-            rule_id=detection.get("id"),
-            rule_name=detection.get("displayName"),
-            tags=raw_alert.get("tags", []) or [],
-            mitre_tactics=[],  # Would need additional mapping
+            rule_id=None,
+            rule_name=raw_alert.get("title"),
+            tags=[],
+            mitre_tactics=[],
             mitre_techniques=[],
             raw_data=raw_alert,
             ingested_at=datetime.utcnow(),

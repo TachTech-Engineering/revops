@@ -1,7 +1,128 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { BarChart3, TrendingUp, AlertTriangle, Shield, Clock, RefreshCw } from 'lucide-react'
 import { useGetAlertAnalyticsQuery } from '../api/pantherApi'
 import { getSeverityColor } from '../lib/utils'
+
+interface SeverityBreakdown {
+  CRITICAL: number
+  HIGH: number
+  MEDIUM: number
+  LOW: number
+  INFO: number
+}
+
+const severityColors = {
+  CRITICAL: '#ef4444', // red-500
+  HIGH: '#f97316',     // orange-500
+  MEDIUM: '#eab308',   // yellow-500
+  LOW: '#22c55e',      // green-500
+  INFO: '#3b82f6',     // blue-500
+}
+
+function AlertsOverTimeChart({
+  byDay,
+  byDaySeverity
+}: {
+  byDay: Record<string, number> | undefined
+  byDaySeverity: Record<string, SeverityBreakdown> | undefined
+}) {
+  const entries = useMemo(() => {
+    if (!byDay || typeof byDay !== 'object') {
+      return []
+    }
+    return Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).slice(-14)
+  }, [byDay])
+
+  if (entries.length === 0) {
+    return (
+      <div className="h-48 flex items-center justify-center text-muted-foreground">
+        No alerts in this period
+      </div>
+    )
+  }
+
+  const maxCount = Math.max(...entries.map(([, c]) => c), 1)
+  const severities = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'] as const
+
+  return (
+    <div>
+      <div style={{ height: '160px', display: 'flex', alignItems: 'flex-end', gap: '4px' }}>
+        {entries.map(([date, count]) => {
+          const barHeight = Math.max(Math.round((count / maxCount) * 150), 8)
+          const daySeverity = byDaySeverity?.[date]
+
+          if (daySeverity) {
+            // Stacked bar with severity colors
+            return (
+              <div
+                key={date}
+                style={{
+                  flex: 1,
+                  height: `${barHeight}px`,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  borderRadius: '4px 4px 0 0',
+                  overflow: 'hidden',
+                  cursor: 'pointer',
+                }}
+                title={`${date}: ${count} alerts\nCritical: ${daySeverity.CRITICAL}\nHigh: ${daySeverity.HIGH}\nMedium: ${daySeverity.MEDIUM}\nLow: ${daySeverity.LOW}\nInfo: ${daySeverity.INFO}`}
+              >
+                {severities.map((severity) => {
+                  const severityCount = daySeverity[severity]
+                  if (severityCount === 0) return null
+                  const heightPercent = (severityCount / count) * 100
+                  return (
+                    <div
+                      key={severity}
+                      style={{
+                        height: `${heightPercent}%`,
+                        backgroundColor: severityColors[severity],
+                        minHeight: severityCount > 0 ? '2px' : 0,
+                      }}
+                    />
+                  )
+                })}
+              </div>
+            )
+          }
+
+          // Fallback to solid blue if no severity data
+          return (
+            <div
+              key={date}
+              style={{
+                flex: 1,
+                height: `${barHeight}px`,
+                backgroundColor: '#3b82f6',
+                borderRadius: '4px 4px 0 0',
+                cursor: 'pointer',
+              }}
+              title={`${date}: ${count} alerts`}
+            />
+          )
+        })}
+      </div>
+      <div style={{ display: 'flex', gap: '4px', marginTop: '8px' }}>
+        {entries.map(([date]) => (
+          <div key={date} style={{ flex: 1, textAlign: 'center' }}>
+            <span style={{ fontSize: '10px', color: '#888' }}>
+              {date.slice(5)}
+            </span>
+          </div>
+        ))}
+      </div>
+      {/* Legend */}
+      <div style={{ display: 'flex', gap: '12px', marginTop: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+        {severities.map((severity) => (
+          <div key={severity} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ width: '12px', height: '12px', backgroundColor: severityColors[severity], borderRadius: '2px' }} />
+            <span style={{ fontSize: '11px', color: '#888' }}>{severity}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export default function AnalyticsDashboardPage() {
   const [days, setDays] = useState(7)
@@ -72,7 +193,7 @@ export default function AnalyticsDashboardPage() {
             </div>
           ))}
         </div>
-      ) : data && (
+      ) : data ? (
         <>
           {/* Summary Cards */}
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -134,31 +255,7 @@ export default function AnalyticsDashboardPage() {
                 <TrendingUp size={18} />
                 Alerts Over Time
               </h3>
-              <div className="h-48 flex items-end gap-1">
-                {Object.entries(data.byDay)
-                  .sort(([a], [b]) => a.localeCompare(b))
-                  .slice(-14)
-                  .map(([date, count]) => {
-                    const height = (count / maxDailyCount) * 100
-                    return (
-                      <div key={date} className="flex-1 flex flex-col items-center gap-1">
-                        <div
-                          className="w-full bg-primary/80 rounded-t hover:bg-primary transition-colors"
-                          style={{ height: `${Math.max(height, 2)}%` }}
-                          title={`${date}: ${count} alerts`}
-                        />
-                        <span className="text-[10px] text-muted-foreground -rotate-45 origin-top-left whitespace-nowrap">
-                          {date.slice(5)}
-                        </span>
-                      </div>
-                    )
-                  })}
-              </div>
-              {Object.keys(data.byDay).length === 0 && (
-                <div className="h-48 flex items-center justify-center text-muted-foreground">
-                  No data for this period
-                </div>
-              )}
+              <AlertsOverTimeChart byDay={data.byDay} byDaySeverity={data.byDaySeverity} />
             </div>
 
             {/* Alerts by Severity */}
@@ -256,6 +353,8 @@ export default function AnalyticsDashboardPage() {
             </div>
           </div>
         </>
+      ) : (
+        <div className="p-4 bg-muted rounded">No data available</div>
       )}
     </div>
   )

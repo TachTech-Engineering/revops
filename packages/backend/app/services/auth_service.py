@@ -255,3 +255,62 @@ def generate_token_response(user: User, refresh_token: str) -> dict:
         "token_type": "bearer",
         "expires_in": ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     }
+
+
+# Password Reset Functions
+PASSWORD_RESET_EXPIRE_HOURS = 24
+
+# In-memory store for reset tokens (use Redis or DB in production)
+_password_reset_tokens: dict[str, tuple[UUID, datetime]] = {}
+
+
+async def create_password_reset_token(db: AsyncSession, user_id: UUID) -> str:
+    """Create a password reset token for a user."""
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.utcnow() + timedelta(hours=PASSWORD_RESET_EXPIRE_HOURS)
+
+    # Store token (in production, use database or Redis)
+    _password_reset_tokens[token] = (user_id, expires_at)
+
+    return token
+
+
+async def validate_password_reset_token(token: str) -> Optional[UUID]:
+    """Validate a password reset token and return the user ID if valid."""
+    if token not in _password_reset_tokens:
+        return None
+
+    user_id, expires_at = _password_reset_tokens[token]
+
+    if datetime.utcnow() > expires_at:
+        # Token expired, remove it
+        del _password_reset_tokens[token]
+        return None
+
+    return user_id
+
+
+async def reset_user_password(
+    db: AsyncSession, token: str, new_password: str
+) -> bool:
+    """Reset a user's password using a valid reset token."""
+    user_id = await validate_password_reset_token(token)
+
+    if not user_id:
+        return False
+
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        return False
+
+    # Update password
+    user.hashed_password = hash_password(new_password)
+    await db.commit()
+
+    # Invalidate the token
+    del _password_reset_tokens[token]
+
+    # Optionally: revoke all refresh tokens for security
+    await revoke_all_user_tokens(db, user_id)
+
+    return True

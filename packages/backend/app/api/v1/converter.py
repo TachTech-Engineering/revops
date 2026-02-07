@@ -15,7 +15,8 @@ class ConvertRequest(BaseModel):
     ruleId: str
     className: Optional[str] = None
     severity: Optional[str] = None
-    sourceFormat: Literal["spl", "yaral"] = "spl"
+    sourceFormat: Literal["spl", "yaral", "aql"] = "spl"
+    targetFormat: Literal["python", "sql"] = "python"  # Target output format (for AQL)
 
 
 # Keep old name as alias for backwards compatibility
@@ -30,7 +31,7 @@ class SPLBatchConvertRequest(BaseModel):
 class ValidateRequest(BaseModel):
     """Request to validate a detection rule."""
     spl: str  # Named 'spl' for backwards compatibility
-    sourceFormat: Literal["spl", "yaral"] = "spl"
+    sourceFormat: Literal["spl", "yaral", "aql"] = "spl"
 
 
 # Keep old name as alias
@@ -60,8 +61,9 @@ async def convert_rule(
     Supports multiple source formats:
     - spl: Splunk SPL queries
     - yaral: Google SecOps YARA-L rules
+    - aql: IBM QRadar AQL queries (supports python and sql output)
 
-    Returns generated Python code, metadata, and any TODOs.
+    Returns generated Python code (or SQL for AQL), metadata, and any TODOs.
     """
     try:
         source_format = SourceFormat(request.sourceFormat)
@@ -71,6 +73,7 @@ async def convert_rule(
             class_name=request.className,
             severity=request.severity,
             source_format=source_format,
+            target_format=request.targetFormat,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -107,12 +110,14 @@ async def validate_rule(
     """
     Validate detection rule syntax without full conversion.
 
-    Supports SPL and YARA-L formats.
+    Supports SPL, YARA-L, and AQL formats.
     Returns analysis of the rule including detected patterns and recommendations.
     """
     try:
         if request.sourceFormat == "yaral":
             return await converter.validate_yaral(request.spl)
+        if request.sourceFormat == "aql":
+            return await converter.validate_aql(request.spl)
         return await converter.validate(request.spl)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

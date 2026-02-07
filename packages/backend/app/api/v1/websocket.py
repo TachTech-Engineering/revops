@@ -42,7 +42,7 @@ class ConnectionManager:
         disconnected = set()
 
         async with self._lock:
-            for connection in self.active_connections:
+            for connection in list(self.active_connections):
                 try:
                     if connection.client_state == WebSocketState.CONNECTED:
                         await connection.send_text(message_str)
@@ -68,52 +68,48 @@ async def websocket_alerts(websocket: WebSocket):
     """WebSocket endpoint for real-time alert notifications."""
     await manager.connect(websocket)
 
-    # Set up Redis subscription for this connection
+    # Subscribe to alerts channel - the service handles the listener internally
     try:
-        # Subscribe to Redis alerts channel
-        await notification_service.connect()
         await notification_service.subscribe(
             notification_service.CHANNEL_ALERTS,
             handle_redis_message,
         )
 
-        # Start listening in background
-        listen_task = asyncio.create_task(notification_service.listen())
-
-        try:
-            # Keep connection alive and handle client messages
-            while True:
-                try:
-                    # Wait for any client messages (like ping/pong or subscription filters)
-                    data = await asyncio.wait_for(
-                        websocket.receive_text(),
-                        timeout=30.0,
-                    )
-                    # Handle client messages if needed
-                    try:
-                        message = json.loads(data)
-                        if message.get("type") == "ping":
-                            await websocket.send_text(json.dumps({"type": "pong"}))
-                    except json.JSONDecodeError:
-                        pass
-                except asyncio.TimeoutError:
-                    # Send heartbeat
-                    try:
-                        await websocket.send_text(json.dumps({"type": "heartbeat"}))
-                    except Exception:
-                        break
-        finally:
-            listen_task.cancel()
+        # Keep connection alive and handle client messages
+        while True:
             try:
-                await listen_task
-            except asyncio.CancelledError:
-                pass
+                # Wait for any client messages (like ping/pong)
+                data = await asyncio.wait_for(
+                    websocket.receive_text(),
+                    timeout=30.0,
+                )
+                # Handle client messages
+                try:
+                    message = json.loads(data)
+                    if message.get("type") == "ping":
+                        await websocket.send_text(json.dumps({"type": "pong"}))
+                except json.JSONDecodeError:
+                    pass
+            except asyncio.TimeoutError:
+                # Send heartbeat
+                try:
+                    if websocket.client_state == WebSocketState.CONNECTED:
+                        await websocket.send_text(json.dumps({"type": "heartbeat"}))
+                    else:
+                        break
+                except Exception:
+                    break
 
     except WebSocketDisconnect:
         logger.info("Client disconnected")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:
+        # Unsubscribe when client disconnects
+        await notification_service.unsubscribe(
+            notification_service.CHANNEL_ALERTS,
+            handle_redis_message,
+        )
         await manager.disconnect(websocket)
 
 
@@ -123,42 +119,39 @@ async def websocket_notifications(websocket: WebSocket):
     await manager.connect(websocket)
 
     try:
-        await notification_service.connect()
         await notification_service.subscribe(
             notification_service.CHANNEL_NOTIFICATIONS,
             handle_redis_message,
         )
 
-        listen_task = asyncio.create_task(notification_service.listen())
-
-        try:
-            while True:
-                try:
-                    data = await asyncio.wait_for(
-                        websocket.receive_text(),
-                        timeout=30.0,
-                    )
-                    try:
-                        message = json.loads(data)
-                        if message.get("type") == "ping":
-                            await websocket.send_text(json.dumps({"type": "pong"}))
-                    except json.JSONDecodeError:
-                        pass
-                except asyncio.TimeoutError:
-                    try:
-                        await websocket.send_text(json.dumps({"type": "heartbeat"}))
-                    except Exception:
-                        break
-        finally:
-            listen_task.cancel()
+        while True:
             try:
-                await listen_task
-            except asyncio.CancelledError:
-                pass
+                data = await asyncio.wait_for(
+                    websocket.receive_text(),
+                    timeout=30.0,
+                )
+                try:
+                    message = json.loads(data)
+                    if message.get("type") == "ping":
+                        await websocket.send_text(json.dumps({"type": "pong"}))
+                except json.JSONDecodeError:
+                    pass
+            except asyncio.TimeoutError:
+                try:
+                    if websocket.client_state == WebSocketState.CONNECTED:
+                        await websocket.send_text(json.dumps({"type": "heartbeat"}))
+                    else:
+                        break
+                except Exception:
+                    break
 
     except WebSocketDisconnect:
         logger.info("Client disconnected")
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
     finally:
+        await notification_service.unsubscribe(
+            notification_service.CHANNEL_NOTIFICATIONS,
+            handle_redis_message,
+        )
         await manager.disconnect(websocket)

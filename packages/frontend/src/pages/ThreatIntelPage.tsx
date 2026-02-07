@@ -266,16 +266,16 @@ function ProviderResultCard({
             <>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Abuse Score:</span>
-                <span className="font-medium">{providerData.abuse_confidence_score}%</span>
+                <span className="font-medium">{String(providerData.abuse_confidence_score)}%</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Reports:</span>
-                <span>{providerData.total_reports || 0}</span>
+                <span>{String(providerData.total_reports ?? 0)}</span>
               </div>
               {providerData.country_code && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Country:</span>
-                  <span>{providerData.country_code}</span>
+                  <span>{String(providerData.country_code)}</span>
                 </div>
               )}
             </>
@@ -285,7 +285,7 @@ function ProviderResultCard({
             <>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Pulse Count:</span>
-                <span className="font-medium">{providerData.pulse_count || 0}</span>
+                <span className="font-medium">{String(providerData.pulse_count ?? 0)}</span>
               </div>
               {(providerData.tags as string[])?.length > 0 && (
                 <div className="flex flex-wrap gap-1 mt-2">

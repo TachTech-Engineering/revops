@@ -7,6 +7,8 @@ from fastapi import APIRouter, HTTPException, status, UploadFile, File
 from pydantic import BaseModel
 
 from app.services.migration_service import migration_service, SIEMFormat
+from app.services.ai_converter_service import ai_converter_service, ConversionFormat, LLMProvider
+from app.config import settings
 
 router = APIRouter()
 
@@ -40,6 +42,52 @@ class FormatInfo(BaseModel):
     id: str
     name: str
     description: str
+
+
+class AIConvertRequest(BaseModel):
+    source_format: str
+    target_format: str
+    source_code: str
+    context: Optional[str] = None
+    provider: Optional[str] = "claude"  # claude or openai
+
+
+class AIConvertResponse(BaseModel):
+    converted_code: str
+    source_format: str
+    target_format: str
+    provider: str
+    model: str
+    success: bool
+    error: Optional[str] = None
+
+
+class ExplainRequest(BaseModel):
+    source_format: str
+    source_code: str
+    provider: Optional[str] = "claude"
+
+
+class SuggestRequest(BaseModel):
+    source_format: str
+    source_code: str
+    provider: Optional[str] = "claude"
+
+
+class AIBulkConvertRequest(BaseModel):
+    source_format: str
+    target_format: str
+    rules: list[str]
+    context: Optional[str] = None
+    provider: Optional[str] = "claude"
+
+
+class AIBulkConvertResponse(BaseModel):
+    results: list[dict]
+    success_count: int
+    error_count: int
+    provider: str
+    model: str
 
 
 @router.get("/formats", response_model=list[FormatInfo])
@@ -284,6 +332,24 @@ def title(event):
 
 def severity(event):
     return "HIGH\"""",
+
+        "aql": """SELECT sourceip, destinationip, username, LOGSOURCENAME(logsourceid), starttime
+FROM events
+WHERE category = 'Authentication'
+AND LOGSOURCETYPENAME(logsourceid) ILIKE '%windows%'
+AND username ILIKE '%admin%'
+AND eventcount > 5
+GROUP BY sourceip, destinationip, username
+LAST 24 HOURS""",
+
+        "sql": """-- Suspicious authentication events
+SELECT source_ip, destination_ip, username, log_source, timestamp
+FROM security_events
+WHERE category = 'Authentication'
+AND username LIKE '%admin%'
+AND event_count > 5
+ORDER BY timestamp DESC
+LIMIT 1000;""",
     }
 
     format_lower = format.lower()
@@ -296,4 +362,295 @@ def severity(event):
     return {
         "format": format_lower,
         "example": examples[format_lower],
+    }
+
+
+# AI-Assisted Conversion Endpoints
+
+@router.post("/convert/ai", response_model=AIConvertResponse)
+async def ai_convert_rule(request: AIConvertRequest):
+    """
+    Convert a detection rule using AI (Claude or OpenAI).
+
+    Uses LLM to intelligently convert detection rules, handling
+    edge cases, aggregations, and complex logic that rule-based
+    conversion may not handle well.
+
+    Requires ANTHROPIC_API_KEY or OPENAI_API_KEY to be configured.
+    """
+    # Validate provider
+    try:
+        provider = LLMProvider(request.provider.lower()) if request.provider else LLMProvider.CLAUDE
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid provider: {request.provider}. Supported: claude, openai"
+        )
+
+    # Check if selected provider is available
+    if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Claude not available - ANTHROPIC_API_KEY not configured"
+        )
+    if provider == LLMProvider.OPENAI and not settings.openai_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OpenAI not available - OPENAI_API_KEY not configured"
+        )
+
+    try:
+        source_format = ConversionFormat(request.source_format.lower())
+        target_format = ConversionFormat(request.target_format.lower())
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid format: {e}. Supported formats: {[f.value for f in ConversionFormat]}"
+        )
+
+    if not request.source_code.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source code cannot be empty"
+        )
+
+    result = ai_converter_service.convert(
+        source_code=request.source_code,
+        source_format=source_format,
+        target_format=target_format,
+        context=request.context,
+        provider=provider,
+    )
+
+    return AIConvertResponse(
+        converted_code=result.get("converted_code", ""),
+        source_format=result.get("source_format", request.source_format),
+        target_format=result.get("target_format", request.target_format),
+        provider=result.get("provider", provider.value),
+        model=result.get("model", "unknown"),
+        success=result.get("success", False),
+        error=result.get("error"),
+    )
+
+
+@router.post("/convert/ai/bulk", response_model=AIBulkConvertResponse)
+async def ai_bulk_convert_rules(request: AIBulkConvertRequest):
+    """
+    Convert multiple detection rules using AI (Claude or OpenAI).
+
+    Processes each rule through the AI converter for intelligent handling
+    of edge cases, aggregations, and complex logic.
+
+    Requires ANTHROPIC_API_KEY or OPENAI_API_KEY to be configured.
+    """
+    # Validate provider
+    try:
+        provider = LLMProvider(request.provider.lower()) if request.provider else LLMProvider.CLAUDE
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid provider: {request.provider}. Supported: claude, openai"
+        )
+
+    # Check if selected provider is available
+    if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Claude not available - ANTHROPIC_API_KEY not configured"
+        )
+    if provider == LLMProvider.OPENAI and not settings.openai_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OpenAI not available - OPENAI_API_KEY not configured"
+        )
+
+    try:
+        source_format = ConversionFormat(request.source_format.lower())
+        target_format = ConversionFormat(request.target_format.lower())
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid format: {e}. Supported formats: {[f.value for f in ConversionFormat]}"
+        )
+
+    results = []
+    success_count = 0
+    error_count = 0
+    model = "unknown"
+
+    for i, rule in enumerate(request.rules):
+        if not rule.strip():
+            results.append({
+                "index": i,
+                "status": "error",
+                "error": "Empty rule",
+            })
+            error_count += 1
+            continue
+
+        result = ai_converter_service.convert(
+            source_code=rule,
+            source_format=source_format,
+            target_format=target_format,
+            context=request.context,
+            provider=provider,
+        )
+
+        model = result.get("model", model)
+
+        if result.get("success"):
+            results.append({
+                "index": i,
+                "status": "success",
+                "converted_code": result.get("converted_code", ""),
+            })
+            success_count += 1
+        else:
+            results.append({
+                "index": i,
+                "status": "error",
+                "error": result.get("error", "Conversion failed"),
+            })
+            error_count += 1
+
+    return AIBulkConvertResponse(
+        results=results,
+        success_count=success_count,
+        error_count=error_count,
+        provider=provider.value,
+        model=model,
+    )
+
+
+@router.post("/explain")
+async def explain_rule(request: ExplainRequest):
+    """
+    Get an AI-generated explanation of what a detection rule does.
+
+    Returns a plain English explanation including:
+    - What it's detecting
+    - Key conditions
+    - MITRE ATT&CK mapping
+    - Potential false positives
+    """
+    # Validate provider
+    try:
+        provider = LLMProvider(request.provider.lower()) if request.provider else LLMProvider.CLAUDE
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid provider: {request.provider}. Supported: claude, openai"
+        )
+
+    # Check if selected provider is available
+    if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Claude not available - ANTHROPIC_API_KEY not configured"
+        )
+    if provider == LLMProvider.OPENAI and not settings.openai_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OpenAI not available - OPENAI_API_KEY not configured"
+        )
+
+    try:
+        source_format = ConversionFormat(request.source_format.lower())
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid format: {e}"
+        )
+
+    if not request.source_code.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source code cannot be empty"
+        )
+
+    result = ai_converter_service.explain_rule(
+        source_code=request.source_code,
+        source_format=source_format,
+        provider=provider,
+    )
+
+    return {
+        "explanation": result.get("explanation", ""),
+        "source_format": source_format.value,
+        "provider": result.get("provider", provider.value),
+        "model": result.get("model"),
+        "success": result.get("success", False),
+        "error": result.get("error"),
+    }
+
+
+@router.post("/suggest")
+async def suggest_improvements(request: SuggestRequest):
+    """
+    Get AI-generated suggestions for improving a detection rule.
+
+    Returns actionable suggestions for:
+    - Detection accuracy
+    - Performance optimization
+    - MITRE ATT&CK coverage
+    - Best practices
+    """
+    # Validate provider
+    try:
+        provider = LLMProvider(request.provider.lower()) if request.provider else LLMProvider.CLAUDE
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid provider: {request.provider}. Supported: claude, openai"
+        )
+
+    # Check if selected provider is available
+    if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Claude not available - ANTHROPIC_API_KEY not configured"
+        )
+    if provider == LLMProvider.OPENAI and not settings.openai_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="OpenAI not available - OPENAI_API_KEY not configured"
+        )
+
+    try:
+        source_format = ConversionFormat(request.source_format.lower())
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid format: {e}"
+        )
+
+    if not request.source_code.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source code cannot be empty"
+        )
+
+    result = ai_converter_service.suggest_improvements(
+        source_code=request.source_code,
+        source_format=source_format,
+        provider=provider,
+    )
+
+    return {
+        "suggestions": result.get("suggestions", ""),
+        "source_format": source_format.value,
+        "provider": result.get("provider", provider.value),
+        "model": result.get("model"),
+        "success": result.get("success", False),
+        "error": result.get("error"),
+    }
+
+
+@router.get("/ai/status")
+async def get_ai_status():
+    """Check if AI-assisted conversion is available and list providers."""
+    providers = ai_converter_service.get_available_providers()
+    return {
+        "available": len(providers) > 0,
+        "providers": providers,
     }

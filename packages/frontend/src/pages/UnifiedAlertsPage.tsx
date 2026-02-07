@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, ReactNode, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertCircle,
@@ -6,13 +6,22 @@ import {
   Filter,
   RefreshCw,
   Search,
+  CheckSquare,
+  Square,
+  XCircle,
+  CheckCircle2,
+  UserPlus,
+  Archive,
+  Trash2,
 } from 'lucide-react'
 import {
   useListUnifiedAlertsQuery,
   useListConnectorsQuery,
+  useBulkUpdateAlertsMutation,
 } from '../api/pantherApi'
 import { cn } from '../lib/utils'
 import { formatDistanceToNow } from 'date-fns'
+import PantherLogo from '../components/common/PantherLogo'
 
 const severityConfig: Record<string, { color: string; label: string }> = {
   critical: { color: 'bg-red-500/20 text-red-400', label: 'Critical' },
@@ -29,35 +38,132 @@ const statusConfig: Record<string, { color: string; label: string }> = {
   closed: { color: 'bg-gray-500/20 text-gray-400', label: 'Closed' },
 }
 
-const sourceTypeConfig: Record<string, { label: string; icon: string }> = {
-  panther: { label: 'Panther', icon: '🐆' },
-  google_secops: { label: 'Google SecOps', icon: '🔵' },
-  splunk: { label: 'Splunk', icon: '🟢' },
-  sentinel: { label: 'Sentinel', icon: '🔷' },
-  elastic: { label: 'Elastic', icon: '🟡' },
+const sourceTypeConfig: Record<string, { label: string; icon: string | ReactNode; category: string }> = {
+  // SIEM
+  panther: { label: 'Panther', icon: <PantherLogo size={20} />, category: 'SIEM' },
+  google_secops: { label: 'Google SecOps', icon: '🔵', category: 'SIEM' },
+  splunk: { label: 'Splunk', icon: '🟢', category: 'SIEM' },
+  sentinel: { label: 'Sentinel', icon: '🔷', category: 'SIEM' },
+  elastic: { label: 'Elastic', icon: '🟡', category: 'SIEM' },
+  sumo_logic: { label: 'Sumo Logic', icon: '🟣', category: 'SIEM' },
+  // EDR
+  crowdstrike_falcon: { label: 'CrowdStrike Falcon', icon: '🔴', category: 'EDR' },
+  sentinelone: { label: 'SentinelOne', icon: '🟣', category: 'EDR' },
+  microsoft_defender: { label: 'Microsoft Defender', icon: '🛡️', category: 'EDR' },
+  carbon_black: { label: 'Carbon Black', icon: '⬛', category: 'EDR' },
+  // XDR
+  cortex_xdr: { label: 'Cortex XDR', icon: '🔶', category: 'XDR' },
+  trend_vision_one: { label: 'Trend Vision One', icon: '🔺', category: 'XDR' },
+  // Cloud Security
+  aws_security_hub: { label: 'AWS Security Hub', icon: '🟠', category: 'Cloud' },
+  aws_guardduty: { label: 'AWS GuardDuty', icon: '🟠', category: 'Cloud' },
+  gcp_scc: { label: 'GCP Security Command Center', icon: '🔵', category: 'Cloud' },
+  azure_defender: { label: 'Azure Defender', icon: '🔷', category: 'Cloud' },
+  wiz: { label: 'Wiz', icon: '💎', category: 'Cloud' },
+  orca: { label: 'Orca', icon: '🐋', category: 'Cloud' },
+  // Identity
+  okta: { label: 'Okta', icon: '🔐', category: 'Identity' },
+  entra_id: { label: 'Microsoft Entra ID', icon: '🔷', category: 'Identity' },
+  azure_ad_identity: { label: 'Azure AD Identity', icon: '🔷', category: 'Identity' },
+  crowdstrike_identity: { label: 'CrowdStrike Identity', icon: '🔴', category: 'Identity' },
+  // Email Security
+  proofpoint: { label: 'Proofpoint', icon: '📧', category: 'Email' },
+  mimecast: { label: 'Mimecast', icon: '📨', category: 'Email' },
+  microsoft_defender_email: { label: 'Defender for Office 365', icon: '📬', category: 'Email' },
+  // Network Security
+  cloudflare: { label: 'Cloudflare', icon: '🟠', category: 'Network' },
+  darktrace: { label: 'Darktrace', icon: '🌐', category: 'Network' },
+  vectra: { label: 'Vectra', icon: '📡', category: 'Network' },
 }
 
+type AlertTab = 'active' | 'resolved'
+
 export default function UnifiedAlertsPage() {
+  const [activeTab, setActiveTab] = useState<AlertTab>('active')
   const [filters, setFilters] = useState({
     source_type: '',
     severity: '',
     status: '',
     connector_id: '',
+    start_date: '',
+    end_date: '',
     page: 1,
     page_size: 25,
   })
   const [showFilters, setShowFilters] = useState(false)
+  const [selectedAlerts, setSelectedAlerts] = useState<Set<string>>(new Set())
+  const [bulkUpdateAlerts] = useBulkUpdateAlertsMutation()
+
+  // Determine status filter based on tab
+  const getStatusFilter = () => {
+    if (filters.status) return filters.status // User manually selected a status
+    if (activeTab === 'resolved') return 'resolved'
+    return undefined // Active tab shows all non-resolved (handled by exclude_resolved param)
+  }
 
   const { data: alerts, isLoading, refetch } = useListUnifiedAlertsQuery({
     source_type: filters.source_type || undefined,
     severity: filters.severity || undefined,
-    status: filters.status || undefined,
+    status: getStatusFilter(),
     connector_id: filters.connector_id || undefined,
+    start_date: filters.start_date || undefined,
+    end_date: filters.end_date || undefined,
     page: filters.page,
     page_size: filters.page_size,
+    exclude_resolved: activeTab === 'active' && !filters.status ? true : undefined,
   })
 
   const { data: connectors } = useListConnectorsQuery({ category: 'data_source' })
+
+  // Selection helpers
+  const allVisibleIds = useMemo(() =>
+    alerts?.items.map(a => a.id) || [],
+    [alerts?.items]
+  )
+
+  const isAllSelected = allVisibleIds.length > 0 &&
+    allVisibleIds.every(id => selectedAlerts.has(id))
+
+  const isSomeSelected = selectedAlerts.size > 0
+
+  const toggleSelectAll = () => {
+    if (isAllSelected) {
+      setSelectedAlerts(new Set())
+    } else {
+      setSelectedAlerts(new Set(allVisibleIds))
+    }
+  }
+
+  const toggleSelectOne = (id: string) => {
+    const newSelected = new Set(selectedAlerts)
+    if (newSelected.has(id)) {
+      newSelected.delete(id)
+    } else {
+      newSelected.add(id)
+    }
+    setSelectedAlerts(newSelected)
+  }
+
+  const clearSelection = () => {
+    setSelectedAlerts(new Set())
+  }
+
+  const handleBulkAction = async (action: string, value?: string) => {
+    if (selectedAlerts.size === 0) return
+
+    try {
+      await bulkUpdateAlerts({
+        alert_ids: Array.from(selectedAlerts),
+        action,
+        value,
+      }).unwrap()
+
+      clearSelection()
+      refetch()
+    } catch (error) {
+      console.error('Bulk action failed:', error)
+    }
+  }
 
   const handleFilterChange = (key: string, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value, page: 1 }))
@@ -73,7 +179,7 @@ export default function UnifiedAlertsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Unified Alerts</h1>
+          <h1 className="text-3xl font-bold">Alerts</h1>
           <p className="text-muted-foreground">
             All alerts from connected data sources in one view
           </p>
@@ -99,9 +205,41 @@ export default function UnifiedAlertsPage() {
         </div>
       </div>
 
+      {/* Tabs for Active vs Resolved */}
+      <div className="flex items-center gap-1 border-b">
+        <button
+          onClick={() => {
+            setActiveTab('active')
+            setFilters((prev) => ({ ...prev, status: '', page: 1 }))
+          }}
+          className={cn(
+            'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
+            activeTab === 'active'
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          )}
+        >
+          Active Alerts
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab('resolved')
+            setFilters((prev) => ({ ...prev, status: '', page: 1 }))
+          }}
+          className={cn(
+            'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
+            activeTab === 'resolved'
+              ? 'border-primary text-foreground'
+              : 'border-transparent text-muted-foreground hover:text-foreground'
+          )}
+        >
+          Resolved
+        </button>
+      </div>
+
       {/* Filters Panel */}
       {showFilters && (
-        <div className="rounded-lg border bg-background p-4">
+        <div className="rounded-lg border bg-background p-4 space-y-4">
           <div className="grid grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Source</label>
@@ -164,6 +302,93 @@ export default function UnifiedAlertsPage() {
               </select>
             </div>
           </div>
+          <div className="grid grid-cols-4 gap-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Start Date</label>
+              <input
+                type="date"
+                value={filters.start_date}
+                onChange={(e) => handleFilterChange('start_date', e.target.value)}
+                className="w-full px-3 py-2 rounded-md border bg-background text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">End Date</label>
+              <input
+                type="date"
+                value={filters.end_date}
+                onChange={(e) => handleFilterChange('end_date', e.target.value)}
+                className="w-full px-3 py-2 rounded-md border bg-background text-sm"
+              />
+            </div>
+            <div className="col-span-2 flex items-end">
+              <button
+                onClick={() => setFilters((prev) => ({ ...prev, start_date: '', end_date: '', page: 1 }))}
+                className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
+              >
+                Clear dates
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Actions Toolbar */}
+      {isSomeSelected && (
+        <div className="rounded-lg border bg-primary/10 p-3 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <span className="font-medium text-primary">
+              {selectedAlerts.size} alert{selectedAlerts.size !== 1 ? 's' : ''} selected
+            </span>
+            <button
+              onClick={clearSelection}
+              className="text-sm text-muted-foreground hover:text-foreground flex items-center gap-1"
+            >
+              <XCircle size={14} />
+              Clear
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleBulkAction('acknowledge')}
+              className="flex items-center gap-2 px-3 py-1.5 bg-yellow-500/20 text-yellow-400 rounded-md text-sm font-medium hover:bg-yellow-500/30"
+            >
+              <CheckCircle2 size={16} />
+              Acknowledge
+            </button>
+            <button
+              onClick={() => handleBulkAction('resolve')}
+              className="flex items-center gap-2 px-3 py-1.5 bg-green-500/20 text-green-400 rounded-md text-sm font-medium hover:bg-green-500/30"
+            >
+              <CheckSquare size={16} />
+              Resolve
+            </button>
+            <button
+              onClick={() => handleBulkAction('close')}
+              className="flex items-center gap-2 px-3 py-1.5 bg-gray-500/20 text-gray-400 rounded-md text-sm font-medium hover:bg-gray-500/30"
+            >
+              <Archive size={16} />
+              Close
+            </button>
+            <div className="w-px h-6 bg-border mx-1" />
+            <select
+              onChange={(e) => {
+                if (e.target.value) {
+                  handleBulkAction('set_severity', e.target.value)
+                  e.target.value = ''
+                }
+              }}
+              className="px-3 py-1.5 bg-muted rounded-md text-sm font-medium border-0"
+              defaultValue=""
+            >
+              <option value="" disabled>Set Severity...</option>
+              <option value="critical">Critical</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+              <option value="info">Info</option>
+            </select>
+          </div>
         </div>
       )}
 
@@ -206,6 +431,18 @@ export default function UnifiedAlertsPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b bg-muted/50">
+                    <th className="text-left p-3 font-medium w-10">
+                      <button
+                        onClick={toggleSelectAll}
+                        className="flex items-center justify-center hover:text-primary"
+                      >
+                        {isAllSelected ? (
+                          <CheckSquare size={18} className="text-primary" />
+                        ) : (
+                          <Square size={18} />
+                        )}
+                      </button>
+                    </th>
                     <th className="text-left p-3 font-medium">Source</th>
                     <th className="text-left p-3 font-medium">Title</th>
                     <th className="text-left p-3 font-medium">Severity</th>
@@ -231,10 +468,32 @@ export default function UnifiedAlertsPage() {
                     }
 
                     return (
-                      <tr key={alert.id} className="hover:bg-muted/50">
+                      <tr
+                        key={alert.id}
+                        className={cn(
+                          'hover:bg-muted/50',
+                          selectedAlerts.has(alert.id) && 'bg-primary/5'
+                        )}
+                      >
+                        <td className="p-3">
+                          <button
+                            onClick={() => toggleSelectOne(alert.id)}
+                            className="flex items-center justify-center hover:text-primary"
+                          >
+                            {selectedAlerts.has(alert.id) ? (
+                              <CheckSquare size={18} className="text-primary" />
+                            ) : (
+                              <Square size={18} />
+                            )}
+                          </button>
+                        </td>
                         <td className="p-3">
                           <div className="flex items-center gap-2">
-                            <span className="text-lg">{sourceInfo.icon}</span>
+                            {typeof sourceInfo.icon === 'string' ? (
+                              <span className="text-lg">{sourceInfo.icon}</span>
+                            ) : (
+                              <span className="flex items-center">{sourceInfo.icon}</span>
+                            )}
                             <span className="text-sm">{sourceInfo.label}</span>
                           </div>
                         </td>
@@ -309,7 +568,7 @@ export default function UnifiedAlertsPage() {
               <div className="flex items-center justify-between p-4 border-t">
                 <div className="text-sm text-muted-foreground">
                   Showing {(filters.page - 1) * filters.page_size + 1} to{' '}
-                  {Math.min(filters.page * filters.page_size, alerts.total)} of {alerts.total}
+                  {Math.min(filters.page * filters.page_size, alerts?.total ?? 0)} of {alerts?.total ?? 0}
                 </div>
                 <div className="flex items-center gap-2">
                   <button

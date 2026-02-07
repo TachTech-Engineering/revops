@@ -2,10 +2,12 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, Set
+from uuid import UUID
 
 from app.services.notification_service import notification_service
 from app.services.panther_service import PantherService
 from app.config import settings
+from app.db.session import async_session_maker
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +20,22 @@ class AlertPoller:
         self._seen_alert_ids: Set[str] = set()
         self._max_seen_ids = 10000  # Limit memory usage
         self._running = False
+        self._organization_id: Optional[UUID] = None
 
-    async def start(self, panther_host: str, panther_token: str, interval_seconds: int = 30):
+    async def start(
+        self,
+        panther_host: str,
+        panther_token: str,
+        interval_seconds: int = 30,
+        organization_id: Optional[str] = None,
+    ):
         """Start polling for alerts."""
         if self._running:
             logger.warning("Alert poller already running")
             return
 
         self._running = True
+        self._organization_id = UUID(organization_id) if organization_id else None
         logger.info(f"Starting alert poller with {interval_seconds}s interval")
 
         panther_service = PantherService(api_host=panther_host, api_token=panther_token)
@@ -71,16 +81,24 @@ class AlertPoller:
                 # Keep only the most recent half
                 self._seen_alert_ids = set(list(self._seen_alert_ids)[self._max_seen_ids // 2:])
 
-            # Broadcast new alerts
+            # Broadcast new alerts and trigger escalations
             for alert in new_alerts:
-                await notification_service.publish_alert({
+                alert_data = {
                     "id": alert.get("id"),
                     "title": alert.get("title"),
                     "severity": alert.get("severity"),
                     "status": alert.get("status"),
                     "createdAt": alert.get("createdAt"),
                     "ruleName": alert.get("rule", {}).get("displayName") or alert.get("rule", {}).get("id"),
-                })
+                    "description": alert.get("description", ""),
+                }
+
+                # Broadcast via WebSocket
+                await notification_service.publish_alert(alert_data)
+
+                # Trigger escalation if organization is configured
+                if self._organization_id:
+                    await self._trigger_escalation(alert_data)
 
             if new_alerts:
                 logger.info(f"Broadcasted {len(new_alerts)} new alerts")
@@ -88,6 +106,25 @@ class AlertPoller:
         except Exception as e:
             logger.error(f"Failed to poll alerts: {e}")
             raise
+
+    async def _trigger_escalation(self, alert_data: dict):
+        """Trigger escalation for an alert if matching policy exists."""
+        if not self._organization_id:
+            return
+
+        try:
+            from app.services.escalation_service import trigger_escalation_for_alert
+
+            async with async_session_maker() as db:
+                escalation = await trigger_escalation_for_alert(
+                    db=db,
+                    organization_id=self._organization_id,
+                    alert=alert_data,
+                )
+                if escalation:
+                    logger.info(f"Triggered escalation {escalation.id} for alert {alert_data.get('id')}")
+        except Exception as e:
+            logger.error(f"Failed to trigger escalation for alert {alert_data.get('id')}: {e}")
 
 
 # Global alert poller instance

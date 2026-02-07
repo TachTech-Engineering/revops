@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4"
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-3-sonnet-20240229"
+    anthropic_model: str = "claude-sonnet-4-20250514"
     default_llm_provider: str = "openai"
 
     # Attack Simulation (Phase 5)
@@ -51,6 +51,20 @@ class Settings(BaseSettings):
 
     # RBAC
     admin_emails: str = ""  # Comma-separated list of admin emails
+
+    # SSO Configuration
+    # Google OAuth
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
+    # Okta OAuth/OIDC
+    okta_domain: str = ""  # e.g., your-org.okta.com
+    okta_client_id: str = ""
+    okta_client_secret: str = ""
+
+    # SSO Settings
+    sso_auto_create_users: bool = True  # Auto-create users on first SSO login
+    sso_default_role: str = "VIEWER"  # Default role for SSO-created users
 
     # SMTP for scheduled reports
     smtp_host: str = ""

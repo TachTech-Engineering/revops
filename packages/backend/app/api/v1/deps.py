@@ -37,6 +37,16 @@ async def get_panther_service(
     return PantherService(api_host=host, api_token=token)
 
 
+async def get_optional_panther_service(
+    x_panther_host: Optional[str] = Header(None),
+    x_panther_token: Optional[str] = Header(None),
+) -> Optional[PantherService]:
+    """Create a Panther service if credentials are provided, otherwise return None."""
+    if not x_panther_host or not x_panther_token:
+        return None
+    return PantherService(api_host=x_panther_host, api_token=x_panther_token)
+
+
 def get_converter_service() -> ConverterService:
     """Get the converter service (stateless, no credentials needed)."""
     return ConverterService()
@@ -104,6 +114,7 @@ def require_role(min_role: UserRoleType):
 
 
 PantherServiceDep = Annotated[PantherService, Depends(get_panther_service)]
+OptionalPantherServiceDep = Annotated[Optional[PantherService], Depends(get_optional_panther_service)]
 ConverterServiceDep = Annotated[ConverterService, Depends(get_converter_service)]
 CurrentUserDep = Annotated[tuple[str, UserRoleType], Depends(get_current_user_role)]
 OptionalUserEmailDep = Annotated[Optional[str], Depends(get_optional_user_email)]

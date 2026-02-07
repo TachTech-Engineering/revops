@@ -28,6 +28,14 @@ services:
       - LOG_LEVEL=INFO
       - CORS_ORIGINS=http://localhost:3000
       - PYTHONPATH=/app:/app/panther_sdk_repo
+      # Telephony service (mock for local dev, twilio for production)
+      - TELEPHONY_PROVIDER=${TELEPHONY_PROVIDER:-mock}
+      - TELEPHONY_MOCK_ENDPOINT=http://telephony-mock:50051
+      - TELEPHONY_ENABLED=true
+      # Twilio credentials (set these in .env for production)
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID:-}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN:-}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER:-}
     depends_on:
       redis:
         condition: service_started
@@ -56,6 +64,28 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Mock Telephony Service for local development
+  # Simulates phone calls and SMS - logs to console
+  # For production, configure real Fonoster or Twilio
+  telephony-mock:
+    image: python:3.11-slim
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./packages/backend/telephony-mock:/app
+    working_dir: /app
+    command: >
+      bash -c "pip install fastapi uvicorn --quiet && python -m uvicorn server:app --host 0.0.0.0 --port 50051"
+    environment:
+      - LOG_LEVEL=INFO
+
+  # Mail server for local testing (captures emails)
+  mailhog:
+    image: mailhog/mailhog:latest
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
 
 volumes:
   redis_data:

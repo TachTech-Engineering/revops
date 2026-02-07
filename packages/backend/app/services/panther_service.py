@@ -38,7 +38,10 @@ class PantherService:
         status: Optional[str] = None,
         severity: Optional[str] = None,
         detection_id: Optional[str] = None,
+        created_after: Optional[Any] = None,
+        created_before: Optional[Any] = None,
         page_size: int = 50,
+        max_items: Optional[int] = None,
     ) -> tuple[list[dict[str, Any]], Optional[str]]:
         """List alerts with pagination."""
         try:
@@ -47,8 +50,10 @@ class PantherService:
                 status=AlertStatus(status) if status else None,
                 severity=Severity(severity) if severity else None,
                 detection_id=detection_id,
+                created_after=created_after,
+                created_before=created_before,
                 page_size=page_size,
-                max_items=page_size,
+                max_items=max_items or page_size,
             ):
                 alerts.append(alert.model_dump(by_alias=True))
             return alerts, None

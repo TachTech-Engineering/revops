@@ -8,20 +8,27 @@ export interface AlertSummary {
   status: AlertStatus
   detectionId: string
   createdAt: string
-  eventCount: number
+  eventCount?: number
 }
 
 export interface Alert extends AlertSummary {
   description: string | null
-  logTypes: string[]
+  logTypes?: string[]
   updatedAt: string | null
-  firstEventAt: string | null
-  lastEventAt: string | null
-  assigneeId: string | null
-  assigneeName: string | null
-  runbook: string | null
-  reference: string | null
-  tags: string[]
+  firstEventAt?: string | null
+  lastEventAt?: string | null
+  assigneeId?: string | null
+  assigneeName?: string | null
+  runbook?: string | null
+  reference?: string | null
+  tags?: string[]
+  // Connector alert fields
+  detectionName?: string | null
+  sourceType?: string | null
+  connectorId?: string | null
+  mitreTactics?: string[]
+  mitreTechniques?: string[]
+  rawData?: Record<string, unknown> | null
 }
 
 export interface AlertEvent {

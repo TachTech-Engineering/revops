@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Save, Play, AlertCircle, CheckCircle } from 'lucide-react'
+import { ArrowLeft, Save, Play, AlertCircle, CheckCircle, Database, Zap } from 'lucide-react'
 import {
   useGetConnectorQuery,
   useGetConnectorTypesQuery,
@@ -11,6 +11,57 @@ import {
   ConnectorCreate,
 } from '../api/pantherApi'
 import { cn } from '../lib/utils'
+
+// Data source connector type to category mapping
+const dataSourceCategories: Record<string, string> = {
+  // SIEM
+  panther: 'SIEM',
+  google_secops: 'SIEM',
+  splunk: 'SIEM',
+  sentinel: 'SIEM',
+  elastic: 'SIEM',
+  sumo_logic: 'SIEM',
+  // EDR
+  crowdstrike_falcon: 'EDR',
+  sentinelone: 'EDR',
+  microsoft_defender: 'EDR',
+  carbon_black: 'EDR',
+  // XDR
+  cortex_xdr: 'XDR',
+  trend_vision_one: 'XDR',
+  // Cloud Security
+  aws_security_hub: 'Cloud Security',
+  aws_guardduty: 'Cloud Security',
+  gcp_scc: 'Cloud Security',
+  azure_defender: 'Cloud Security',
+  wiz: 'Cloud Security',
+  orca: 'Cloud Security',
+  // Identity
+  okta: 'Identity',
+  entra_id: 'Identity',
+  azure_ad_identity: 'Identity',
+  crowdstrike_identity: 'Identity',
+  // Email Security
+  proofpoint: 'Email Security',
+  mimecast: 'Email Security',
+  microsoft_defender_email: 'Email Security',
+  // Network
+  cloudflare: 'Network',
+  darktrace: 'Network',
+  vectra: 'Network',
+}
+
+const categoryOrder = ['SIEM', 'EDR', 'XDR', 'Cloud Security', 'Identity', 'Email Security', 'Network', 'Other']
+
+const categoryDescriptions: Record<string, string> = {
+  'SIEM': 'Security Information and Event Management platforms',
+  'EDR': 'Endpoint Detection and Response solutions',
+  'XDR': 'Extended Detection and Response platforms',
+  'Cloud Security': 'Cloud security posture and threat detection',
+  'Identity': 'Identity and access management security',
+  'Email Security': 'Email threat protection and phishing detection',
+  'Network': 'Network security and traffic analysis',
+}
 
 interface FormData {
   name: string
@@ -187,6 +238,27 @@ export default function ConnectorEditorPage() {
 
   const filteredTypes = connectorTypes?.filter((t) => t.category === formData.category) || []
 
+  // Group data source types by their sub-category
+  const groupedDataSourceTypes = useMemo(() => {
+    if (formData.category !== 'data_source') return {}
+
+    const groups: Record<string, typeof filteredTypes> = {}
+    filteredTypes.forEach((type) => {
+      const subCategory = dataSourceCategories[type.type] || 'Other'
+      if (!groups[subCategory]) {
+        groups[subCategory] = []
+      }
+      groups[subCategory].push(type)
+    })
+    return groups
+  }, [filteredTypes, formData.category])
+
+  const sortedSubCategories = useMemo(() => {
+    return Object.keys(groupedDataSourceTypes).sort(
+      (a, b) => categoryOrder.indexOf(a) - categoryOrder.indexOf(b)
+    )
+  }, [groupedDataSourceTypes])
+
   if (isEditing && isLoadingConnector) {
     return <div className="p-6 text-center text-muted-foreground">Loading connector...</div>
   }
@@ -220,8 +292,13 @@ export default function ConnectorEditorPage() {
                   : 'border-muted hover:border-accent'
               )}
             >
-              <div className="font-semibold">Data Source</div>
-              <div className="text-sm text-muted-foreground">Ingest alerts from SIEMs</div>
+              <div className="flex items-center gap-2 font-semibold mb-1">
+                <Database size={18} />
+                Data Source
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Ingest alerts from SIEMs, EDR, cloud security, identity, and network platforms
+              </div>
             </button>
             <button
               type="button"
@@ -233,8 +310,13 @@ export default function ConnectorEditorPage() {
                   : 'border-muted hover:border-accent'
               )}
             >
-              <div className="font-semibold">Action Connector</div>
-              <div className="text-sm text-muted-foreground">Execute responses and notifications</div>
+              <div className="flex items-center gap-2 font-semibold mb-1">
+                <Zap size={18} />
+                Action Connector
+              </div>
+              <div className="text-sm text-muted-foreground">
+                Execute responses via ticketing, messaging, EDR actions, and webhooks
+              </div>
             </button>
           </div>
         </div>
@@ -243,28 +325,66 @@ export default function ConnectorEditorPage() {
       {/* Connector Type Selection */}
       {!isEditing && (
         <div className="rounded-lg border bg-background p-6">
-          <label className="block text-sm font-medium mb-3">Connector Type</label>
+          <label className="block text-sm font-medium mb-3">
+            {formData.category === 'data_source' ? 'Select Data Source' : 'Select Action Connector'}
+          </label>
           {errors.connector_type && (
             <p className="text-sm text-destructive mb-2">{errors.connector_type}</p>
           )}
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {filteredTypes.map((type) => (
-              <button
-                key={type.type}
-                type="button"
-                onClick={() => handleTypeChange(type.type)}
-                className={cn(
-                  'p-3 rounded-lg border text-left transition-colors',
-                  formData.connector_type === type.type
-                    ? 'border-primary bg-primary/10'
-                    : 'border-muted hover:border-accent'
-                )}
-              >
-                <div className="font-medium">{type.name}</div>
-                <div className="text-xs text-muted-foreground line-clamp-2">{type.description}</div>
-              </button>
-            ))}
-          </div>
+
+          {/* Data Sources - Grouped by Category */}
+          {formData.category === 'data_source' ? (
+            <div className="space-y-6">
+              {sortedSubCategories.map((subCategory) => (
+                <div key={subCategory}>
+                  <div className="mb-3">
+                    <h3 className="font-medium text-sm">{subCategory}</h3>
+                    {categoryDescriptions[subCategory] && (
+                      <p className="text-xs text-muted-foreground">{categoryDescriptions[subCategory]}</p>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {groupedDataSourceTypes[subCategory].map((type) => (
+                      <button
+                        key={type.type}
+                        type="button"
+                        onClick={() => handleTypeChange(type.type)}
+                        className={cn(
+                          'p-3 rounded-lg border text-left transition-colors',
+                          formData.connector_type === type.type
+                            ? 'border-primary bg-primary/10'
+                            : 'border-muted hover:border-accent'
+                        )}
+                      >
+                        <div className="font-medium">{type.name}</div>
+                        <div className="text-xs text-muted-foreground line-clamp-2">{type.description}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* Action Connectors - Flat Grid */
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {filteredTypes.map((type) => (
+                <button
+                  key={type.type}
+                  type="button"
+                  onClick={() => handleTypeChange(type.type)}
+                  className={cn(
+                    'p-3 rounded-lg border text-left transition-colors',
+                    formData.connector_type === type.type
+                      ? 'border-primary bg-primary/10'
+                      : 'border-muted hover:border-accent'
+                  )}
+                >
+                  <div className="font-medium">{type.name}</div>
+                  <div className="text-xs text-muted-foreground line-clamp-2">{type.description}</div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

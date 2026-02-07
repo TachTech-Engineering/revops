@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { ArrowLeft, Play, Save, ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowLeft, Play, Save, ChevronDown, ChevronUp, History } from 'lucide-react'
 import Editor from '@monaco-editor/react'
 import {
   useGetRuleQuery,
@@ -11,6 +11,7 @@ import {
 import type { Severity, RuleCreate, RuleUpdate } from '../types'
 import TestCaseEditor, { TestCase } from '../components/rules/TestCaseEditor'
 import TestResultsPanel from '../components/rules/TestResultsPanel'
+import RuleVersionHistory from '../components/rules/RuleVersionHistory'
 
 const DEFAULT_RULE_CODE = `from panther_sdk.detections import Rule, Severity, LogType, deep_get
 
@@ -59,6 +60,7 @@ export default function RuleEditorPage() {
   const [testCases, setTestCases] = useState<TestCase[]>([])
   const [testCaseResults, setTestCaseResults] = useState<Map<string, { passed: boolean; error?: string }>>(new Map())
   const [showTestPanel, setShowTestPanel] = useState(false)
+  const [showVersionHistory, setShowVersionHistory] = useState(false)
 
   useEffect(() => {
     if (existingRule) {
@@ -340,6 +342,29 @@ export default function RuleEditorPage() {
                 />
               )}
             </div>
+          )}
+
+          {/* Version History Toggle (only for existing rules) */}
+          {!isNew && ruleId && (
+            <>
+              <button
+                onClick={() => setShowVersionHistory(!showVersionHistory)}
+                className="w-full flex items-center justify-between px-4 py-2 rounded-lg border bg-muted/50 hover:bg-muted transition-colors"
+              >
+                <span className="font-semibold text-sm flex items-center gap-2">
+                  <History size={16} />
+                  Version History
+                </span>
+                {showVersionHistory ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+              </button>
+
+              {/* Version History Panel */}
+              {showVersionHistory && (
+                <div className="rounded-lg border bg-background p-4">
+                  <RuleVersionHistory ruleId={ruleId} />
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

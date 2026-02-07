@@ -109,6 +109,52 @@ async def run_migrations(conn) -> None:
         logger.warning(f"Migration check failed (table may not exist yet): {e}")
 
 
+async def seed_default_correlation_rules() -> None:
+    """Seed default correlation rules for auto-incident creation."""
+    from sqlalchemy import select
+    from app.db.models import CorrelationRule, Organization
+
+    async with AsyncSessionLocal() as db:
+        try:
+            # Get all organizations
+            result = await db.execute(select(Organization))
+            organizations = result.scalars().all()
+
+            for org in organizations:
+                # Check if default high-severity rule already exists
+                existing = await db.execute(
+                    select(CorrelationRule).where(
+                        CorrelationRule.organization_id == org.id,
+                        CorrelationRule.name == "Auto-Incident: Critical/High Severity Alerts",
+                    )
+                )
+                if existing.scalar_one_or_none():
+                    continue
+
+                # Create default rule for high-severity alerts
+                rule = CorrelationRule(
+                    organization_id=org.id,
+                    name="Auto-Incident: Critical/High Severity Alerts",
+                    description="Automatically creates incidents from critical and high severity alerts from any data source connector.",
+                    conditions={
+                        "severity_filter": ["critical", "high"],
+                        "min_alerts": 1,
+                        "time_window_minutes": 60,
+                    },
+                    is_active=True,
+                    auto_create_incident=True,
+                    created_by="system",
+                )
+                db.add(rule)
+                logger.info(f"Created default correlation rule for organization {org.name}")
+
+            await db.commit()
+            logger.info("Default correlation rules seeded successfully")
+        except Exception as e:
+            logger.warning(f"Failed to seed default correlation rules: {e}")
+            await db.rollback()
+
+
 async def init_db(max_retries: int = 10, retry_delay: float = 2.0) -> None:
     """Initialize database with retry logic for container startup."""
     from app.db.models import Base
@@ -120,6 +166,10 @@ async def init_db(max_retries: int = 10, retry_delay: float = 2.0) -> None:
                 # Run migrations to add any missing columns
                 await run_migrations(conn)
             logger.info("Database initialized successfully")
+
+            # Seed default correlation rules
+            await seed_default_correlation_rules()
+
             return
         except Exception as e:
             if attempt < max_retries - 1:

@@ -145,7 +145,7 @@ async def create_playbook(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlaybookResponse:
     """Create a new playbook. Requires analyst role."""
-    email, _ = analyst
+    email = analyst.email
 
     db_playbook = Playbook(
         name=playbook.name,
@@ -238,7 +238,7 @@ async def execute_playbook(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ExecutionResponse:
     """Execute a playbook for an alert. Requires analyst role."""
-    email, _ = analyst
+    email = analyst.email
 
     # Get playbook
     result = await db.execute(select(Playbook).where(Playbook.id == playbook_id))

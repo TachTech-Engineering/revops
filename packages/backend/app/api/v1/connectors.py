@@ -448,6 +448,7 @@ async def trigger_sync(
     admin: OrgAdminDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     background_tasks: BackgroundTasks,
+    full_sync: bool = Query(False, description="Force full resync from max age window, ignoring last sync time"),
 ) -> dict:
     """Trigger a manual sync for a data source connector. Requires admin role."""
     result = await db.execute(
@@ -469,15 +470,20 @@ async def trigger_sync(
         raise HTTPException(status_code=400, detail="Connector is not connected")
 
     # Queue sync in background (pass org_id for proper alert creation)
-    background_tasks.add_task(sync_connector_alerts, connector_id, admin.organization_id)
+    background_tasks.add_task(sync_connector_alerts, connector_id, admin.organization_id, full_sync)
 
-    return {"status": "sync_queued", "connector_id": str(connector_id)}
+    return {"status": "sync_queued", "connector_id": str(connector_id), "full_sync": full_sync}
 
 
-async def sync_connector_alerts(connector_id: UUID, organization_id: UUID):
+async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_sync: bool = False):
     """Background task to sync alerts from a connector."""
     from app.db.session import AsyncSessionLocal
     from app.config import settings
+    from app.services.correlation_service import CorrelationService
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"Starting sync for connector {connector_id}, full_sync={full_sync}")
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(
@@ -506,15 +512,21 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID):
 
         connector_instance = connector_cls(connector.id, connector.config, credentials)
 
+        # Initialize correlation service for auto-incident creation
+        correlation_service = CorrelationService(db)
+
         # Calculate sync time range
         from datetime import timedelta
         since = datetime.utcnow() - timedelta(days=settings.alert_sync_max_age_days)
-        if connector.last_sync_at:
+        if connector.last_sync_at and not full_sync:
             since = connector.last_sync_at
+
+        logger.info(f"Syncing alerts since {since} (full_sync={full_sync})")
 
         try:
             cursor = connector.last_sync_cursor
             total_synced = 0
+            total_incidents = 0
 
             while True:
                 alerts, next_cursor = await connector_instance.fetch_alerts(
@@ -523,6 +535,7 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID):
                     cursor=cursor,
                 )
 
+                new_alerts = []
                 for alert in alerts:
                     # Set organization_id on the alert
                     alert.organization_id = organization_id
@@ -541,9 +554,17 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID):
                         continue
 
                     db.add(alert)
+                    new_alerts.append(alert)
                     total_synced += 1
 
                 await db.flush()
+
+                # Process new alerts through correlation rules
+                if new_alerts:
+                    incidents = await correlation_service.process_alerts_batch(
+                        new_alerts, organization_id
+                    )
+                    total_incidents += len(incidents)
 
                 if not next_cursor:
                     break
@@ -554,7 +575,13 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID):
             connector.last_error = None
             await db.commit()
 
+            logger.info(
+                f"Sync completed for connector {connector_id}: "
+                f"{total_synced} alerts synced, {total_incidents} incidents created"
+            )
+
         except Exception as e:
+            logger.exception(f"Sync failed for connector {connector_id}: {e}")
             connector.last_error = str(e)
             await db.commit()
 
@@ -649,6 +676,9 @@ async def list_unified_alerts(
     status: Optional[str] = None,
     source_type: Optional[str] = None,
     connector_id: Optional[UUID] = None,
+    exclude_resolved: Optional[bool] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> dict:
     """List alerts from all connected sources (unified view) for the current organization."""
     # Filter by organization
@@ -658,10 +688,24 @@ async def list_unified_alerts(
         query = query.where(NormalizedAlert.severity == severity.lower())
     if status:
         query = query.where(NormalizedAlert.status == status.lower())
+    if exclude_resolved:
+        query = query.where(NormalizedAlert.status != "resolved")
     if source_type:
         query = query.where(NormalizedAlert.source_type == source_type)
     if connector_id:
         query = query.where(NormalizedAlert.connector_id == connector_id)
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00")).replace(tzinfo=None)
+            query = query.where(NormalizedAlert.created_at_source >= start_dt)
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00")).replace(tzinfo=None)
+            query = query.where(NormalizedAlert.created_at_source <= end_dt)
+        except ValueError:
+            pass
 
     # Count total
     count_query = select(func.count()).select_from(query.subquery())

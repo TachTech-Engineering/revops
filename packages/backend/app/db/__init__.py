@@ -3,6 +3,7 @@ from app.db.models import (
     Base,
     # Authentication
     Organization,
+    OrganizationSSO,
     User,
     RefreshToken,
     SavedQuery,
@@ -13,6 +14,7 @@ from app.db.models import (
     WebhookConfig,
     UserRole,
     UserRoleType,
+    SSOProvider,
     AuditLog,
     Playbook,
     PlaybookExecution,
@@ -45,12 +47,17 @@ from app.db.models import (
     NoteResourceType,
     Notification,
     NotificationType,
+    # Rule Versions
+    RuleVersion,
+    RuleChangeType,
     # Connector Framework
     Connector,
     NormalizedAlert,
     ConnectorCategory,
     ConnectorStatus,
     DataSourceType,
+    DataSourceCategory,
+    DATA_SOURCE_CATEGORIES,
     ActionConnectorType,
     # Workflow Engine
     Workflow,
@@ -61,6 +68,49 @@ from app.db.models import (
     WorkflowStatus,
     WorkflowExecutionStatus,
     NodeType,
+    # Data Pipelines
+    Pipeline,
+    PipelineStage,
+    PipelineEdge,
+    PipelineDestination,
+    PipelineExecution,
+    PipelineStatus,
+    StageType,
+    StageCategory,
+    PipelineExecutionStatus,
+    DestinationType,
+    # Rule Health & AI Features
+    RuleHealth,
+    TriageSuggestion,
+    AssetCriticality,
+    NLQueryHistory,
+    # Alert Clustering
+    AlertCluster,
+    AlertClusterStatus,
+    AlertClusterMember,
+    # Playbook Templates
+    PlaybookTemplate,
+    IncidentResolutionPattern,
+    # Escalation Policies
+    EscalationPolicy,
+    EscalationStep,
+    EscalationNotificationType,
+    EscalationStatus,
+    AlertEscalation,
+    # On-Call Schedules
+    OnCallSchedule,
+    OnCallRotationMember,
+    OnCallOverride,
+    RotationType,
+    OnCallRole,
+    # Alert Trends
+    AlertTrendCache,
+    # Anomaly Detection
+    AnomalyType,
+    AnomalyDetection,
+    # SOC Collaboration
+    ShiftHandoff,
+    AlertPresence,
 )
 
 __all__ = [
@@ -71,6 +121,7 @@ __all__ = [
     "Base",
     # Authentication
     "Organization",
+    "OrganizationSSO",
     "User",
     "RefreshToken",
     "SavedQuery",
@@ -81,6 +132,7 @@ __all__ = [
     "WebhookConfig",
     "UserRole",
     "UserRoleType",
+    "SSOProvider",
     "AuditLog",
     "Playbook",
     "PlaybookExecution",
@@ -113,12 +165,17 @@ __all__ = [
     "NoteResourceType",
     "Notification",
     "NotificationType",
+    # Rule Versions
+    "RuleVersion",
+    "RuleChangeType",
     # Connector Framework
     "Connector",
     "NormalizedAlert",
     "ConnectorCategory",
     "ConnectorStatus",
     "DataSourceType",
+    "DataSourceCategory",
+    "DATA_SOURCE_CATEGORIES",
     "ActionConnectorType",
     # Workflow Engine
     "Workflow",
@@ -129,4 +186,47 @@ __all__ = [
     "WorkflowStatus",
     "WorkflowExecutionStatus",
     "NodeType",
+    # Data Pipelines
+    "Pipeline",
+    "PipelineStage",
+    "PipelineEdge",
+    "PipelineDestination",
+    "PipelineExecution",
+    "PipelineStatus",
+    "StageType",
+    "StageCategory",
+    "PipelineExecutionStatus",
+    "DestinationType",
+    # Rule Health & AI Features
+    "RuleHealth",
+    "TriageSuggestion",
+    "AssetCriticality",
+    "NLQueryHistory",
+    # Alert Clustering
+    "AlertCluster",
+    "AlertClusterStatus",
+    "AlertClusterMember",
+    # Playbook Templates
+    "PlaybookTemplate",
+    "IncidentResolutionPattern",
+    # Escalation Policies
+    "EscalationPolicy",
+    "EscalationStep",
+    "EscalationNotificationType",
+    "EscalationStatus",
+    "AlertEscalation",
+    # On-Call Schedules
+    "OnCallSchedule",
+    "OnCallRotationMember",
+    "OnCallOverride",
+    "RotationType",
+    "OnCallRole",
+    # Alert Trends
+    "AlertTrendCache",
+    # Anomaly Detection
+    "AnomalyType",
+    "AnomalyDetection",
+    # SOC Collaboration
+    "ShiftHandoff",
+    "AlertPresence",
 ]

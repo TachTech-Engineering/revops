@@ -20,7 +20,6 @@ import {
   FileText,
   FileBarChart,
   AlertTriangle,
-  Briefcase,
   Sparkles,
   LayoutGrid,
   Target,
@@ -32,6 +31,11 @@ import {
   Bot,
   Plug,
   GitBranch,
+  KeyRound,
+  Mail,
+  MessageSquare,
+  Ticket,
+  AlertCircle,
 } from 'lucide-react'
 import { RootState } from '../../store'
 import { toggleSidebar } from '../../store/uiSlice'
@@ -41,6 +45,7 @@ import RevOpsLogo from './RevOpsLogo'
 import AlertNotifications from '../alerts/AlertNotifications'
 import NotificationCenter from '../notifications/NotificationCenter'
 import MobileNav from '../mobile/MobileNav'
+import AIChatWidget from '../ai/AIChatWidget'
 
 interface LayoutProps {
   children: ReactNode
@@ -67,8 +72,10 @@ const navSections: NavSection[] = [
     icon: AlertTriangle,
     items: [
       { path: '/alerts', label: 'Alerts', icon: Bell },
+      { path: '/alerts/clusters', label: 'Alert Clusters', icon: LayoutGrid },
       { path: '/incidents', label: 'Incidents', icon: AlertTriangle },
-      { path: '/cases', label: 'Cases', icon: Briefcase },
+      { path: '/oncall', label: 'On-Call', icon: Users },
+      { path: '/escalation-policies', label: 'Escalation', icon: Bell },
     ],
   },
   {
@@ -77,6 +84,7 @@ const navSections: NavSection[] = [
     icon: GitBranch,
     items: [
       { path: '/connectors', label: 'Connectors', icon: Plug },
+      { path: '/pipelines', label: 'Pipelines', icon: GitBranch },
       { path: '/workflows', label: 'Workflows', icon: GitBranch },
     ],
   },
@@ -88,6 +96,22 @@ const navSections: NavSection[] = [
       { path: '/queries', label: 'Query Explorer', icon: Database },
       { path: '/ioc-search', label: 'IOC Search', icon: Search },
       { path: '/threat-intel', label: 'Threat Intel', icon: Shield },
+      { path: '/threat-hunting', label: 'Threat Hunting', icon: Crosshair },
+    ],
+  },
+  {
+    id: 'integrations',
+    label: 'Integrations',
+    icon: Plug,
+    items: [
+      { path: '/integrations', label: 'All Integrations', icon: Plug },
+    ],
+  },
+  {
+    id: 'tools',
+    label: 'Tools',
+    icon: ArrowRightLeft,
+    items: [
       { path: '/migration', label: 'Migration Hub', icon: ArrowRightLeft },
     ],
   },
@@ -97,10 +121,14 @@ const navSections: NavSection[] = [
     icon: Activity,
     items: [
       { path: '/analytics', label: 'Overview', icon: BarChart3 },
+      { path: '/executive-summary', label: 'Executive Summary', icon: BarChart3 },
+      { path: '/compliance', label: 'Compliance', icon: Shield },
       { path: '/mitre', label: 'MITRE ATT&CK', icon: Target },
+      { path: '/rule-health', label: 'Rule Health', icon: Activity },
       { path: '/sla', label: 'SLA Tracking', icon: Clock },
       { path: '/dashboards', label: 'Dashboards', icon: LayoutGrid },
       { path: '/reports', label: 'Reports', icon: FileBarChart },
+      { path: '/report-builder', label: 'Report Builder', icon: FileBarChart },
     ],
   },
   {
@@ -110,10 +138,13 @@ const navSections: NavSection[] = [
     items: [
       { path: '/webhooks', label: 'Webhooks', icon: Webhook },
       { path: '/enrichment', label: 'Enrichment', icon: Sparkles },
+      { path: '/asset-criticality', label: 'Asset Criticality', icon: Shield },
       { path: '/roles', label: 'Roles', icon: Users },
       { path: '/audit', label: 'Audit Logs', icon: FileText },
       { path: '/settings', label: 'Settings', icon: Settings },
       { path: '/settings/ai', label: 'AI Settings', icon: Bot },
+      { path: '/settings/sso', label: 'SSO Settings', icon: KeyRound },
+      { path: '/playbook-generator', label: 'Playbook AI', icon: Sparkles },
     ],
   },
 ]
@@ -350,11 +381,12 @@ export default function Layout({ children }: LayoutProps) {
         {/* Sidebar - Hidden on mobile, shown on md+ */}
         <aside
           className={cn(
-            'hidden md:block fixed left-0 top-14 z-40 h-[calc(100vh-3.5rem)] w-56 border-r border-border bg-background transition-transform duration-300 overflow-y-auto',
+            'hidden md:flex md:flex-col fixed left-0 top-14 z-40 h-[calc(100vh-3.5rem)] w-56 border-r border-border bg-background transition-transform duration-300',
             sidebarOpen ? 'translate-x-0' : '-translate-x-full'
           )}
         >
-          <nav className="flex flex-col p-3">
+          {/* Scrollable nav area */}
+          <nav className="flex-1 flex flex-col p-3 overflow-y-auto">
             {/* Top-level items */}
             <Link
               to="/"
@@ -383,8 +415,8 @@ export default function Layout({ children }: LayoutProps) {
             ))}
           </nav>
 
-          {/* Keyboard shortcuts hint */}
-          <div className="absolute bottom-0 left-0 right-0 p-3 border-t border-border bg-background">
+          {/* Keyboard shortcuts hint - fixed at bottom */}
+          <div className="flex-shrink-0 p-3 border-t border-border bg-background">
             <p className="text-xs text-muted-foreground">
               <kbd className="px-1 bg-muted rounded text-[10px]">g</kbd>+
               <kbd className="px-1 bg-muted rounded text-[10px]">c</kbd>/
@@ -408,6 +440,9 @@ export default function Layout({ children }: LayoutProps) {
 
       {/* Mobile Navigation */}
       <MobileNav />
+
+      {/* AI Chat Widget */}
+      <AIChatWidget />
     </div>
   )
 }

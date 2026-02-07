@@ -7,6 +7,7 @@ import {
   useCreateSavedQueryMutation,
   useDeleteSavedQueryMutation,
 } from '../api/pantherApi'
+import NaturalQueryInput from '../components/queries/NaturalQueryInput'
 
 const EXAMPLE_QUERIES = [
   {
@@ -121,6 +122,15 @@ export default function QueryExplorerPage() {
         <h1 className="text-3xl font-bold">Query Explorer</h1>
         <p className="text-muted-foreground">Run SQL queries against your Panther data lake</p>
       </div>
+
+      {/* Natural Language Query Input */}
+      <NaturalQueryInput
+        onQueryResult={(results) => {
+          // The NaturalQueryInput component handles its own result display
+          console.log('NL Query results:', results)
+        }}
+        className="mb-2"
+      />
 
       <div className="grid gap-6 lg:grid-cols-4">
         {/* Query Editor */}
