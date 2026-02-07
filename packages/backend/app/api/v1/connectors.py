@@ -466,8 +466,23 @@ async def trigger_sync(
     if connector.category != ConnectorCategory.DATA_SOURCE:
         raise HTTPException(status_code=400, detail="Only data source connectors can be synced")
 
+    if connector.status == ConnectorStatus.PENDING:
+        raise HTTPException(
+            status_code=400,
+            detail="Connector has not been tested yet. Please test the connection first."
+        )
+
+    if connector.status == ConnectorStatus.ERROR:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Connector is in error state: {connector.last_error or 'Unknown error'}. Please fix the issue and test the connection again."
+        )
+
+    if connector.status == ConnectorStatus.DISABLED:
+        raise HTTPException(status_code=400, detail="Connector is disabled")
+
     if connector.status != ConnectorStatus.CONNECTED:
-        raise HTTPException(status_code=400, detail="Connector is not connected")
+        raise HTTPException(status_code=400, detail=f"Connector is not connected (status: {connector.status.value})")
 
     # Queue sync in background (pass org_id for proper alert creation)
     background_tasks.add_task(sync_connector_alerts, connector_id, admin.organization_id, full_sync)
