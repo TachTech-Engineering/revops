@@ -356,8 +356,21 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
 
         return tags[:20]  # Limit tags
 
-    def normalize_severity(self, source_severity: str) -> str:
+    def normalize_severity(self, source_severity) -> str:
         """Normalize CrowdStrike severity to standard values."""
+        # CrowdStrike uses numeric severity (0-100) or string values
+        if isinstance(source_severity, int):
+            if source_severity >= 80:
+                return "critical"
+            elif source_severity >= 60:
+                return "high"
+            elif source_severity >= 40:
+                return "medium"
+            elif source_severity >= 20:
+                return "low"
+            else:
+                return "info"
+
         severity_map = {
             "critical": "critical",
             "high": "high",
@@ -365,7 +378,7 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
             "low": "low",
             "informational": "info",
         }
-        return severity_map.get(source_severity.lower(), "medium")
+        return severity_map.get(str(source_severity).lower(), "medium")
 
     def normalize_status(self, source_status: str) -> str:
         """Normalize CrowdStrike status to standard values."""
