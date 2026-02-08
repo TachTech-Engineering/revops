@@ -124,9 +124,9 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
             base_url = self.config.get("base_url", "https://api.crowdstrike.com")
 
             async with httpx.AsyncClient(timeout=30.0) as client:
-                # Test by querying sensor info
+                # Test by querying detections endpoint (what we'll actually use)
                 response = await client.get(
-                    f"{base_url}/sensors/queries/sensors/v1",
+                    f"{base_url}/detects/queries/detects/v1",
                     headers={"Authorization": f"Bearer {token}"},
                     params={"limit": 1},
                 )
@@ -134,22 +134,39 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
             latency_ms = int((time.time() - start_time) * 1000)
 
             if response.status_code == 200:
+                data = response.json()
                 return ConnectionTestResult(
                     success=True,
                     message="Successfully connected to CrowdStrike Falcon",
-                    details={"api_url": base_url},
+                    details={
+                        "api_url": base_url,
+                        "detections_available": len(data.get("resources", [])) > 0,
+                    },
+                    latency_ms=latency_ms,
+                )
+            elif response.status_code == 401:
+                return ConnectionTestResult(
+                    success=False,
+                    message="Authentication failed - check client ID and secret",
                     latency_ms=latency_ms,
                 )
             elif response.status_code == 403:
                 return ConnectionTestResult(
                     success=False,
-                    message="Access denied - check API scopes (need Detections Read)",
+                    message="Access denied - API client needs 'Detections: Read' scope",
                     latency_ms=latency_ms,
                 )
             else:
+                error_detail = ""
+                try:
+                    error_data = response.json()
+                    if "errors" in error_data:
+                        error_detail = ": " + str(error_data["errors"])
+                except Exception:
+                    pass
                 return ConnectionTestResult(
                     success=False,
-                    message=f"API returned status {response.status_code}",
+                    message=f"API returned status {response.status_code}{error_detail}",
                     latency_ms=latency_ms,
                 )
 
