@@ -47,7 +47,7 @@ const sourceTypeConfig: Record<string, { label: string; icon: string | ReactNode
   elastic: { label: 'Elastic', icon: '🟡', category: 'SIEM' },
   sumo_logic: { label: 'Sumo Logic', icon: '🟣', category: 'SIEM' },
   // EDR
-  crowdstrike_falcon: { label: 'CrowdStrike Falcon', icon: '🔴', category: 'EDR' },
+  crowdstrike_falcon: { label: 'CrowdStrike Falcon', icon: <img src="/icons/crowdstrike.png" alt="CrowdStrike" className="w-5 h-5 object-contain" />, category: 'EDR' },
   sentinelone: { label: 'SentinelOne', icon: '🟣', category: 'EDR' },
   microsoft_defender: { label: 'Microsoft Defender', icon: '🛡️', category: 'EDR' },
   carbon_black: { label: 'Carbon Black', icon: '⬛', category: 'EDR' },
