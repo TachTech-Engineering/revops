@@ -308,19 +308,28 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
         if raw_alert.get("technique_id"):
             mitre_techniques.append(raw_alert["technique_id"])
 
+        # Ensure rule_id and rule_name are strings
+        rule_id = raw_alert.get("pattern_id")
+        if rule_id is not None:
+            rule_id = str(rule_id)
+
+        rule_name = raw_alert.get("scenario") or raw_alert.get("name")
+        if rule_name is not None:
+            rule_name = str(rule_name)
+
         return NormalizedAlert(
             id=uuid.uuid4(),
             connector_id=self.connector_id,
             source_type="crowdstrike_falcon",
-            external_id=raw_alert.get("composite_id") or raw_alert.get("id", str(uuid.uuid4())),
+            external_id=str(raw_alert.get("composite_id") or raw_alert.get("id", uuid.uuid4())),
             title=title[:500],
             description=description[:2000] if description else None,
             severity=self.normalize_severity(raw_alert.get("severity", "medium")),
             status=self.normalize_status(raw_alert.get("status", "new")),
             created_at_source=created_at,
             updated_at_source=updated_at,
-            rule_id=raw_alert.get("pattern_id"),
-            rule_name=raw_alert.get("scenario") or raw_alert.get("name"),
+            rule_id=rule_id,
+            rule_name=rule_name,
             tags=self._extract_tags(raw_alert),
             mitre_tactics=mitre_tactics,
             mitre_techniques=mitre_techniques,
