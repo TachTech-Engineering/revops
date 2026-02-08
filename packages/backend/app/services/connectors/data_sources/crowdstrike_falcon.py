@@ -254,12 +254,13 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
 
     def normalize_alert(self, raw_alert: dict[str, Any]) -> NormalizedAlert:
         """Normalize a CrowdStrike alert to the unified schema."""
-        # Parse timestamps
+        # Parse timestamps (must be timezone-naive for database)
         created_at = datetime.utcnow()
         created_timestamp = raw_alert.get("created_timestamp", "")
         if created_timestamp:
             try:
-                created_at = datetime.fromisoformat(created_timestamp.replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(created_timestamp.replace("Z", "+00:00"))
+                created_at = dt.replace(tzinfo=None)  # Convert to naive
             except (ValueError, TypeError):
                 pass
 
@@ -267,7 +268,8 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
         updated_timestamp = raw_alert.get("updated_timestamp", "")
         if updated_timestamp:
             try:
-                updated_at = datetime.fromisoformat(updated_timestamp.replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(updated_timestamp.replace("Z", "+00:00"))
+                updated_at = dt.replace(tzinfo=None)  # Convert to naive
             except (ValueError, TypeError):
                 pass
 
