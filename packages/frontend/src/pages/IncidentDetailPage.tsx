@@ -12,18 +12,18 @@ import {
 } from '../api/pantherApi'
 
 const statusColors: Record<IncidentStatus, string> = {
-  open: 'bg-red-100 text-red-800',
-  investigating: 'bg-yellow-100 text-yellow-800',
-  contained: 'bg-blue-100 text-blue-800',
-  resolved: 'bg-green-100 text-green-800',
-  closed: 'bg-gray-100 text-gray-800',
+  open: 'bg-red-500/20 text-red-400',
+  investigating: 'bg-yellow-500/20 text-yellow-400',
+  contained: 'bg-blue-500/20 text-blue-400',
+  resolved: 'bg-green-500/20 text-green-400',
+  closed: 'bg-muted text-muted-foreground',
 }
 
 const severityColors: Record<IncidentSeverity, string> = {
-  low: 'bg-gray-100 text-gray-800',
-  medium: 'bg-yellow-100 text-yellow-800',
-  high: 'bg-orange-100 text-orange-800',
-  critical: 'bg-red-100 text-red-800',
+  low: 'bg-muted text-muted-foreground',
+  medium: 'bg-yellow-500/20 text-yellow-400',
+  high: 'bg-orange-500/20 text-orange-400',
+  critical: 'bg-red-500/20 text-red-400',
 }
 
 export default function IncidentDetailPage() {
@@ -73,7 +73,7 @@ export default function IncidentDetailPage() {
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
       </div>
     )
   }
@@ -81,7 +81,7 @@ export default function IncidentDetailPage() {
   if (error || !incident) {
     return (
       <div className="p-6">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700">
+        <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4 text-destructive">
           Failed to load incident
         </div>
       </div>
@@ -94,24 +94,24 @@ export default function IncidentDetailPage() {
       <div className="flex justify-between items-start mb-6">
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <Link to="/incidents" className="text-blue-600 hover:text-blue-800">
+            <Link to="/incidents" className="text-primary hover:text-primary/80">
               Incidents
             </Link>
-            <span className="text-gray-400">/</span>
-            <span className="text-gray-600">{incident.id.slice(0, 8)}</span>
+            <span className="text-muted-foreground">/</span>
+            <span className="text-muted-foreground">{incident.id.slice(0, 8)}</span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">{incident.title}</h1>
+          <h1 className="text-2xl font-bold text-foreground">{incident.title}</h1>
         </div>
         <div className="flex gap-2">
           <button
             onClick={() => setIsEditing(true)}
-            className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+            className="px-4 py-2 border border-border rounded-lg text-foreground hover:bg-muted transition-colors"
           >
             Edit
           </button>
           <button
             onClick={handleDelete}
-            className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+            className="px-4 py-2 bg-destructive text-destructive-foreground rounded-lg hover:bg-destructive/90 transition-colors"
           >
             Delete
           </button>
@@ -122,16 +122,16 @@ export default function IncidentDetailPage() {
         {/* Main Content */}
         <div className="col-span-2 space-y-6">
           {/* Description */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">Description</h2>
-            <p className="text-gray-700 whitespace-pre-wrap">
+          <div className="bg-card border border-border rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-foreground mb-4">Description</h2>
+            <p className="text-muted-foreground whitespace-pre-wrap">
               {incident.description || 'No description provided'}
             </p>
           </div>
 
           {/* Alerts */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">
+          <div className="bg-card border border-border rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-foreground mb-4">
               Associated Alerts ({incident.alert_count})
             </h2>
             {incident.alert_ids.length > 0 ? (
@@ -141,24 +141,24 @@ export default function IncidentDetailPage() {
                   return (
                     <div
                       key={alertId}
-                      className="flex justify-between items-center p-3 bg-gray-50 rounded-lg"
+                      className="flex justify-between items-center p-3 bg-muted/50 rounded-lg"
                     >
                       <div>
                         <Link
                           to={`/alerts/${alertId}`}
-                          className="text-blue-600 hover:text-blue-800 font-medium"
+                          className="text-primary hover:text-primary/80 font-medium"
                         >
                           {alert?.title || alertId}
                         </Link>
                         {alert && (
-                          <p className="text-sm text-gray-500">
+                          <p className="text-sm text-muted-foreground">
                             {alert.severity} - {new Date(alert.createdAt).toLocaleString()}
                           </p>
                         )}
                       </div>
                       <button
                         onClick={() => handleRemoveAlert(alertId)}
-                        className="text-red-600 hover:text-red-800 text-sm"
+                        className="text-destructive hover:text-destructive/80 text-sm transition-colors"
                       >
                         Remove
                       </button>
@@ -167,29 +167,29 @@ export default function IncidentDetailPage() {
                 })}
               </div>
             ) : (
-              <p className="text-gray-500">No alerts associated with this incident</p>
+              <p className="text-muted-foreground">No alerts associated with this incident</p>
             )}
           </div>
 
           {/* Timeline placeholder */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">Activity Timeline</h2>
+          <div className="bg-card border border-border rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-foreground mb-4">Activity Timeline</h2>
             <div className="space-y-4">
               <div className="flex gap-3">
-                <div className="w-2 h-2 bg-blue-500 rounded-full mt-2"></div>
+                <div className="w-2 h-2 bg-primary rounded-full mt-2"></div>
                 <div>
-                  <p className="text-sm text-gray-900">Incident created</p>
-                  <p className="text-xs text-gray-500">
+                  <p className="text-sm text-foreground">Incident created</p>
+                  <p className="text-xs text-muted-foreground">
                     {new Date(incident.created_at).toLocaleString()} by {incident.created_by}
                   </p>
                 </div>
               </div>
               {incident.updated_at !== incident.created_at && (
                 <div className="flex gap-3">
-                  <div className="w-2 h-2 bg-gray-400 rounded-full mt-2"></div>
+                  <div className="w-2 h-2 bg-muted-foreground rounded-full mt-2"></div>
                   <div>
-                    <p className="text-sm text-gray-900">Incident updated</p>
-                    <p className="text-xs text-gray-500">
+                    <p className="text-sm text-foreground">Incident updated</p>
+                    <p className="text-xs text-muted-foreground">
                       {new Date(incident.updated_at).toLocaleString()}
                     </p>
                   </div>
@@ -201,11 +201,11 @@ export default function IncidentDetailPage() {
 
         {/* Sidebar */}
         <div className="space-y-6">
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">Details</h2>
+          <div className="bg-card border border-border rounded-lg p-6">
+            <h2 className="text-lg font-semibold text-foreground mb-4">Details</h2>
             <dl className="space-y-4">
               <div>
-                <dt className="text-sm text-gray-500">Status</dt>
+                <dt className="text-sm text-muted-foreground">Status</dt>
                 <dd className="mt-1">
                   <span className={`px-2 py-1 text-xs font-medium rounded-full ${statusColors[incident.status]}`}>
                     {incident.status}
@@ -213,7 +213,7 @@ export default function IncidentDetailPage() {
                 </dd>
               </div>
               <div>
-                <dt className="text-sm text-gray-500">Severity</dt>
+                <dt className="text-sm text-muted-foreground">Severity</dt>
                 <dd className="mt-1">
                   <span className={`px-2 py-1 text-xs font-medium rounded-full ${severityColors[incident.severity]}`}>
                     {incident.severity}
@@ -221,22 +221,22 @@ export default function IncidentDetailPage() {
                 </dd>
               </div>
               <div>
-                <dt className="text-sm text-gray-500">Assignee</dt>
-                <dd className="mt-1 text-gray-900">{incident.assignee || 'Unassigned'}</dd>
+                <dt className="text-sm text-muted-foreground">Assignee</dt>
+                <dd className="mt-1 text-foreground">{incident.assignee || 'Unassigned'}</dd>
               </div>
               <div>
-                <dt className="text-sm text-gray-500">Created By</dt>
-                <dd className="mt-1 text-gray-900">{incident.created_by}</dd>
+                <dt className="text-sm text-muted-foreground">Created By</dt>
+                <dd className="mt-1 text-foreground">{incident.created_by}</dd>
               </div>
               <div>
-                <dt className="text-sm text-gray-500">Created At</dt>
-                <dd className="mt-1 text-gray-900">
+                <dt className="text-sm text-muted-foreground">Created At</dt>
+                <dd className="mt-1 text-foreground">
                   {new Date(incident.created_at).toLocaleString()}
                 </dd>
               </div>
               <div>
-                <dt className="text-sm text-gray-500">Updated At</dt>
-                <dd className="mt-1 text-gray-900">
+                <dt className="text-sm text-muted-foreground">Updated At</dt>
+                <dd className="mt-1 text-foreground">
                   {new Date(incident.updated_at).toLocaleString()}
                 </dd>
               </div>
@@ -245,13 +245,13 @@ export default function IncidentDetailPage() {
 
           {/* Tags */}
           {incident.tags.length > 0 && (
-            <div className="bg-white rounded-lg shadow p-6">
-              <h2 className="text-lg font-semibold mb-4">Tags</h2>
+            <div className="bg-card border border-border rounded-lg p-6">
+              <h2 className="text-lg font-semibold text-foreground mb-4">Tags</h2>
               <div className="flex flex-wrap gap-2">
                 {incident.tags.map((tag) => (
                   <span
                     key={tag}
-                    className="px-2 py-1 bg-gray-100 text-gray-700 text-sm rounded-full"
+                    className="px-2 py-1 bg-muted text-muted-foreground text-sm rounded-full"
                   >
                     {tag}
                   </span>
@@ -310,11 +310,11 @@ function EditIncidentModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="flex justify-between items-center px-6 py-4 border-b sticky top-0 bg-white">
-          <h2 className="text-lg font-semibold">Edit Incident</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+      <div className="bg-card border border-border rounded-lg shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex justify-between items-center px-6 py-4 border-b border-border sticky top-0 bg-card">
+          <h2 className="text-lg font-semibold text-foreground">Edit Incident</h2>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -323,33 +323,33 @@ function EditIncidentModal({
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+            <label className="block text-sm font-medium text-foreground mb-1">Title</label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-border bg-background text-foreground rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <label className="block text-sm font-medium text-foreground mb-1">Description</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-border bg-background text-foreground rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <label className="block text-sm font-medium text-foreground mb-1">Status</label>
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as IncidentStatus)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-border bg-background text-foreground rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
               >
                 <option value="open">Open</option>
                 <option value="investigating">Investigating</option>
@@ -360,11 +360,11 @@ function EditIncidentModal({
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Severity</label>
+              <label className="block text-sm font-medium text-foreground mb-1">Severity</label>
               <select
                 value={severity}
                 onChange={(e) => setSeverity(e.target.value as IncidentSeverity)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                className="w-full px-3 py-2 border border-border bg-background text-foreground rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
               >
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
@@ -375,23 +375,23 @@ function EditIncidentModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Assignee</label>
+            <label className="block text-sm font-medium text-foreground mb-1">Assignee</label>
             <input
               type="email"
               value={assignee}
               onChange={(e) => setAssignee(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-border bg-background text-foreground rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
               placeholder="user@example.com"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Tags</label>
+            <label className="block text-sm font-medium text-foreground mb-1">Tags</label>
             <input
               type="text"
               value={tags}
               onChange={(e) => setTags(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-full px-3 py-2 border border-border bg-background text-foreground rounded-lg focus:ring-2 focus:ring-primary focus:border-primary"
               placeholder="Comma-separated tags"
             />
           </div>
@@ -400,13 +400,13 @@ function EditIncidentModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50"
+              className="px-4 py-2 border border-border rounded-lg text-foreground hover:bg-muted transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
             >
               Save Changes
             </button>

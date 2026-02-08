@@ -20,7 +20,7 @@ import {
   useBulkUpdateAlertsMutation,
 } from '../api/pantherApi'
 import { cn } from '../lib/utils'
-import { formatDistanceToNow } from 'date-fns'
+import { formatRelativeTime } from '../lib/dateUtils'
 import PantherLogo from '../components/common/PantherLogo'
 
 const severityConfig: Record<string, { color: string; label: string }> = {
@@ -392,22 +392,38 @@ export default function UnifiedAlertsPage() {
         </div>
       )}
 
-      {/* Stats */}
+      {/* Stats - Clickable severity filters */}
       {alerts && (
-        <div className="grid grid-cols-5 gap-4">
-          <div className="rounded-lg border bg-background p-4">
-            <div className="text-2xl font-bold">{alerts.total}</div>
+        <div className="grid grid-cols-6 gap-4">
+          <button
+            onClick={() => handleFilterChange('severity', '')}
+            className={cn(
+              'rounded-lg border bg-background p-4 text-left transition-all hover:border-primary/50',
+              !filters.severity && 'ring-2 ring-primary border-primary'
+            )}
+          >
+            <div className="text-2xl font-bold">
+              {Object.values(alerts.severity_counts || {}).reduce((a, b) => a + b, 0)}
+            </div>
             <div className="text-sm text-muted-foreground">Total Alerts</div>
-          </div>
+          </button>
           {Object.entries(severityConfig).map(([key, cfg]) => {
-            const count = alerts.items.filter((a) => a.severity === key).length
+            const count = alerts.severity_counts?.[key] || 0
+            const isActive = filters.severity === key
             return (
-              <div key={key} className="rounded-lg border bg-background p-4">
+              <button
+                key={key}
+                onClick={() => handleFilterChange('severity', isActive ? '' : key)}
+                className={cn(
+                  'rounded-lg border bg-background p-4 text-left transition-all hover:border-primary/50',
+                  isActive && 'ring-2 ring-primary border-primary'
+                )}
+              >
                 <div className={cn('text-2xl font-bold', cfg.color.split(' ')[1])}>
                   {count}
                 </div>
                 <div className="text-sm text-muted-foreground">{cfg.label}</div>
-              </div>
+              </button>
             )
           })}
         </div>
@@ -529,9 +545,7 @@ export default function UnifiedAlertsPage() {
                           {alert.rule_name || '-'}
                         </td>
                         <td className="p-3 text-sm text-muted-foreground">
-                          {formatDistanceToNow(new Date(alert.created_at_source), {
-                            addSuffix: true,
-                          })}
+                          {formatRelativeTime(alert.created_at_source)}
                         </td>
                         <td className="p-3">
                           <div className="flex items-center gap-2">

@@ -104,17 +104,22 @@ class AIConverterService:
             self._openai_client = openai.OpenAI(api_key=api_key)
         return self._openai_client
 
-    def get_available_providers(self) -> list[dict]:
-        """Get list of available LLM providers based on configured API keys."""
+    def get_available_providers(self, org_has_anthropic: bool = False, org_has_openai: bool = False) -> list[dict]:
+        """Get list of available LLM providers based on configured API keys.
+
+        Args:
+            org_has_anthropic: Whether the organization has configured an Anthropic key
+            org_has_openai: Whether the organization has configured an OpenAI key
+        """
         providers = []
-        if getattr(settings, 'anthropic_api_key', None):
+        if getattr(settings, 'anthropic_api_key', None) or org_has_anthropic:
             providers.append({
                 "id": LLMProvider.CLAUDE.value,
                 "name": "Claude",
                 "model": CLAUDE_MODEL,
                 "description": "Claude Sonnet 4 - excellent at code generation",
             })
-        if getattr(settings, 'openai_api_key', None):
+        if getattr(settings, 'openai_api_key', None) or org_has_openai:
             providers.append({
                 "id": LLMProvider.OPENAI.value,
                 "name": "OpenAI",
@@ -130,6 +135,8 @@ class AIConverterService:
         user_prompt: str,
         max_tokens: int = 4096,
         messages: Optional[list[dict]] = None,
+        api_key: Optional[str] = None,
+        model_override: Optional[str] = None,
     ) -> dict | str:
         """
         Call the specified LLM provider.
@@ -140,6 +147,8 @@ class AIConverterService:
             user_prompt: User prompt (used if messages is None)
             max_tokens: Maximum tokens in response
             messages: Optional conversation history (for chat mode)
+            api_key: Optional API key (uses org key if provided, else env key)
+            model_override: Optional model to use instead of default
 
         Returns:
             dict with 'content' and 'model' keys if messages provided,
@@ -148,7 +157,13 @@ class AIConverterService:
         if provider == LLMProvider.CLAUDE:
             import anthropic
             try:
-                client = self._get_anthropic_client()
+                # Use provided API key or fall back to cached client
+                if api_key:
+                    client = anthropic.Anthropic(api_key=api_key)
+                else:
+                    client = self._get_anthropic_client()
+
+                model = model_override or CLAUDE_MODEL
 
                 # Build messages list
                 if messages:
@@ -157,7 +172,7 @@ class AIConverterService:
                     msg_list = [{"role": "user", "content": user_prompt}]
 
                 response = client.messages.create(
-                    model=CLAUDE_MODEL,
+                    model=model,
                     max_tokens=max_tokens,
                     system=system_prompt,
                     messages=msg_list
@@ -166,7 +181,7 @@ class AIConverterService:
 
                 # Return dict for chat mode, string for backward compatibility
                 if messages:
-                    return {"content": content, "model": CLAUDE_MODEL}
+                    return {"content": content, "model": model}
                 return content
 
             except anthropic.APIError as e:
@@ -176,7 +191,13 @@ class AIConverterService:
         elif provider == LLMProvider.OPENAI:
             import openai
             try:
-                client = self._get_openai_client()
+                # Use provided API key or fall back to cached client
+                if api_key:
+                    client = openai.OpenAI(api_key=api_key)
+                else:
+                    client = self._get_openai_client()
+
+                model = model_override or OPENAI_MODEL
 
                 # Build messages list
                 if messages:
@@ -188,7 +209,7 @@ class AIConverterService:
                     ]
 
                 response = client.chat.completions.create(
-                    model=OPENAI_MODEL,
+                    model=model,
                     max_tokens=max_tokens,
                     messages=msg_list
                 )
@@ -196,7 +217,7 @@ class AIConverterService:
 
                 # Return dict for chat mode, string for backward compatibility
                 if messages:
-                    return {"content": content, "model": OPENAI_MODEL}
+                    return {"content": content, "model": model}
                 return content
 
             except openai.APIError as e:
@@ -213,6 +234,8 @@ class AIConverterService:
         target_format: ConversionFormat,
         context: Optional[str] = None,
         provider: LLMProvider = LLMProvider.CLAUDE,
+        api_key: Optional[str] = None,
+        model_override: Optional[str] = None,
     ) -> dict:
         """
         Convert a detection rule using AI.
@@ -223,6 +246,8 @@ class AIConverterService:
             target_format: Target SIEM format
             context: Optional additional context about the rule
             provider: LLM provider to use (claude or openai)
+            api_key: Optional API key (uses org key if provided)
+            model_override: Optional model to use instead of default
 
         Returns:
             dict with converted_code, model, and success status
@@ -234,7 +259,7 @@ class AIConverterService:
             source_code, source_format, target_format, source_desc, target_desc, context
         )
 
-        model = CLAUDE_MODEL if provider == LLMProvider.CLAUDE else OPENAI_MODEL
+        model = model_override or (CLAUDE_MODEL if provider == LLMProvider.CLAUDE else OPENAI_MODEL)
 
         try:
             converted_code = self._call_llm(
@@ -242,6 +267,8 @@ class AIConverterService:
                 system_prompt=CONVERSION_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 max_tokens=4096,
+                api_key=api_key,
+                model_override=model_override,
             )
 
             # Clean up code blocks if present
@@ -362,6 +389,8 @@ class AIConverterService:
         source_code: str,
         source_format: ConversionFormat,
         provider: LLMProvider = LLMProvider.CLAUDE,
+        api_key: Optional[str] = None,
+        model_override: Optional[str] = None,
     ) -> dict:
         """Get an explanation of what a detection rule does."""
         source_desc = FORMAT_DESCRIPTIONS.get(source_format, source_format.value)
@@ -381,13 +410,15 @@ Include:
 
 Provide a concise but complete explanation."""
 
-        model = CLAUDE_MODEL if provider == LLMProvider.CLAUDE else OPENAI_MODEL
+        model = model_override or (CLAUDE_MODEL if provider == LLMProvider.CLAUDE else OPENAI_MODEL)
 
         try:
             explanation = self._call_llm(
                 provider=provider,
                 system_prompt="You are a security detection expert who explains detection rules clearly.",
                 user_prompt=prompt,
+                api_key=api_key,
+                model_override=model_override,
                 max_tokens=1024,
             )
             return {
@@ -411,6 +442,8 @@ Provide a concise but complete explanation."""
         source_code: str,
         source_format: ConversionFormat,
         provider: LLMProvider = LLMProvider.CLAUDE,
+        api_key: Optional[str] = None,
+        model_override: Optional[str] = None,
     ) -> dict:
         """Suggest improvements for a detection rule."""
         source_desc = FORMAT_DESCRIPTIONS.get(source_format, source_format.value)
@@ -431,12 +464,14 @@ Provide suggestions for:
 
 Be specific and actionable."""
 
-        model = CLAUDE_MODEL if provider == LLMProvider.CLAUDE else OPENAI_MODEL
+        model = model_override or (CLAUDE_MODEL if provider == LLMProvider.CLAUDE else OPENAI_MODEL)
 
         try:
             suggestions = self._call_llm(
                 provider=provider,
                 system_prompt="You are a security detection expert who provides actionable improvement suggestions.",
+                api_key=api_key,
+                model_override=model_override,
                 user_prompt=prompt,
                 max_tokens=1024,
             )

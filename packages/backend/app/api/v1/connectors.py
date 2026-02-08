@@ -727,6 +727,38 @@ async def list_unified_alerts(
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
 
+    # Get severity counts (apply all filters except severity filter for accurate totals)
+    severity_counts_query = (
+        select(NormalizedAlert.severity, func.count().label("count"))
+        .where(NormalizedAlert.organization_id == org_id)
+    )
+    # Apply same filters as main query (except severity) for accurate counts
+    if status:
+        severity_counts_query = severity_counts_query.where(NormalizedAlert.status == status.lower())
+    if exclude_resolved:
+        severity_counts_query = severity_counts_query.where(NormalizedAlert.status != "resolved")
+    if source_type:
+        severity_counts_query = severity_counts_query.where(NormalizedAlert.source_type == source_type)
+    if connector_id:
+        severity_counts_query = severity_counts_query.where(NormalizedAlert.connector_id == connector_id)
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00")).replace(tzinfo=None)
+            severity_counts_query = severity_counts_query.where(NormalizedAlert.created_at_source >= start_dt)
+        except ValueError:
+            pass
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00")).replace(tzinfo=None)
+            severity_counts_query = severity_counts_query.where(NormalizedAlert.created_at_source <= end_dt)
+        except ValueError:
+            pass
+
+    severity_counts_query = severity_counts_query.group_by(NormalizedAlert.severity)
+    severity_result = await db.execute(severity_counts_query)
+    severity_rows = severity_result.all()
+    severity_counts = {row[0]: row[1] for row in severity_rows if row[0]}
+
     # Get alerts
     query = query.order_by(desc(NormalizedAlert.created_at_source))
     query = query.offset((page - 1) * page_size).limit(page_size)
@@ -758,6 +790,7 @@ async def list_unified_alerts(
         "total": total,
         "page": page,
         "page_size": page_size,
+        "severity_counts": severity_counts,
     }
 
 

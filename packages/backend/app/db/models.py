@@ -227,6 +227,44 @@ class OrganizationSSO(Base):
     )
 
 
+class OrganizationAPIKeys(Base):
+    """
+    Per-organization API key storage for LLM providers.
+    Allows each tenant to configure their own API keys.
+    Keys are encrypted using Fernet symmetric encryption.
+    """
+    __tablename__ = "organization_api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
+    # Provider name (e.g., "openai", "anthropic")
+    provider: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    # Encrypted API key (Fernet encrypted)
+    api_key_encrypted: Mapped[bytes] = mapped_column(nullable=False)
+
+    # Optional model override (if not set, uses system default)
+    model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # Key status
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    # Audit
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        # Each org can only have one key per provider
+        Index('ix_org_api_keys_org_provider', 'organization_id', 'provider', unique=True),
+    )
+
+
 class User(Base):
     __tablename__ = "users"
 

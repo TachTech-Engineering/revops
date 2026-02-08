@@ -23,8 +23,8 @@ import {
   ConnectorStatus,
 } from '../api/pantherApi'
 import { cn } from '../lib/utils'
-import { formatDistanceToNow } from 'date-fns'
 import PantherLogo from '../components/common/PantherLogo'
+import { formatRelativeTime } from '../lib/dateUtils'
 
 const statusConfig: Record<ConnectorStatus, { label: string; color: string; icon: typeof CheckCircle }> = {
   connected: { label: 'Connected', color: 'bg-green-500/20 text-green-400', icon: CheckCircle },
@@ -305,7 +305,7 @@ export default function ConnectorsPage() {
                               <div className="ml-11 flex items-center gap-4 text-xs text-muted-foreground">
                                 {connector.last_health_check && (
                                   <span>
-                                    Last checked: {formatDistanceToNow(new Date(connector.last_health_check), { addSuffix: true })}
+                                    Last checked: {formatRelativeTime(connector.last_health_check)}
                                   </span>
                                 )}
                                 <span>
@@ -313,7 +313,7 @@ export default function ConnectorsPage() {
                                 </span>
                                 {connector.last_sync_at && (
                                   <span>
-                                    Last sync: {formatDistanceToNow(new Date(connector.last_sync_at), { addSuffix: true })}
+                                    Last sync: {formatRelativeTime(connector.last_sync_at)}
                                   </span>
                                 )}
                                 {connector.last_error && (
@@ -432,7 +432,7 @@ export default function ConnectorsPage() {
                             <div className="ml-11 flex items-center gap-4 text-xs text-muted-foreground">
                               {connector.last_health_check && (
                                 <span>
-                                  Last checked: {formatDistanceToNow(new Date(connector.last_health_check), { addSuffix: true })}
+                                  Last checked: {formatRelativeTime(connector.last_health_check)}
                                 </span>
                               )}
                               {connector.last_error && (

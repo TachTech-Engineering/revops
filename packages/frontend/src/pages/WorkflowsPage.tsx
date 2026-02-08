@@ -23,7 +23,7 @@ import {
   WorkflowStatus,
 } from '../api/pantherApi'
 import { cn } from '../lib/utils'
-import { formatDistanceToNow } from 'date-fns'
+import { formatRelativeTime } from '../lib/dateUtils'
 
 const statusConfig: Record<WorkflowStatus, { label: string; color: string; icon: typeof CheckCircle }> = {
   active: { label: 'Active', color: 'bg-green-500/20 text-green-400', icon: CheckCircle },
@@ -159,7 +159,7 @@ export default function WorkflowsPage() {
                       <div className="flex items-center gap-4 text-xs text-muted-foreground">
                         <span>Created by {workflow.created_by}</span>
                         <span>
-                          Updated {formatDistanceToNow(new Date(workflow.updated_at), { addSuffix: true })}
+                          Updated {formatRelativeTime(workflow.updated_at)}
                         </span>
                       </div>
                     </div>

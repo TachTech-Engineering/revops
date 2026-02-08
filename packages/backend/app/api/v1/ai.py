@@ -1,6 +1,7 @@
 """
 AI-powered summarization and conversion API endpoints.
 """
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -10,8 +11,9 @@ from sqlalchemy import select, and_, or_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
-from app.db.models import LLMProvider, Incident, IncidentAlert, AISummaryCache, NormalizedAlert
+from app.db.models import LLMProvider, Incident, IncidentAlert, AISummaryCache, NormalizedAlert, OrganizationAPIKeys
 from app.services.llm_service import llm_service
+from app.services.encryption_service import encrypt_credential, decrypt_credential
 from app.services.ai_converter_service import (
     ai_converter_service,
     ConversionFormat,
@@ -51,6 +53,28 @@ class TestConnectionResponse(BaseModel):
     provider: str
     model: Optional[str] = None
     message: str
+
+
+# API Key Management Models
+class SaveAPIKeyRequest(BaseModel):
+    provider: str  # "openai" or "anthropic"
+    api_key: str
+    model: Optional[str] = None
+
+
+class APIKeyResponse(BaseModel):
+    provider: str
+    configured: bool
+    model: Optional[str] = None
+    last_used_at: Optional[str] = None
+    is_active: bool = True
+
+
+class OrganizationSettingsResponse(BaseModel):
+    default_provider: str
+    openai: dict
+    anthropic: dict
+    organization_keys: list[APIKeyResponse]
 
 
 # AI Converter Models
@@ -245,12 +269,41 @@ async def summarize_incident(
         raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
 
 
-@router.get("/settings", response_model=LLMSettingsResponse)
+@router.get("/settings", response_model=OrganizationSettingsResponse)
 async def get_ai_settings(
     user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: AsyncSession = Depends(get_db),
 ):
-    """Get current LLM configuration."""
-    return await llm_service.get_settings()
+    """Get current LLM configuration including organization-specific API keys."""
+    # Get base settings
+    base_settings = await llm_service.get_settings()
+
+    # Get organization-specific API keys
+    result = await db.execute(
+        select(OrganizationAPIKeys).where(
+            OrganizationAPIKeys.organization_id == org_id
+        )
+    )
+    org_keys = result.scalars().all()
+
+    org_key_responses = []
+    for key in org_keys:
+        org_key_responses.append(APIKeyResponse(
+            provider=key.provider,
+            configured=True,
+            model=key.model,
+            last_used_at=key.last_used_at.isoformat() if key.last_used_at else None,
+            is_active=key.is_active,
+        ))
+
+    # Merge organization keys with base settings
+    return OrganizationSettingsResponse(
+        default_provider=base_settings["default_provider"],
+        openai=base_settings["openai"],
+        anthropic=base_settings["anthropic"],
+        organization_keys=org_key_responses,
+    )
 
 
 @router.post("/test/{provider}", response_model=TestConnectionResponse)
@@ -269,6 +322,225 @@ async def test_connection(
 
     result = await llm_service.test_connection(llm_provider)
     return TestConnectionResponse(**result)
+
+
+@router.post("/keys", response_model=APIKeyResponse)
+async def save_api_key(
+    request: SaveAPIKeyRequest,
+    admin: OrgAdminDep,
+    org_id: OrgIdDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Save or update an organization's API key for an LLM provider.
+    Only organization admins can manage API keys.
+    """
+    provider = request.provider.lower()
+    if provider not in ["openai", "anthropic"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider: {provider}. Use 'openai' or 'anthropic'."
+        )
+
+    # Validate API key format (basic check)
+    api_key = request.api_key.strip()
+    if provider == "openai" and not api_key.startswith("sk-"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid OpenAI API key format. Key should start with 'sk-'"
+        )
+    if provider == "anthropic" and not api_key.startswith("sk-ant-"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid Anthropic API key format. Key should start with 'sk-ant-'"
+        )
+
+    # Encrypt the API key
+    encrypted_key = encrypt_credential(api_key)
+
+    # Check if key already exists for this org/provider
+    result = await db.execute(
+        select(OrganizationAPIKeys).where(
+            and_(
+                OrganizationAPIKeys.organization_id == org_id,
+                OrganizationAPIKeys.provider == provider,
+            )
+        )
+    )
+    existing_key = result.scalar_one_or_none()
+
+    if existing_key:
+        # Update existing key
+        existing_key.api_key_encrypted = encrypted_key
+        existing_key.model = request.model
+        existing_key.is_active = True
+        existing_key.last_error = None
+        existing_key.updated_at = datetime.utcnow()
+    else:
+        # Create new key
+        new_key = OrganizationAPIKeys(
+            organization_id=org_id,
+            provider=provider,
+            api_key_encrypted=encrypted_key,
+            model=request.model,
+            is_active=True,
+            created_by=admin.email,
+        )
+        db.add(new_key)
+
+    await db.commit()
+
+    return APIKeyResponse(
+        provider=provider,
+        configured=True,
+        model=request.model,
+        is_active=True,
+    )
+
+
+class TestAPIKeyRequest(BaseModel):
+    provider: str
+    api_key: str
+    model: Optional[str] = None
+
+
+@router.post("/keys/test", response_model=TestConnectionResponse)
+async def test_api_key_direct(
+    request: TestAPIKeyRequest,
+    user: OrgUserDep,
+):
+    """
+    Test an API key directly without saving it.
+    Use this to verify a key works before committing it.
+    """
+    provider = request.provider.lower()
+    if provider not in ["openai", "anthropic"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider: {provider}. Use 'openai' or 'anthropic'."
+        )
+
+    api_key = request.api_key.strip()
+
+    # Basic format validation
+    if provider == "openai" and not api_key.startswith("sk-"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid OpenAI API key format. Key should start with 'sk-'"
+        )
+    if provider == "anthropic" and not api_key.startswith("sk-ant-"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid Anthropic API key format. Key should start with 'sk-ant-'"
+        )
+
+    try:
+        result = await llm_service.test_connection_with_key(
+            provider=LLMProvider(provider),
+            api_key=api_key,
+            model=request.model,
+        )
+        return TestConnectionResponse(**result)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Test failed: {str(e)}")
+
+
+@router.delete("/keys/{provider}")
+async def delete_api_key(
+    provider: str,
+    admin: OrgAdminDep,
+    org_id: OrgIdDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Delete an organization's API key for an LLM provider.
+    Only organization admins can manage API keys.
+    """
+    provider = provider.lower()
+    if provider not in ["openai", "anthropic"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider: {provider}. Use 'openai' or 'anthropic'."
+        )
+
+    result = await db.execute(
+        select(OrganizationAPIKeys).where(
+            and_(
+                OrganizationAPIKeys.organization_id == org_id,
+                OrganizationAPIKeys.provider == provider,
+            )
+        )
+    )
+    existing_key = result.scalar_one_or_none()
+
+    if not existing_key:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No API key found for provider: {provider}"
+        )
+
+    await db.delete(existing_key)
+    await db.commit()
+
+    return {"message": f"API key for {provider} deleted successfully"}
+
+
+@router.post("/keys/{provider}/test", response_model=TestConnectionResponse)
+async def test_organization_api_key(
+    provider: str,
+    admin: OrgAdminDep,
+    org_id: OrgIdDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Test an organization's API key for an LLM provider.
+    """
+    provider = provider.lower()
+    if provider not in ["openai", "anthropic"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid provider: {provider}. Use 'openai' or 'anthropic'."
+        )
+
+    # Get the organization's API key
+    result = await db.execute(
+        select(OrganizationAPIKeys).where(
+            and_(
+                OrganizationAPIKeys.organization_id == org_id,
+                OrganizationAPIKeys.provider == provider,
+            )
+        )
+    )
+    org_key = result.scalar_one_or_none()
+
+    if not org_key:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No API key configured for provider: {provider}"
+        )
+
+    # Decrypt and test the key
+    try:
+        api_key = decrypt_credential(org_key.api_key_encrypted)
+        test_result = await llm_service.test_connection_with_key(
+            provider=LLMProvider(provider),
+            api_key=api_key,
+            model=org_key.model,
+        )
+
+        # Update last_used_at and any errors
+        org_key.last_used_at = datetime.utcnow()
+        if test_result["status"] == "success":
+            org_key.last_error = None
+        else:
+            org_key.last_error = test_result["message"]
+        await db.commit()
+
+        return TestConnectionResponse(**test_result)
+    except Exception as e:
+        org_key.last_error = str(e)
+        await db.commit()
+        raise HTTPException(status_code=500, detail=f"Test failed: {str(e)}")
 
 
 @router.get("/summaries")
@@ -315,12 +587,62 @@ async def list_cached_summaries(
 
 # ==================== AI Converter Endpoints ====================
 
+async def get_org_api_key(
+    db: AsyncSession,
+    org_id,
+    provider: str
+) -> tuple[Optional[str], Optional[str]]:
+    """
+    Get organization's API key and model for a provider.
+    Returns (api_key, model) tuple, both may be None.
+    """
+    result = await db.execute(
+        select(OrganizationAPIKeys).where(
+            and_(
+                OrganizationAPIKeys.organization_id == org_id,
+                OrganizationAPIKeys.provider == provider,
+                OrganizationAPIKeys.is_active == True,
+            )
+        )
+    )
+    org_key = result.scalar_one_or_none()
+
+    if org_key:
+        try:
+            api_key = decrypt_credential(org_key.api_key_encrypted)
+            return api_key, org_key.model
+        except Exception:
+            pass
+
+    return None, None
+
+
+async def get_org_has_keys(db: AsyncSession, org_id) -> tuple[bool, bool]:
+    """Check if organization has configured API keys for each provider."""
+    result = await db.execute(
+        select(OrganizationAPIKeys.provider).where(
+            and_(
+                OrganizationAPIKeys.organization_id == org_id,
+                OrganizationAPIKeys.is_active == True,
+            )
+        )
+    )
+    providers = [row[0] for row in result.all()]
+    return 'anthropic' in providers, 'openai' in providers
+
+
 @router.get("/converter/providers", response_model=AIProvidersResponse)
 async def get_converter_providers(
     user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: AsyncSession = Depends(get_db),
 ):
     """Get available AI providers and supported formats for conversion."""
-    providers = ai_converter_service.get_available_providers()
+    org_has_anthropic, org_has_openai = await get_org_has_keys(db, org_id)
+    providers = ai_converter_service.get_available_providers(
+        org_has_anthropic=org_has_anthropic,
+        org_has_openai=org_has_openai,
+    )
     formats = [
         {"value": fmt.value, "label": desc}
         for fmt, desc in FORMAT_DESCRIPTIONS.items()
@@ -332,6 +654,8 @@ async def get_converter_providers(
 async def ai_convert_rule(
     request: AIConvertRequest,
     user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Convert a detection rule using AI.
@@ -372,12 +696,20 @@ async def ai_convert_rule(
                 detail=f"Invalid provider: {request.provider}. Use 'claude' or 'openai'."
             )
 
-    # Check if provider is available
-    available = ai_converter_service.get_available_providers()
+    # Get organization's API key for this provider
+    provider_name = "anthropic" if provider == ConverterLLMProvider.CLAUDE else "openai"
+    org_api_key, org_model = await get_org_api_key(db, org_id, provider_name)
+
+    # Check if provider is available (either org key or env key)
+    org_has_anthropic, org_has_openai = await get_org_has_keys(db, org_id)
+    available = ai_converter_service.get_available_providers(
+        org_has_anthropic=org_has_anthropic,
+        org_has_openai=org_has_openai,
+    )
     if not any(p["id"] == provider.value for p in available):
         raise HTTPException(
             status_code=400,
-            detail=f"Provider '{provider.value}' is not configured. Configure API key in settings."
+            detail=f"Provider '{provider.value}' is not configured. Configure API key in AI Settings."
         )
 
     result = ai_converter_service.convert(
@@ -386,6 +718,8 @@ async def ai_convert_rule(
         target_format=target_fmt,
         context=request.context,
         provider=provider,
+        api_key=org_api_key,
+        model_override=org_model,
     )
 
     return AIConvertResponse(**result)
@@ -395,6 +729,8 @@ async def ai_convert_rule(
 async def ai_explain_rule(
     request: AIExplainRequest,
     user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get an AI-powered explanation of what a detection rule does.
@@ -426,18 +762,28 @@ async def ai_explain_rule(
                 detail=f"Invalid provider: {request.provider}. Use 'claude' or 'openai'."
             )
 
+    # Get organization's API key for this provider
+    provider_name = "anthropic" if provider == ConverterLLMProvider.CLAUDE else "openai"
+    org_api_key, org_model = await get_org_api_key(db, org_id, provider_name)
+
     # Check if provider is available
-    available = ai_converter_service.get_available_providers()
+    org_has_anthropic, org_has_openai = await get_org_has_keys(db, org_id)
+    available = ai_converter_service.get_available_providers(
+        org_has_anthropic=org_has_anthropic,
+        org_has_openai=org_has_openai,
+    )
     if not any(p["id"] == provider.value for p in available):
         raise HTTPException(
             status_code=400,
-            detail=f"Provider '{provider.value}' is not configured. Configure API key in settings."
+            detail=f"Provider '{provider.value}' is not configured. Configure API key in AI Settings."
         )
 
     result = ai_converter_service.explain_rule(
         source_code=request.source_code,
         source_format=source_fmt,
         provider=provider,
+        api_key=org_api_key,
+        model_override=org_model,
     )
 
     return AIExplainResponse(**result)
@@ -447,6 +793,8 @@ async def ai_explain_rule(
 async def ai_enhance_rule(
     request: AIEnhanceRequest,
     user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Get AI-powered suggestions to improve a detection rule.
@@ -478,18 +826,28 @@ async def ai_enhance_rule(
                 detail=f"Invalid provider: {request.provider}. Use 'claude' or 'openai'."
             )
 
+    # Get organization's API key for this provider
+    provider_name = "anthropic" if provider == ConverterLLMProvider.CLAUDE else "openai"
+    org_api_key, org_model = await get_org_api_key(db, org_id, provider_name)
+
     # Check if provider is available
-    available = ai_converter_service.get_available_providers()
+    org_has_anthropic, org_has_openai = await get_org_has_keys(db, org_id)
+    available = ai_converter_service.get_available_providers(
+        org_has_anthropic=org_has_anthropic,
+        org_has_openai=org_has_openai,
+    )
     if not any(p["id"] == provider.value for p in available):
         raise HTTPException(
             status_code=400,
-            detail=f"Provider '{provider.value}' is not configured. Configure API key in settings."
+            detail=f"Provider '{provider.value}' is not configured. Configure API key in AI Settings."
         )
 
     result = ai_converter_service.suggest_improvements(
         source_code=request.source_code,
         source_format=source_fmt,
         provider=provider,
+        api_key=org_api_key,
+        model_override=org_model,
     )
 
     return AIEnhanceResponse(**result)
@@ -611,7 +969,9 @@ async def _execute_conversion(
     source_code: str,
     source_format: str,
     target_format: str,
-    provider: ConverterLLMProvider
+    provider: ConverterLLMProvider,
+    api_key: Optional[str] = None,
+    model_override: Optional[str] = None,
 ) -> dict:
     """Execute a rule conversion."""
     try:
@@ -625,6 +985,8 @@ async def _execute_conversion(
         source_format=source_fmt,
         target_format=target_fmt,
         provider=provider,
+        api_key=api_key,
+        model_override=model_override,
     )
 
     return result
@@ -762,12 +1124,20 @@ async def ai_chat(
                 detail=f"Invalid provider: {request.provider}. Use 'claude' or 'openai'."
             )
 
+    # Get organization's API key for this provider
+    provider_name = "anthropic" if provider == ConverterLLMProvider.CLAUDE else "openai"
+    org_api_key, org_model = await get_org_api_key(db, org_id, provider_name)
+
     # Check if provider is available
-    available = ai_converter_service.get_available_providers()
+    org_has_anthropic, org_has_openai = await get_org_has_keys(db, org_id)
+    available = ai_converter_service.get_available_providers(
+        org_has_anthropic=org_has_anthropic,
+        org_has_openai=org_has_openai,
+    )
     if not any(p["id"] == provider.value for p in available):
         raise HTTPException(
             status_code=400,
-            detail=f"Provider '{provider.value}' is not configured. Configure API key in settings."
+            detail=f"Provider '{provider.value}' is not configured. Configure API key in AI Settings."
         )
 
     # Detect intent
@@ -894,7 +1264,8 @@ async def ai_chat(
                 target_format = 'sigma'  # Default
 
             action_data = await _execute_conversion(
-                source_code, source_format, target_format, provider
+                source_code, source_format, target_format, provider,
+                api_key=org_api_key, model_override=org_model
             )
 
             if action_data.get('success'):
@@ -958,6 +1329,8 @@ Keep responses concise but helpful. Use markdown formatting for code blocks and 
         system_prompt=system_prompt,
         user_prompt=user_message,
         messages=messages if len(messages) > 1 else None,
+        api_key=org_api_key,
+        model_override=org_model,
     )
 
     return AIChatResponse(

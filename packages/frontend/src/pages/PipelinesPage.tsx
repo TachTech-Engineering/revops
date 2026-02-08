@@ -26,7 +26,7 @@ import {
   PipelineStatus,
 } from '../api/pantherApi'
 import { cn } from '../lib/utils'
-import { formatDistanceToNow } from 'date-fns'
+import { formatRelativeTime } from '../lib/dateUtils'
 
 const statusConfig: Record<PipelineStatus, { label: string; color: string; icon: typeof CheckCircle }> = {
   active: { label: 'Active', color: 'bg-green-500/20 text-green-400', icon: CheckCircle },
@@ -244,7 +244,7 @@ export default function PipelinesPage() {
                             <div className="flex items-center gap-2 text-muted-foreground">
                               <span>Last run:</span>
                               <span>
-                                {formatDistanceToNow(new Date(metrics.last_execution), { addSuffix: true })}
+                                {formatRelativeTime(metrics.last_execution)}
                               </span>
                             </div>
                           )}
@@ -260,7 +260,7 @@ export default function PipelinesPage() {
                         )}
                         <span>Batch size: {pipeline.batch_size}</span>
                         <span>
-                          Updated {formatDistanceToNow(new Date(pipeline.updated_at), { addSuffix: true })}
+                          Updated {formatRelativeTime(pipeline.updated_at)}
                         </span>
                       </div>
                     </div>

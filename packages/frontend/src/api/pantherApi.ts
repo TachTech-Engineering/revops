@@ -32,7 +32,7 @@ export const revopsApi = createApi({
       return headers
     },
   }),
-  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'SuppressionRule', 'Settings', 'Webhook', 'UserRole', 'AuditLog', 'Playbook', 'ScheduledReport', 'Incident', 'CorrelationRule', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Recommendation', 'SimulationRun', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleVersion', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'OnCallSchedule', 'TrendAnalytics', 'Anomaly'],
+  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'SuppressionRule', 'Settings', 'Webhook', 'UserRole', 'AuditLog', 'Playbook', 'ScheduledReport', 'Incident', 'CorrelationRule', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Recommendation', 'SimulationRun', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleVersion', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'OnCallSchedule', 'TrendAnalytics', 'Anomaly', 'AISettings'],
   endpoints: (builder) => ({
     // Alerts
     listAlerts: builder.query<PaginatedResponse<AlertSummary>, AlertFilters>({
@@ -1108,12 +1108,46 @@ export const revopsApi = createApi({
 
     getAISettings: builder.query<AISettingsResponse, void>({
       query: () => '/ai/settings',
+      providesTags: ['AISettings'],
     }),
 
     testAIConnection: builder.mutation<{ status: string; provider: string; model?: string; message: string }, string>({
       query: (provider) => ({
         url: `/ai/test/${provider}`,
         method: 'POST',
+      }),
+    }),
+
+    // Organization API Key Management
+    saveAPIKey: builder.mutation<SaveAPIKeyResponse, SaveAPIKeyRequest>({
+      query: (body) => ({
+        url: '/ai/keys',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['AISettings'],
+    }),
+
+    deleteAPIKey: builder.mutation<{ message: string }, string>({
+      query: (provider) => ({
+        url: `/ai/keys/${provider}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['AISettings'],
+    }),
+
+    testOrganizationAPIKey: builder.mutation<{ status: string; provider: string; model?: string; message: string }, string>({
+      query: (provider) => ({
+        url: `/ai/keys/${provider}/test`,
+        method: 'POST',
+      }),
+    }),
+
+    testAPIKeyDirect: builder.mutation<{ status: string; provider: string; model?: string; message: string }, { provider: string; api_key: string; model?: string }>({
+      query: (body) => ({
+        url: '/ai/keys/test',
+        method: 'POST',
+        body,
       }),
     }),
 
@@ -2875,10 +2909,32 @@ export interface SummaryResponse {
   output_tokens: number
 }
 
+export interface OrganizationAPIKey {
+  provider: string
+  configured: boolean
+  model?: string
+  last_used_at?: string
+  is_active: boolean
+}
+
 export interface AISettingsResponse {
   default_provider: string
   openai: { configured: boolean; model: string }
   anthropic: { configured: boolean; model: string }
+  organization_keys?: OrganizationAPIKey[]
+}
+
+export interface SaveAPIKeyRequest {
+  provider: string
+  api_key: string
+  model?: string
+}
+
+export interface SaveAPIKeyResponse {
+  provider: string
+  configured: boolean
+  model?: string
+  is_active: boolean
 }
 
 // AI Converter Types
@@ -3200,6 +3256,7 @@ export interface NormalizedAlertListResponse {
   total: number
   page: number
   page_size: number
+  severity_counts?: Record<string, number>
 }
 
 export interface UnifiedAlertFilters {
@@ -3991,6 +4048,11 @@ export const {
   useSummarizeIncidentMutation,
   useGetAISettingsQuery,
   useTestAIConnectionMutation,
+  // Organization API Key Management
+  useSaveAPIKeyMutation,
+  useDeleteAPIKeyMutation,
+  useTestOrganizationAPIKeyMutation,
+  useTestAPIKeyDirectMutation,
   // AI Converter
   useGetAIConverterProvidersQuery,
   useAiConvertRuleMutation,

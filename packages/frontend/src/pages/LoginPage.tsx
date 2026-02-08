@@ -404,7 +404,7 @@ export default function LoginPage() {
             <RevOpsLogo size={64} />
           </div>
           <h1 className="text-2xl font-bold text-zinc-100">RevOps</h1>
-          <p className="text-zinc-400 mt-2">Multi-SIEM Security Operations Platform</p>
+          <p className="text-zinc-400 mt-2">One Platform. All Your Security Alerts.</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border border-zinc-800 bg-zinc-900 p-6 shadow-xl">

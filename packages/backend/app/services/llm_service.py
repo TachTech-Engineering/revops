@@ -393,7 +393,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
         }
 
     async def test_connection(self, provider: LLMProvider) -> dict:
-        """Test connection to an LLM provider."""
+        """Test connection to an LLM provider using configured settings."""
         test_prompt = "Respond with 'Connection successful' if you can read this message."
 
         try:
@@ -409,6 +409,126 @@ Be concise but thorough. This summary should enable quick decision-making."""
                 "status": "error",
                 "provider": provider.value,
                 "message": str(e),
+            }
+
+    async def test_connection_with_key(
+        self,
+        provider: LLMProvider,
+        api_key: str,
+        model: Optional[str] = None,
+    ) -> dict:
+        """Test connection to an LLM provider using a custom API key."""
+        test_prompt = "Respond with 'Connection successful' if you can read this message."
+
+        try:
+            if provider == LLMProvider.OPENAI:
+                result = await self._call_openai_with_key(test_prompt, api_key, model)
+            elif provider == LLMProvider.ANTHROPIC:
+                result = await self._call_anthropic_with_key(test_prompt, api_key, model)
+            else:
+                raise ValueError(f"Unsupported provider: {provider}")
+
+            return {
+                "status": "success",
+                "provider": provider.value,
+                "model": result["model"],
+                "message": "Connection successful - API key is valid",
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "provider": provider.value,
+                "message": str(e),
+            }
+
+    async def _call_openai_with_key(
+        self,
+        prompt: str,
+        api_key: str,
+        model: Optional[str] = None,
+    ) -> dict:
+        """Call OpenAI API with a custom API key."""
+        model_to_use = model or settings.openai_model
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": model_to_use,
+                    "messages": [
+                        {"role": "system", "content": "You are a security analyst assistant."},
+                        {"role": "user", "content": prompt},
+                    ],
+                    "max_tokens": 100,
+                    "temperature": 0.3,
+                },
+                timeout=30.0,
+            )
+
+            if response.status_code == 401:
+                raise ValueError("Invalid OpenAI API key")
+            elif response.status_code == 429:
+                raise ValueError("OpenAI rate limit exceeded")
+            elif response.status_code == 404:
+                raise ValueError(f"Model '{model_to_use}' not found or you don't have access")
+
+            response.raise_for_status()
+            data = response.json()
+
+            return {
+                "summary": data["choices"][0]["message"]["content"],
+                "model": model_to_use,
+                "input_tokens": data.get("usage", {}).get("prompt_tokens", 0),
+                "output_tokens": data.get("usage", {}).get("completion_tokens", 0),
+            }
+
+    async def _call_anthropic_with_key(
+        self,
+        prompt: str,
+        api_key: str,
+        model: Optional[str] = None,
+    ) -> dict:
+        """Call Anthropic API with a custom API key."""
+        model_to_use = model or settings.anthropic_model
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": api_key,
+                    "Content-Type": "application/json",
+                    "anthropic-version": "2023-06-01",
+                },
+                json={
+                    "model": model_to_use,
+                    "max_tokens": 100,
+                    "messages": [
+                        {"role": "user", "content": prompt},
+                    ],
+                    "system": "You are a security analyst assistant.",
+                },
+                timeout=30.0,
+            )
+
+            if response.status_code == 401:
+                raise ValueError("Invalid Anthropic API key")
+            elif response.status_code == 429:
+                raise ValueError("Anthropic rate limit exceeded")
+            elif response.status_code == 404:
+                raise ValueError(f"Model '{model_to_use}' not found or you don't have access")
+
+            response.raise_for_status()
+            data = response.json()
+
+            return {
+                "summary": data["content"][0]["text"],
+                "model": model_to_use,
+                "input_tokens": data.get("usage", {}).get("input_tokens", 0),
+                "output_tokens": data.get("usage", {}).get("output_tokens", 0),
             }
 
 

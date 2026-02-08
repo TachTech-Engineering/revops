@@ -1,12 +1,13 @@
 import { Link } from 'react-router-dom'
 import { Bell, Shield, ArrowRightLeft, AlertTriangle } from 'lucide-react'
-import { useListAlertsQuery, useListRulesQuery } from '../api/pantherApi'
+import { useListUnifiedAlertsQuery, useListRulesQuery } from '../api/pantherApi'
 import { getSeverityColor, formatDate } from '../lib/utils'
 
 export default function Dashboard() {
-  const { data: alertsData, isLoading: alertsLoading } = useListAlertsQuery({
-    pageSize: 5,
-    status: 'OPEN'
+  // Use unified alerts API to get accurate total counts
+  const { data: alertsData, isLoading: alertsLoading } = useListUnifiedAlertsQuery({
+    page_size: 5,
+    status: 'open'
   })
   const { data: rulesData, isLoading: rulesLoading } = useListRulesQuery({
     pageSize: 5
@@ -22,7 +23,7 @@ export default function Dashboard() {
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <Link
-          to="/alerts"
+          to="/unified-alerts"
           className="rounded-lg border border-border bg-card p-6 hover:border-red-500/50 hover:bg-red-500/5 transition-colors"
         >
           <div className="flex items-center gap-4">
@@ -32,7 +33,7 @@ export default function Dashboard() {
             <div>
               <p className="text-sm text-muted-foreground">Open Alerts</p>
               <p className="text-2xl font-bold">
-                {alertsLoading ? '...' : alertsData?.results.length || 0}
+                {alertsLoading ? '...' : alertsData?.total?.toLocaleString() || 0}
               </p>
             </div>
           </div>
@@ -82,19 +83,19 @@ export default function Dashboard() {
         <div className="divide-y divide-border">
           {alertsLoading ? (
             <div className="p-6 text-center text-muted-foreground">Loading...</div>
-          ) : alertsData?.results.length === 0 ? (
+          ) : !alertsData?.items?.length ? (
             <div className="p-6 text-center text-muted-foreground">No open alerts</div>
           ) : (
-            alertsData?.results.map((alert) => (
+            alertsData.items.map((alert) => (
               <Link
                 key={alert.id}
-                to={`/alerts/${alert.id}`}
+                to={`/unified-alerts`}
                 className="flex items-center justify-between px-6 py-4 hover:bg-accent transition-colors"
               >
                 <div>
                   <p className="font-medium">{alert.title}</p>
                   <p className="text-sm text-muted-foreground">
-                    {alert.detectionId} - {alert.eventCount} events
+                    {alert.source_type} {alert.rule_name ? `- ${alert.rule_name}` : ''}
                   </p>
                 </div>
                 <div className="flex items-center gap-4">
@@ -102,16 +103,16 @@ export default function Dashboard() {
                     {alert.severity}
                   </span>
                   <span className="text-sm text-muted-foreground">
-                    {formatDate(alert.createdAt)}
+                    {formatDate(alert.created_at_source)}
                   </span>
                 </div>
               </Link>
             ))
           )}
         </div>
-        {alertsData && alertsData.results.length > 0 && (
+        {alertsData && alertsData.items?.length > 0 && (
           <div className="border-t border-border px-6 py-3">
-            <Link to="/alerts" className="text-sm text-primary hover:underline">
+            <Link to="/unified-alerts" className="text-sm text-primary hover:underline">
               View all alerts
             </Link>
           </div>

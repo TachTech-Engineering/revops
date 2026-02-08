@@ -85,9 +85,10 @@ You can also drag & drop rule files directly into this chat!`,
   const fileInputRef = useRef<HTMLInputElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
 
-  // Check if AI credentials are configured
+  // Check if AI credentials are configured (env vars or organization keys)
   const { data: aiSettings } = useGetAISettingsQuery()
-  const isAIConfigured = aiSettings?.openai?.configured || aiSettings?.anthropic?.configured
+  const hasOrgKeys = aiSettings?.organization_keys?.some(k => k.configured) || false
+  const isAIConfigured = aiSettings?.openai?.configured || aiSettings?.anthropic?.configured || hasOrgKeys
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
