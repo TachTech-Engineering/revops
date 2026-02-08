@@ -54,13 +54,6 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
                         ],
                         "default": "https://api.crowdstrike.com",
                     },
-                    "min_severity": {
-                        "type": "string",
-                        "title": "Minimum Severity",
-                        "description": "Minimum severity to fetch",
-                        "enum": ["critical", "high", "medium", "low", "informational"],
-                        "default": "low",
-                    },
                 },
                 "required": ["base_url"],
             },
@@ -180,21 +173,10 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
         try:
             token = await self._get_access_token()
             base_url = self.config.get("base_url", "https://api.crowdstrike.com")
-            min_severity = self.config.get("min_severity", "low")
 
             # Build FQL filter for alerts
             since_timestamp = since.strftime("%Y-%m-%dT%H:%M:%SZ")
-            filter_parts = [f"created_timestamp:>='{since_timestamp}'"]
-
-            # Add severity filter
-            severity_order = ["informational", "low", "medium", "high", "critical"]
-            if min_severity in severity_order:
-                min_idx = severity_order.index(min_severity)
-                allowed_severities = severity_order[min_idx:]
-                sev_filter = ",".join([f"'{s}'" for s in allowed_severities])
-                filter_parts.append(f"severity:[{sev_filter}]")
-
-            filter_query = "+".join(filter_parts)
+            filter_query = f"created_timestamp:>='{since_timestamp}'"
 
             params = {
                 "filter": filter_query,
