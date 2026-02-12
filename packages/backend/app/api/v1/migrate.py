@@ -10,12 +10,38 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.migration_service import migration_service, SIEMFormat
 from app.services.ai_converter_service import ai_converter_service, ConversionFormat, LLMProvider
+from app.services.encryption_service import decrypt_credential
 from app.config import settings
 from app.db.session import get_db
 from app.db.models import OrganizationAPIKeys
 from app.api.v1.deps import OrgUserDep, OrgIdDep
 
 router = APIRouter()
+
+
+async def get_org_api_key(
+    db: AsyncSession,
+    org_id,
+    provider: LLMProvider,
+) -> Optional[str]:
+    """Fetch and decrypt organization API key for the given provider."""
+    provider_name = 'anthropic' if provider == LLMProvider.CLAUDE else 'openai'
+    result = await db.execute(
+        select(OrganizationAPIKeys).where(
+            and_(
+                OrganizationAPIKeys.organization_id == org_id,
+                OrganizationAPIKeys.provider == provider_name,
+                OrganizationAPIKeys.is_active == True,
+            )
+        )
+    )
+    org_key_record = result.scalar_one_or_none()
+    if org_key_record:
+        try:
+            return decrypt_credential(org_key_record.api_key_encrypted)
+        except Exception:
+            pass
+    return None
 
 
 class ConvertRequest(BaseModel):
@@ -373,7 +399,12 @@ LIMIT 1000;""",
 # AI-Assisted Conversion Endpoints
 
 @router.post("/convert/ai", response_model=AIConvertResponse)
-async def ai_convert_rule(request: AIConvertRequest):
+async def ai_convert_rule(
+    request: AIConvertRequest,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: AsyncSession = Depends(get_db),
+):
     """
     Convert a detection rule using AI (Claude or OpenAI).
 
@@ -381,7 +412,7 @@ async def ai_convert_rule(request: AIConvertRequest):
     edge cases, aggregations, and complex logic that rule-based
     conversion may not handle well.
 
-    Requires ANTHROPIC_API_KEY or OPENAI_API_KEY to be configured.
+    Uses organization API key if configured, otherwise falls back to env var.
     """
     # Validate provider
     try:
@@ -392,16 +423,19 @@ async def ai_convert_rule(request: AIConvertRequest):
             detail=f"Invalid provider: {request.provider}. Supported: claude, openai"
         )
 
-    # Check if selected provider is available
-    if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key:
+    # Try to get organization API key
+    org_api_key = await get_org_api_key(db, org_id, provider)
+
+    # Check if selected provider is available (org key OR env var)
+    if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Claude not available - ANTHROPIC_API_KEY not configured"
+            detail="Claude not available - no API key configured"
         )
-    if provider == LLMProvider.OPENAI and not settings.openai_api_key:
+    if provider == LLMProvider.OPENAI and not settings.openai_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="OpenAI not available - OPENAI_API_KEY not configured"
+            detail="OpenAI not available - no API key configured"
         )
 
     try:
@@ -425,6 +459,7 @@ async def ai_convert_rule(request: AIConvertRequest):
         target_format=target_format,
         context=request.context,
         provider=provider,
+        api_key=org_api_key,  # Pass org key if available
     )
 
     return AIConvertResponse(
@@ -528,7 +563,12 @@ async def ai_bulk_convert_rules(request: AIBulkConvertRequest):
 
 
 @router.post("/explain")
-async def explain_rule(request: ExplainRequest):
+async def explain_rule(
+    request: ExplainRequest,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: AsyncSession = Depends(get_db),
+):
     """
     Get an AI-generated explanation of what a detection rule does.
 
@@ -547,16 +587,19 @@ async def explain_rule(request: ExplainRequest):
             detail=f"Invalid provider: {request.provider}. Supported: claude, openai"
         )
 
+    # Get org API key
+    org_api_key = await get_org_api_key(db, org_id, provider)
+
     # Check if selected provider is available
-    if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key:
+    if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Claude not available - ANTHROPIC_API_KEY not configured"
+            detail="Claude not available - no API key configured"
         )
-    if provider == LLMProvider.OPENAI and not settings.openai_api_key:
+    if provider == LLMProvider.OPENAI and not settings.openai_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="OpenAI not available - OPENAI_API_KEY not configured"
+            detail="OpenAI not available - no API key configured"
         )
 
     try:
@@ -577,6 +620,7 @@ async def explain_rule(request: ExplainRequest):
         source_code=request.source_code,
         source_format=source_format,
         provider=provider,
+        api_key=org_api_key,
     )
 
     return {
@@ -590,7 +634,12 @@ async def explain_rule(request: ExplainRequest):
 
 
 @router.post("/suggest")
-async def suggest_improvements(request: SuggestRequest):
+async def suggest_improvements(
+    request: SuggestRequest,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: AsyncSession = Depends(get_db),
+):
     """
     Get AI-generated suggestions for improving a detection rule.
 
@@ -609,16 +658,19 @@ async def suggest_improvements(request: SuggestRequest):
             detail=f"Invalid provider: {request.provider}. Supported: claude, openai"
         )
 
+    # Get org API key
+    org_api_key = await get_org_api_key(db, org_id, provider)
+
     # Check if selected provider is available
-    if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key:
+    if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Claude not available - ANTHROPIC_API_KEY not configured"
+            detail="Claude not available - no API key configured"
         )
-    if provider == LLMProvider.OPENAI and not settings.openai_api_key:
+    if provider == LLMProvider.OPENAI and not settings.openai_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="OpenAI not available - OPENAI_API_KEY not configured"
+            detail="OpenAI not available - no API key configured"
         )
 
     try:
@@ -639,6 +691,7 @@ async def suggest_improvements(request: SuggestRequest):
         source_code=request.source_code,
         source_format=source_format,
         provider=provider,
+        api_key=org_api_key,
     )
 
     return {
