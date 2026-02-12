@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useSelector } from 'react-redux'
 import {
   ArrowRightLeft,
   FileCode,
@@ -39,6 +40,7 @@ import {
   ExternalLink,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
+import type { RootState } from '../store'
 
 // SIEM format icons (using colored squares + names for visual distinction)
 const SIEM_ICONS: Record<string, { icon: string; color: string; bgColor: string }> = {
@@ -264,6 +266,7 @@ const HISTORY_KEY = 'migration_history'
 const FAVORITES_KEY = 'migration_favorites'
 
 export default function MigrationPage() {
+  const { accessToken } = useSelector((state: RootState) => state.auth)
   const [activeTab, setActiveTab] = useState<'converter' | 'bulk' | 'wizard' | 'templates' | 'history'>('converter')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const codeEditorRef = useRef<HTMLTextAreaElement>(null)
@@ -327,6 +330,15 @@ export default function MigrationPage() {
   }>>([])
   const [isMigrating, setIsMigrating] = useState(false)
   const [migrationProgress, setMigrationProgress] = useState({ current: 0, total: 0, phase: '' })
+
+  // Helper to create headers with auth
+  const getAuthHeaders = useCallback(() => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (accessToken) {
+      headers['Authorization'] = `Bearer ${accessToken}`
+    }
+    return headers
+  }, [accessToken])
 
   // Load history from localStorage
   useEffect(() => {
@@ -410,7 +422,9 @@ export default function MigrationPage() {
   useEffect(() => {
     const checkAIStatus = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/v1/migrate/ai/status`)
+        const response = await fetch(`${API_BASE}/api/v1/migrate/ai/status`, {
+          headers: getAuthHeaders(),
+        })
         if (response.ok) {
           const data = await response.json()
           setAiAvailable(data.available)
@@ -425,13 +439,15 @@ export default function MigrationPage() {
       }
     }
     checkAIStatus()
-  }, [])
+  }, [getAuthHeaders])
 
   // Fetch connectors for wizard
   useEffect(() => {
     const fetchConnectors = async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/v1/connectors`)
+        const response = await fetch(`${API_BASE}/api/v1/connectors`, {
+          headers: getAuthHeaders(),
+        })
         if (response.ok) {
           const data = await response.json()
           setConnectors(data.filter((c: { category: string }) => c.category === 'data_source'))
@@ -500,7 +516,7 @@ export default function MigrationPage() {
 
       const response = await fetch(`${API_BASE}${endpoint}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(body),
       })
 
@@ -543,7 +559,7 @@ export default function MigrationPage() {
     try {
       const response = await fetch(`${API_BASE}/api/v1/migrate/explain`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           source_format: sourceFormat,
           source_code: sourceCode,
@@ -578,7 +594,7 @@ export default function MigrationPage() {
     try {
       const response = await fetch(`${API_BASE}/api/v1/migrate/suggest`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           source_format: sourceFormat,
           source_code: sourceCode,
@@ -663,7 +679,7 @@ export default function MigrationPage() {
 
         const response = await fetch(`${API_BASE}/api/v1/migrate/convert/ai/bulk`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
             source_format: sourceFormat,
             target_format: targetFormat,
@@ -700,7 +716,7 @@ export default function MigrationPage() {
           const content = await file.text()
           const response = await fetch(`${API_BASE}/api/v1/migrate/convert`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(),
             body: JSON.stringify({
               source_format: sourceFormat,
               target_format: targetFormat,
@@ -738,7 +754,7 @@ export default function MigrationPage() {
     try {
       const response = await fetch(`${API_BASE}/api/v1/migrate/plan`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           source_format: wizardSourceFormat,
           target_format: wizardTargetFormat,
@@ -784,7 +800,9 @@ export default function MigrationPage() {
 
     setIsExtracting(true)
     try {
-      const response = await fetch(`${API_BASE}/api/v1/connectors/${selectedConnector}/rules`)
+      const response = await fetch(`${API_BASE}/api/v1/connectors/${selectedConnector}/rules`, {
+        headers: getAuthHeaders(),
+      })
       if (response.ok) {
         const data = await response.json()
         setExtractedRules(data.rules?.map((r: { id: string; name: string; content: string }) => ({
@@ -838,7 +856,7 @@ export default function MigrationPage() {
         const endpoint = aiAvailable ? '/api/v1/migrate/convert/ai' : '/api/v1/migrate/convert'
         const response = await fetch(`${API_BASE}${endpoint}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
             source_format: wizardSourceFormat,
             target_format: wizardTargetFormat,
@@ -887,7 +905,7 @@ export default function MigrationPage() {
       try {
         const response = await fetch(`${API_BASE}/api/v1/migrate/validate`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify({
             format: wizardTargetFormat,
             code: rule.converted,
