@@ -85,6 +85,7 @@ export default function ConnectorsPage() {
   const [activeTab, setActiveTab] = useState<ConnectorCategory | 'all'>('all')
   const [filterStatus, setFilterStatus] = useState<ConnectorStatus | ''>('')
   const [syncMessage, setSyncMessage] = useState<{ id: string; message: string; type: 'success' | 'error' } | null>(null)
+  const [testMessage, setTestMessage] = useState<{ id: string; message: string; type: 'success' | 'error' } | null>(null)
 
   // Auto-dismiss sync message after 5 seconds
   useEffect(() => {
@@ -93,6 +94,14 @@ export default function ConnectorsPage() {
       return () => clearTimeout(timer)
     }
   }, [syncMessage])
+
+  // Auto-dismiss test message after 5 seconds
+  useEffect(() => {
+    if (testMessage) {
+      const timer = setTimeout(() => setTestMessage(null), 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [testMessage])
 
   const { data: connectors, isLoading, refetch } = useListConnectorsQuery({
     category: activeTab !== 'all' ? activeTab : undefined,
@@ -111,9 +120,17 @@ export default function ConnectorsPage() {
   const handleTest = async (id: string) => {
     try {
       const result = await testConnector(id).unwrap()
-      alert(result.success ? `Connection successful: ${result.message}` : `Connection failed: ${result.message}`)
+      setTestMessage({
+        id,
+        message: result.success ? result.message : `Failed: ${result.message}`,
+        type: result.success ? 'success' : 'error',
+      })
     } catch (err) {
-      alert('Failed to test connection')
+      setTestMessage({
+        id,
+        message: 'Failed to test connection',
+        type: 'error',
+      })
     }
   }
 
@@ -339,6 +356,14 @@ export default function ConnectorsPage() {
                                     syncMessage.type === 'success' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
                                   )}>
                                     {syncMessage.message}
+                                  </span>
+                                )}
+                                {testMessage?.id === connector.id && (
+                                  <span className={cn(
+                                    'px-2 py-0.5 rounded',
+                                    testMessage.type === 'success' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                                  )}>
+                                    {testMessage.message}
                                   </span>
                                 )}
                               </div>
