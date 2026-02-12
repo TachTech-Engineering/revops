@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
-import { Bell, Shield, ArrowRightLeft, AlertTriangle } from 'lucide-react'
-import { useListUnifiedAlertsQuery, useListRulesQuery } from '../api/pantherApi'
+import { Bell, Plug, ArrowRightLeft, AlertTriangle } from 'lucide-react'
+import { useListUnifiedAlertsQuery, useListConnectorsQuery } from '../api/pantherApi'
 import { getSeverityColor, formatDate } from '../lib/utils'
 
 export default function Dashboard() {
@@ -9,21 +9,19 @@ export default function Dashboard() {
     page_size: 5,
     status: 'open'
   })
-  const { data: rulesData, isLoading: rulesLoading } = useListRulesQuery({
-    pageSize: 5
-  })
+  const { data: connectorsData, isLoading: connectorsLoading } = useListConnectorsQuery({})
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="text-muted-foreground">Overview of your Panther security posture</p>
+        <p className="text-muted-foreground">Overview of your security posture</p>
       </div>
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <Link
-          to="/unified-alerts"
+          to="/alerts"
           className="rounded-lg border border-border bg-card p-6 hover:border-red-500/50 hover:bg-red-500/5 transition-colors"
         >
           <div className="flex items-center gap-4">
@@ -40,17 +38,17 @@ export default function Dashboard() {
         </Link>
 
         <Link
-          to="/rules"
+          to="/connectors"
           className="rounded-lg border border-border bg-card p-6 hover:border-blue-500/50 hover:bg-blue-500/5 transition-colors"
         >
           <div className="flex items-center gap-4">
             <div className="rounded-full bg-blue-500/20 p-3">
-              <Shield className="h-6 w-6 text-blue-400" />
+              <Plug className="h-6 w-6 text-blue-400" />
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Active Rules</p>
+              <p className="text-sm text-muted-foreground">Data Connectors</p>
               <p className="text-2xl font-bold">
-                {rulesLoading ? '...' : rulesData?.results.filter(r => r.enabled).length || 0}
+                {connectorsLoading ? '...' : connectorsData?.items?.filter(c => c.is_enabled).length || 0}
               </p>
             </div>
           </div>
@@ -66,7 +64,7 @@ export default function Dashboard() {
             </div>
             <div>
               <p className="text-sm text-muted-foreground">Rule Converter</p>
-              <p className="text-sm font-medium">Convert SPL & YARA-L</p>
+              <p className="text-sm font-medium">Convert detection rules</p>
             </div>
           </div>
         </Link>
@@ -89,7 +87,7 @@ export default function Dashboard() {
             alertsData.items.map((alert) => (
               <Link
                 key={alert.id}
-                to={`/unified-alerts`}
+                to={`/alerts/${alert.id}`}
                 className="flex items-center justify-between px-6 py-4 hover:bg-accent transition-colors"
               >
                 <div>
@@ -112,7 +110,7 @@ export default function Dashboard() {
         </div>
         {alertsData && alertsData.items?.length > 0 && (
           <div className="border-t border-border px-6 py-3">
-            <Link to="/unified-alerts" className="text-sm text-primary hover:underline">
+            <Link to="/alerts" className="text-sm text-primary hover:underline">
               View all alerts
             </Link>
           </div>

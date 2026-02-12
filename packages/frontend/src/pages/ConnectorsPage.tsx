@@ -1,4 +1,4 @@
-import { useState, ReactNode } from 'react'
+import { useState, ReactNode, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Plus,
@@ -84,6 +84,15 @@ const connectorTypeLabels: Record<string, { label: string; icon: string | ReactN
 export default function ConnectorsPage() {
   const [activeTab, setActiveTab] = useState<ConnectorCategory | 'all'>('all')
   const [filterStatus, setFilterStatus] = useState<ConnectorStatus | ''>('')
+  const [syncMessage, setSyncMessage] = useState<{ id: string; message: string; type: 'success' | 'error' } | null>(null)
+
+  // Auto-dismiss sync message after 5 seconds
+  useEffect(() => {
+    if (syncMessage) {
+      const timer = setTimeout(() => setSyncMessage(null), 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [syncMessage])
 
   const { data: connectors, isLoading, refetch } = useListConnectorsQuery({
     category: activeTab !== 'all' ? activeTab : undefined,
@@ -110,13 +119,18 @@ export default function ConnectorsPage() {
 
   const handleSync = async (id: string, fullSync: boolean = false) => {
     try {
-      const result = await syncConnector({ id, fullSync }).unwrap()
-      alert(fullSync
-        ? `Full sync queued. Alerts will be fetched from the last 30 days.`
-        : `Sync queued. New alerts will be fetched.`
-      )
+      await syncConnector({ id, fullSync }).unwrap()
+      setSyncMessage({
+        id,
+        message: fullSync ? 'Full sync queued - fetching last 30 days' : 'Sync queued - fetching new alerts',
+        type: 'success',
+      })
     } catch (err) {
-      alert('Failed to sync alerts')
+      setSyncMessage({
+        id,
+        message: 'Failed to sync alerts',
+        type: 'error',
+      })
     }
   }
 
@@ -318,6 +332,14 @@ export default function ConnectorsPage() {
                                 )}
                                 {connector.last_error && (
                                   <span className="text-red-400">Error: {connector.last_error}</span>
+                                )}
+                                {syncMessage?.id === connector.id && (
+                                  <span className={cn(
+                                    'px-2 py-0.5 rounded',
+                                    syncMessage.type === 'success' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                                  )}>
+                                    {syncMessage.message}
+                                  </span>
                                 )}
                               </div>
                             </div>

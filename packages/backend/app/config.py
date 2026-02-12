@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # CORS Configuration
     cors_origins: str = "http://localhost:3000"
 
+    # Public URL (for generating external callback URLs behind proxies)
+    public_base_url: str = ""  # e.g., "https://ttrevops.com"
+
     # Redis Configuration
     redis_host: str = "localhost"
     redis_port: int = 6379

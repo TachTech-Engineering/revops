@@ -127,6 +127,37 @@ async def get_org_sso_configs(
     return list(result.scalars().all())
 
 
+async def org_has_sso_enabled(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> bool:
+    """Check if an organization has any enabled SSO configuration."""
+    result = await db.execute(
+        select(OrganizationSSO.id)
+        .where(
+            OrganizationSSO.organization_id == organization_id,
+            OrganizationSSO.is_enabled == True
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def get_org_sso_provider_names(
+    db: AsyncSession,
+    organization_id: UUID,
+) -> list[str]:
+    """Get list of enabled SSO provider names for an organization."""
+    result = await db.execute(
+        select(OrganizationSSO.provider)
+        .where(
+            OrganizationSSO.organization_id == organization_id,
+            OrganizationSSO.is_enabled == True
+        )
+    )
+    return [row[0].value.title() for row in result.all()]
+
+
 async def get_org_by_slug(
     db: AsyncSession,
     slug: str,

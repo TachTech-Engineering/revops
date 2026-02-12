@@ -3,12 +3,17 @@ Migration API - Detection rule conversion endpoints.
 """
 
 from typing import Optional
-from fastapi import APIRouter, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, HTTPException, status, UploadFile, File, Depends
 from pydantic import BaseModel
+from sqlalchemy import select, and_
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.migration_service import migration_service, SIEMFormat
 from app.services.ai_converter_service import ai_converter_service, ConversionFormat, LLMProvider
 from app.config import settings
+from app.db.session import get_db
+from app.db.models import OrganizationAPIKeys
+from app.api.v1.deps import OrgUserDep, OrgIdDep
 
 router = APIRouter()
 
@@ -647,9 +652,29 @@ async def suggest_improvements(request: SuggestRequest):
 
 
 @router.get("/ai/status")
-async def get_ai_status():
+async def get_ai_status(
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: AsyncSession = Depends(get_db),
+):
     """Check if AI-assisted conversion is available and list providers."""
-    providers = ai_converter_service.get_available_providers()
+    # Check organization API keys
+    result = await db.execute(
+        select(OrganizationAPIKeys.provider).where(
+            and_(
+                OrganizationAPIKeys.organization_id == org_id,
+                OrganizationAPIKeys.is_active == True,
+            )
+        )
+    )
+    org_providers = [row[0] for row in result.all()]
+    org_has_anthropic = 'anthropic' in org_providers
+    org_has_openai = 'openai' in org_providers
+
+    providers = ai_converter_service.get_available_providers(
+        org_has_anthropic=org_has_anthropic,
+        org_has_openai=org_has_openai,
+    )
     return {
         "available": len(providers) > 0,
         "providers": providers,

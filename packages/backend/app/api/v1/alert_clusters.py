@@ -217,43 +217,68 @@ async def generate_clusters(
     # Demo: create sample clusters
     now = datetime.utcnow()
 
-    demo_clusters = [
-        AlertCluster(
-            organization_id=org_id,
-            name="Brute Force Login Attempts - DC01",
-            summary="Multiple failed login attempts detected from external IP addresses targeting domain controller DC01. Pattern suggests automated credential stuffing attack.",
-            severity="high",
-            status=AlertClusterStatus.OPEN,
-            primary_rule_id="rule-failed-login-001",
-            cluster_type="rule_based",
-            alert_count=47,
-            first_alert_at=now - timedelta(hours=6),
-            last_alert_at=now - timedelta(minutes=15),
-            common_entities={"target_host": "DC01", "attack_type": "credential_stuffing"},
-        ),
-        AlertCluster(
-            organization_id=org_id,
-            name="Suspicious PowerShell Activity - Engineering Workstations",
-            summary="Encoded PowerShell commands executed across multiple engineering workstations. Commands appear to be reconnaissance scripts.",
-            severity="medium",
-            status=AlertClusterStatus.OPEN,
-            primary_rule_id="rule-powershell-suspicious-001",
-            cluster_type="entity_based",
-            alert_count=12,
-            first_alert_at=now - timedelta(hours=2),
-            last_alert_at=now - timedelta(minutes=30),
-            common_entities={"department": "engineering", "technique": "T1059.001"},
-        ),
+    demo_clusters_data = [
+        {
+            "name": "Brute Force Login Attempts - DC01",
+            "summary": "Multiple failed login attempts detected from external IP addresses targeting domain controller DC01. Pattern suggests automated credential stuffing attack.",
+            "severity": "high",
+            "primary_rule_id": "rule-failed-login-001",
+            "cluster_type": "rule_based",
+            "alert_count": 47,
+            "first_alert_at": now - timedelta(hours=6),
+            "last_alert_at": now - timedelta(minutes=15),
+            "common_entities": {"target_host": "DC01", "attack_type": "credential_stuffing"},
+        },
+        {
+            "name": "Suspicious PowerShell Activity - Engineering Workstations",
+            "summary": "Encoded PowerShell commands executed across multiple engineering workstations. Commands appear to be reconnaissance scripts.",
+            "severity": "medium",
+            "primary_rule_id": "rule-powershell-suspicious-001",
+            "cluster_type": "entity_based",
+            "alert_count": 12,
+            "first_alert_at": now - timedelta(hours=2),
+            "last_alert_at": now - timedelta(minutes=30),
+            "common_entities": {"department": "engineering", "technique": "T1059.001"},
+        },
     ]
 
-    for cluster in demo_clusters:
+    created_count = 0
+    skipped_count = 0
+
+    for cluster_data in demo_clusters_data:
+        # Check if cluster with same name already exists for this org
+        existing = await db.execute(
+            select(AlertCluster).where(
+                AlertCluster.organization_id == org_id,
+                AlertCluster.name == cluster_data["name"]
+            )
+        )
+        if existing.scalar_one_or_none():
+            skipped_count += 1
+            continue
+
+        cluster = AlertCluster(
+            organization_id=org_id,
+            name=cluster_data["name"],
+            summary=cluster_data["summary"],
+            severity=cluster_data["severity"],
+            status=AlertClusterStatus.OPEN,
+            primary_rule_id=cluster_data["primary_rule_id"],
+            cluster_type=cluster_data["cluster_type"],
+            alert_count=cluster_data["alert_count"],
+            first_alert_at=cluster_data["first_alert_at"],
+            last_alert_at=cluster_data["last_alert_at"],
+            common_entities=cluster_data["common_entities"],
+        )
         db.add(cluster)
+        created_count += 1
 
     await db.commit()
 
     return {
         "status": "success",
-        "clusters_created": len(demo_clusters),
+        "clusters_created": created_count,
+        "clusters_skipped": skipped_count,
         "time_window_hours": request.time_window_hours,
         "cluster_criteria": request.cluster_by,
     }

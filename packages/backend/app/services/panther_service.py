@@ -1,9 +1,13 @@
 """Service layer wrapping the Panther SDK."""
 from typing import Any, Optional
 
-from panther_sdk import PantherClient
-from panther_sdk.models.common import AlertStatus, Severity
-from panther_sdk.exceptions import PantherError, NotFoundError
+from app.lib.panther_sdk import (
+    PantherClient,
+    AlertStatus,
+    Severity,
+    PantherError,
+    NotFoundError,
+)
 
 
 class PantherService:

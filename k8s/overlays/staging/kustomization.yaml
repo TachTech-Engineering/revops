@@ -1,7 +1,7 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: panther-dashboard-staging
+namespace: revops-staging
 
 resources:
   - ../../base
@@ -19,7 +19,7 @@ configMapGenerator:
       - CORS_ORIGINS=https://staging.panther-dashboard.example.com
 
 images:
-  - name: gcr.io/pantherutil/panther-dashboard-frontend
+  - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend
     newTag: staging
-  - name: gcr.io/pantherutil/panther-dashboard-backend
+  - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend
     newTag: staging

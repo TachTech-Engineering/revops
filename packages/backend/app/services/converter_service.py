@@ -25,9 +25,9 @@ class SourceFormat(str, Enum):
 
 logger = logging.getLogger(__name__)
 
-# Try to import the Panther SDK converter
+# Import the Panther SDK converter from local lib
 try:
-    from panther_sdk.converters.splunk import (
+    from app.lib.panther_sdk.converters.splunk import (
         SPLToPantherConverter,
         SPLConversionError,
     )
@@ -276,9 +276,9 @@ class ConverterService:
         # Try SDK validation first if available
         if HAS_PANTHER_SDK:
             try:
-                from panther_sdk.converters.splunk.lexer import SPLLexer
-                from panther_sdk.converters.splunk.parser import SPLParser
-                from panther_sdk.converters.splunk.analyzer import SPLAnalyzer
+                from app.lib.panther_sdk.converters.splunk.lexer import SPLLexer
+                from app.lib.panther_sdk.converters.splunk.parser import SPLParser
+                from app.lib.panther_sdk.converters.splunk.analyzer import SPLAnalyzer
 
                 lexer = SPLLexer(spl)
                 tokens = lexer.tokenize()

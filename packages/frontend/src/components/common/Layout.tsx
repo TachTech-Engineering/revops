@@ -140,6 +140,7 @@ const navSections: NavSection[] = [
       { path: '/enrichment', label: 'Enrichment', icon: Sparkles },
       { path: '/asset-criticality', label: 'Asset Criticality', icon: Shield },
       { path: '/roles', label: 'Roles', icon: Users },
+      { path: '/users', label: 'Users', icon: Users },
       { path: '/audit', label: 'Audit Logs', icon: FileText },
       { path: '/settings', label: 'Settings', icon: Settings },
       { path: '/settings/ai', label: 'AI Settings', icon: Bot },

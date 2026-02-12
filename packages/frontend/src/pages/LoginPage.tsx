@@ -557,8 +557,8 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* Password field - shown for login, register, reset */}
-          {mode !== 'forgot' && (
+          {/* Password field - shown for login (when no SSO), register, reset */}
+          {mode !== 'forgot' && !(mode === 'login' && detectedSSO) && (
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-zinc-200 mb-2">
                 {mode === 'reset' ? 'New Password' : 'Password'}
@@ -606,8 +606,8 @@ export default function LoginPage() {
             </div>
           )}
 
-          {/* Forgot password link - only for login mode */}
-          {mode === 'login' && (
+          {/* Forgot password link - only for login mode when no SSO */}
+          {mode === 'login' && !detectedSSO && (
             <div className="text-right">
               <button
                 type="button"
@@ -623,48 +623,51 @@ export default function LoginPage() {
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
-          >
-            {isLoading ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                {mode === 'forgot' && 'Sending reset link...'}
-                {mode === 'reset' && 'Resetting password...'}
-                {mode === 'register' && 'Creating account...'}
-                {mode === 'login' && 'Signing in...'}
-              </>
-            ) : (
-              <>
-                {mode === 'forgot' && (
-                  <>
-                    <Mail size={16} />
-                    Send Reset Link
-                  </>
-                )}
-                {mode === 'reset' && (
-                  <>
-                    <KeyRound size={16} />
-                    Reset Password
-                  </>
-                )}
-                {mode === 'register' && (
-                  <>
-                    <UserPlus size={16} />
-                    Create Account
-                  </>
-                )}
-                {mode === 'login' && (
-                  <>
-                    <LogIn size={16} />
-                    Sign In
-                  </>
-                )}
-              </>
-            )}
-          </button>
+          {/* Submit button - hidden for login when SSO is detected */}
+          {!(mode === 'login' && detectedSSO) && (
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors"
+            >
+              {isLoading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  {mode === 'forgot' && 'Sending reset link...'}
+                  {mode === 'reset' && 'Resetting password...'}
+                  {mode === 'register' && 'Creating account...'}
+                  {mode === 'login' && 'Signing in...'}
+                </>
+              ) : (
+                <>
+                  {mode === 'forgot' && (
+                    <>
+                      <Mail size={16} />
+                      Send Reset Link
+                    </>
+                  )}
+                  {mode === 'reset' && (
+                    <>
+                      <KeyRound size={16} />
+                      Reset Password
+                    </>
+                  )}
+                  {mode === 'register' && (
+                    <>
+                      <UserPlus size={16} />
+                      Create Account
+                    </>
+                  )}
+                  {mode === 'login' && (
+                    <>
+                      <LogIn size={16} />
+                      Sign In
+                    </>
+                  )}
+                </>
+              )}
+            </button>
+          )}
 
           {/* Detected SSO from email domain */}
           {detectedSSO && detectedSSO.provider && mode === 'login' && (

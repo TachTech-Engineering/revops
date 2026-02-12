@@ -178,13 +178,21 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
             since_timestamp = since.strftime("%Y-%m-%dT%H:%M:%SZ")
             filter_query = f"created_timestamp:>='{since_timestamp}'"
 
+            # CrowdStrike API limit: offset + limit must be <= 10000
+            max_offset = 9900  # Leave room for limit of 100
+            current_offset = int(cursor) if cursor else 0
+
+            # If we've hit the pagination limit, stop fetching
+            if current_offset >= max_offset:
+                return [], None
+
             params = {
                 "filter": filter_query,
                 "limit": min(limit, 100),  # Max 100 per request
                 "sort": "created_timestamp|asc",
             }
             if cursor:
-                params["offset"] = int(cursor)
+                params["offset"] = current_offset
 
             async with httpx.AsyncClient(timeout=60.0) as client:
                 # Step 1: Query alert IDs
@@ -239,13 +247,15 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
                 normalized = self.normalize_alert(alert)
                 normalized_alerts.append(normalized)
 
-            # Calculate next cursor
+            # Calculate next cursor (respecting CrowdStrike's 10000 limit)
             next_cursor = None
             meta = query_data.get("meta", {}).get("pagination", {})
             total = meta.get("total", 0)
             offset = meta.get("offset", 0)
-            if offset + len(alert_ids) < total:
-                next_cursor = str(offset + len(alert_ids))
+            next_offset = offset + len(alert_ids)
+            # Only continue if there are more results AND we haven't hit the API limit
+            if next_offset < total and next_offset < max_offset:
+                next_cursor = str(next_offset)
 
             return normalized_alerts, next_cursor
 

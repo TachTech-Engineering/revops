@@ -3,16 +3,13 @@ import { Link } from 'react-router-dom'
 import {
   AlertCircle,
   ExternalLink,
-  Filter,
   RefreshCw,
   Search,
   CheckSquare,
   Square,
   XCircle,
   CheckCircle2,
-  UserPlus,
   Archive,
-  Trash2,
 } from 'lucide-react'
 import {
   useListUnifiedAlertsQuery,
@@ -90,7 +87,6 @@ export default function UnifiedAlertsPage() {
     page: 1,
     page_size: 25,
   })
-  const [showFilters, setShowFilters] = useState(false)
   const [selectedAlerts, setSelectedAlerts] = useState<Set<string>>(new Set())
   const [bulkUpdateAlerts] = useBulkUpdateAlertsMutation()
 
@@ -176,162 +172,131 @@ export default function UnifiedAlertsPage() {
   const totalPages = Math.ceil((alerts?.total || 0) / filters.page_size)
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Alerts</h1>
-          <p className="text-muted-foreground">
-            All alerts from connected data sources in one view
-          </p>
+    <div className="space-y-4">
+      {/* Header with Filters */}
+      <div className="flex items-center gap-3 p-3 bg-card rounded-lg border flex-wrap">
+        <div className="flex items-center gap-2 mr-1">
+          <AlertCircle className="text-primary" size={20} />
+          <h1 className="text-lg font-bold">Alerts</h1>
         </div>
-        <div className="flex items-center gap-2">
+
+        <div className="h-6 w-px bg-border hidden sm:block" />
+
+        {/* Tabs */}
+        <div className="flex items-center gap-1">
           <button
-            onClick={() => setShowFilters(!showFilters)}
+            onClick={() => {
+              setActiveTab('active')
+              setFilters((prev) => ({ ...prev, status: '', page: 1 }))
+            }}
             className={cn(
-              'flex items-center gap-2 px-4 py-2 rounded-md font-medium',
-              showFilters ? 'bg-accent' : 'bg-muted hover:bg-accent'
+              'px-3 py-1 text-sm font-medium rounded-md transition-colors',
+              activeTab === 'active'
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent'
             )}
           >
-            <Filter size={18} />
-            Filters
+            Active
           </button>
           <button
-            onClick={() => refetch()}
-            className="flex items-center gap-2 px-4 py-2 bg-muted text-muted-foreground rounded-md font-medium hover:bg-accent"
+            onClick={() => {
+              setActiveTab('resolved')
+              setFilters((prev) => ({ ...prev, status: '', page: 1 }))
+            }}
+            className={cn(
+              'px-3 py-1 text-sm font-medium rounded-md transition-colors',
+              activeTab === 'resolved'
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent'
+            )}
           >
-            <RefreshCw size={18} className={isLoading ? 'animate-spin' : ''} />
-            Refresh
+            Resolved
           </button>
         </div>
-      </div>
 
-      {/* Tabs for Active vs Resolved */}
-      <div className="flex items-center gap-1 border-b">
-        <button
-          onClick={() => {
-            setActiveTab('active')
-            setFilters((prev) => ({ ...prev, status: '', page: 1 }))
-          }}
-          className={cn(
-            'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
-            activeTab === 'active'
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          )}
+        <div className="h-6 w-px bg-border hidden sm:block" />
+
+        {/* Filters */}
+        <select
+          value={filters.source_type}
+          onChange={(e) => handleFilterChange('source_type', e.target.value)}
+          className="px-2 py-1.5 rounded-md border bg-background text-sm"
         >
-          Active Alerts
-        </button>
-        <button
-          onClick={() => {
-            setActiveTab('resolved')
-            setFilters((prev) => ({ ...prev, status: '', page: 1 }))
-          }}
-          className={cn(
-            'px-4 py-2 text-sm font-medium border-b-2 transition-colors',
-            activeTab === 'resolved'
-              ? 'border-primary text-foreground'
-              : 'border-transparent text-muted-foreground hover:text-foreground'
-          )}
+          <option value="">All Sources</option>
+          {Object.entries(sourceTypeConfig).map(([key, cfg]) => (
+            <option key={key} value={key}>
+              {cfg.label}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={filters.severity}
+          onChange={(e) => handleFilterChange('severity', e.target.value)}
+          className="px-2 py-1.5 rounded-md border bg-background text-sm"
         >
-          Resolved
+          <option value="">All Severities</option>
+          {Object.entries(severityConfig).map(([key, cfg]) => (
+            <option key={key} value={key}>
+              {cfg.label}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={filters.status}
+          onChange={(e) => handleFilterChange('status', e.target.value)}
+          className="px-2 py-1.5 rounded-md border bg-background text-sm"
+        >
+          <option value="">All Statuses</option>
+          {Object.entries(statusConfig).map(([key, cfg]) => (
+            <option key={key} value={key}>
+              {cfg.label}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={filters.connector_id}
+          onChange={(e) => handleFilterChange('connector_id', e.target.value)}
+          className="px-2 py-1.5 rounded-md border bg-background text-sm"
+        >
+          <option value="">All Connectors</option>
+          {connectors?.items.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+
+        <input
+          type="date"
+          value={filters.start_date}
+          onChange={(e) => handleFilterChange('start_date', e.target.value)}
+          className="px-2 py-1.5 rounded-md border bg-background text-sm"
+          title="Start Date"
+        />
+
+        <input
+          type="date"
+          value={filters.end_date}
+          onChange={(e) => handleFilterChange('end_date', e.target.value)}
+          className="px-2 py-1.5 rounded-md border bg-background text-sm"
+          title="End Date"
+        />
+
+        <span className="text-sm text-muted-foreground">
+          {alerts?.total || 0} alerts
+        </span>
+
+        <button
+          onClick={() => refetch()}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-muted text-muted-foreground rounded-md text-sm hover:bg-accent ml-auto"
+        >
+          <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
+          Refresh
         </button>
       </div>
-
-      {/* Filters Panel */}
-      {showFilters && (
-        <div className="rounded-lg border bg-background p-4 space-y-4">
-          <div className="grid grid-cols-4 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Source</label>
-              <select
-                value={filters.source_type}
-                onChange={(e) => handleFilterChange('source_type', e.target.value)}
-                className="w-full px-3 py-2 rounded-md border bg-background text-sm"
-              >
-                <option value="">All Sources</option>
-                {Object.entries(sourceTypeConfig).map(([key, cfg]) => (
-                  <option key={key} value={key}>
-                    {cfg.icon} {cfg.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Connector</label>
-              <select
-                value={filters.connector_id}
-                onChange={(e) => handleFilterChange('connector_id', e.target.value)}
-                className="w-full px-3 py-2 rounded-md border bg-background text-sm"
-              >
-                <option value="">All Connectors</option>
-                {connectors?.items.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Severity</label>
-              <select
-                value={filters.severity}
-                onChange={(e) => handleFilterChange('severity', e.target.value)}
-                className="w-full px-3 py-2 rounded-md border bg-background text-sm"
-              >
-                <option value="">All Severities</option>
-                {Object.entries(severityConfig).map(([key, cfg]) => (
-                  <option key={key} value={key}>
-                    {cfg.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Status</label>
-              <select
-                value={filters.status}
-                onChange={(e) => handleFilterChange('status', e.target.value)}
-                className="w-full px-3 py-2 rounded-md border bg-background text-sm"
-              >
-                <option value="">All Statuses</option>
-                {Object.entries(statusConfig).map(([key, cfg]) => (
-                  <option key={key} value={key}>
-                    {cfg.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="grid grid-cols-4 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Start Date</label>
-              <input
-                type="date"
-                value={filters.start_date}
-                onChange={(e) => handleFilterChange('start_date', e.target.value)}
-                className="w-full px-3 py-2 rounded-md border bg-background text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">End Date</label>
-              <input
-                type="date"
-                value={filters.end_date}
-                onChange={(e) => handleFilterChange('end_date', e.target.value)}
-                className="w-full px-3 py-2 rounded-md border bg-background text-sm"
-              />
-            </div>
-            <div className="col-span-2 flex items-end">
-              <button
-                onClick={() => setFilters((prev) => ({ ...prev, start_date: '', end_date: '', page: 1 }))}
-                className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground"
-              >
-                Clear dates
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Bulk Actions Toolbar */}
       {isSomeSelected && (

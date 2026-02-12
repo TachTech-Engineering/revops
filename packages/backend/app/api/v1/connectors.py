@@ -555,17 +555,17 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_
                     # Set organization_id on the alert
                     alert.organization_id = organization_id
 
-                    # Check if alert already exists
+                    # Check if alert already exists (use .first() to handle duplicates gracefully)
                     existing = await db.execute(
-                        select(NormalizedAlert).where(
+                        select(NormalizedAlert.id).where(
                             and_(
                                 NormalizedAlert.organization_id == organization_id,
                                 NormalizedAlert.connector_id == connector_id,
                                 NormalizedAlert.external_id == alert.external_id,
                             )
-                        )
+                        ).limit(1)
                     )
-                    if existing.scalar_one_or_none():
+                    if existing.scalar():
                         continue
 
                     db.add(alert)

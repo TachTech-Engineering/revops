@@ -7,13 +7,14 @@ import {
   Clock,
   User,
   Merge,
-  Filter,
+  Trash2,
 } from 'lucide-react'
 import {
   useListAlertClustersQuery,
   useGenerateClustersMutation,
   useUpdateAlertClusterMutation,
   useMergeClustersMutation,
+  useDeleteAlertClusterMutation,
 } from '../api/pantherApi'
 import { cn } from '../lib/utils'
 
@@ -33,7 +34,7 @@ const statusColors: Record<string, string> = {
 }
 
 export default function ClusteredAlertsPage() {
-  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [statusFilter, setStatusFilter] = useState<string>('open')
   const [severityFilter, setSeverityFilter] = useState<string>('')
   const [selectedClusters, setSelectedClusters] = useState<Set<string>>(new Set())
   const [showMergeModal, setShowMergeModal] = useState(false)
@@ -48,6 +49,7 @@ export default function ClusteredAlertsPage() {
   const [generateClusters, { isLoading: isGenerating }] = useGenerateClustersMutation()
   const [updateCluster] = useUpdateAlertClusterMutation()
   const [mergeClusters, { isLoading: isMerging }] = useMergeClustersMutation()
+  const [deleteCluster] = useDeleteAlertClusterMutation()
 
   const handleGenerate = async () => {
     try {
@@ -86,6 +88,19 @@ export default function ClusteredAlertsPage() {
     }
   }
 
+  const handleDelete = async (clusterId: string, clusterName: string) => {
+    if (!confirm(`Are you sure you want to delete the cluster "${clusterName}"? This cannot be undone.`)) return
+
+    try {
+      await deleteCluster(clusterId).unwrap()
+      selectedClusters.delete(clusterId)
+      setSelectedClusters(new Set(selectedClusters))
+    } catch (err) {
+      console.error('Failed to delete cluster:', err)
+      alert('Failed to delete cluster')
+    }
+  }
+
   const toggleClusterSelection = (clusterId: string) => {
     setSelectedClusters((prev) => {
       const next = new Set(prev)
@@ -99,42 +114,16 @@ export default function ClusteredAlertsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Layers className="text-primary" />
-            Alert Clusters
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            AI-grouped similar alerts to reduce analyst fatigue
-          </p>
+    <div className="space-y-4">
+      {/* Header with Filters */}
+      <div className="flex items-center gap-4 p-4 bg-card rounded-lg border flex-wrap">
+        <div className="flex items-center gap-2 mr-2">
+          <Layers className="text-primary" size={20} />
+          <h1 className="text-lg font-bold">Alert Clusters</h1>
         </div>
-        <div className="flex items-center gap-2">
-          {selectedClusters.size >= 2 && (
-            <button
-              onClick={() => setShowMergeModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-            >
-              <Merge size={16} />
-              Merge ({selectedClusters.size})
-            </button>
-          )}
-          <button
-            onClick={handleGenerate}
-            disabled={isGenerating}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50"
-          >
-            <RefreshCw size={16} className={isGenerating ? 'animate-spin' : ''} />
-            Generate Clusters
-          </button>
-        </div>
-      </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-4 p-4 bg-card rounded-lg border">
-        <Filter size={16} className="text-muted-foreground" />
+        <div className="h-6 w-px bg-border hidden sm:block" />
+
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
@@ -157,9 +146,30 @@ export default function ClusteredAlertsPage() {
           <option value="medium">Medium</option>
           <option value="low">Low</option>
         </select>
-        <span className="text-sm text-muted-foreground ml-auto">
+
+        <span className="text-sm text-muted-foreground">
           {data?.total || 0} clusters
         </span>
+
+        <div className="flex items-center gap-2 ml-auto">
+          {selectedClusters.size >= 2 && (
+            <button
+              onClick={() => setShowMergeModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 text-sm"
+            >
+              <Merge size={14} />
+              Merge ({selectedClusters.size})
+            </button>
+          )}
+          <button
+            onClick={handleGenerate}
+            disabled={isGenerating}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 text-sm"
+          >
+            <RefreshCw size={14} className={isGenerating ? 'animate-spin' : ''} />
+            Generate
+          </button>
+        </div>
       </div>
 
       {/* Clusters List */}
@@ -261,6 +271,12 @@ export default function ClusteredAlertsPage() {
                   </select>
                   <button className="flex items-center justify-center gap-1 px-3 py-1.5 text-sm border rounded hover:bg-accent">
                     View <ChevronRight size={14} />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(cluster.id, cluster.name)}
+                    className="flex items-center justify-center gap-1 px-3 py-1.5 text-sm border border-red-500/50 rounded hover:bg-red-500/20 text-red-400"
+                  >
+                    <Trash2 size={14} /> Delete
                   </button>
                 </div>
               </div>

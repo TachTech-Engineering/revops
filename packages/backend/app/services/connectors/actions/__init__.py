@@ -14,6 +14,7 @@ from app.services.connectors.actions.sentinelone import SentinelOneActionConnect
 from app.services.connectors.actions.servicenow import ServiceNowActionConnector
 from app.services.connectors.actions.webhook import WebhookActionConnector
 from app.services.connectors.actions.http import HTTPActionConnector
+from app.services.connectors.actions.email import EmailActionConnector
 
 __all__ = [
     "JiraActionConnector",
@@ -25,4 +26,5 @@ __all__ = [
     "ServiceNowActionConnector",
     "WebhookActionConnector",
     "HTTPActionConnector",
+    "EmailActionConnector",
 ]

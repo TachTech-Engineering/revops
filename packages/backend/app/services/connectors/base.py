@@ -356,6 +356,7 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     from app.services.connectors.actions.servicenow import ServiceNowActionConnector
     from app.services.connectors.actions.webhook import WebhookActionConnector
     from app.services.connectors.actions.http import HTTPActionConnector
+    from app.services.connectors.actions.email import EmailActionConnector
 
     registry.register_action("jira", JiraActionConnector)
     registry.register_action("slack", SlackActionConnector)
@@ -366,3 +367,4 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     registry.register_action("servicenow", ServiceNowActionConnector)
     registry.register_action("webhook", WebhookActionConnector)
     registry.register_action("http", HTTPActionConnector)
+    registry.register_action("email", EmailActionConnector)

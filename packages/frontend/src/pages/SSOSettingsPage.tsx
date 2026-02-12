@@ -14,6 +14,8 @@ import {
   ExternalLink,
   AlertCircle,
   CheckCircle,
+  Copy,
+  PartyPopper,
 } from 'lucide-react'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
@@ -92,6 +94,11 @@ export default function SSOSettingsPage() {
   const [isSaving, setIsSaving] = useState(false)
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null)
   const [testingId, setTestingId] = useState<string | null>(null)
+  const [newlyCreatedConfig, setNewlyCreatedConfig] = useState<{
+    id: string
+    provider: string
+    callbackUrl: string
+  } | null>(null)
 
   // Check if user is admin
   const isAdmin = userRole === 'admin'
@@ -185,10 +192,20 @@ export default function SSOSettingsPage() {
       })
 
       if (response.ok) {
+        const data = await response.json()
         await fetchConfigs()
         setShowForm(false)
         setEditingId(null)
         setFormData(defaultFormData)
+
+        // Show the newly created config details (only for new configs, not edits)
+        if (!editingId && data.id) {
+          setNewlyCreatedConfig({
+            id: data.id,
+            provider: data.provider,
+            callbackUrl: `${window.location.origin}/api/v1/auth/sso/${data.id}/callback`,
+          })
+        }
       } else {
         const errorData = await response.json().catch(() => ({}))
         setError(errorData.detail || 'Failed to save SSO configuration')
@@ -355,6 +372,71 @@ export default function SSOSettingsPage() {
           )}
           <p className={testResult.success ? 'text-green-500' : 'text-red-500'}>
             {testResult.message}
+          </p>
+        </div>
+      )}
+
+      {/* Newly Created Config Success Banner */}
+      {newlyCreatedConfig && (
+        <div className="rounded-lg border border-green-500/30 bg-green-500/10 p-6">
+          <div className="flex items-start justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <PartyPopper className="text-green-500" size={24} />
+              <div>
+                <h3 className="font-semibold text-green-500">SSO Configuration Created!</h3>
+                <p className="text-sm text-muted-foreground">
+                  Copy the callback URL below and add it to your {newlyCreatedConfig.provider} application settings.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setNewlyCreatedConfig(null)}
+              className="p-1 text-muted-foreground hover:text-foreground"
+            >
+              <X size={18} />
+            </button>
+          </div>
+
+          <div className="space-y-3 bg-background/50 rounded-lg p-4">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Config ID
+              </label>
+              <div className="flex items-center gap-2 mt-1">
+                <code className="flex-1 font-mono text-sm bg-muted px-3 py-2 rounded select-all">
+                  {newlyCreatedConfig.id}
+                </code>
+                <button
+                  onClick={() => navigator.clipboard.writeText(newlyCreatedConfig.id)}
+                  className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded"
+                  title="Copy Config ID"
+                >
+                  <Copy size={16} />
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Callback URL (Redirect URI)
+              </label>
+              <div className="flex items-center gap-2 mt-1">
+                <code className="flex-1 font-mono text-sm bg-muted px-3 py-2 rounded select-all break-all">
+                  {newlyCreatedConfig.callbackUrl}
+                </code>
+                <button
+                  onClick={() => navigator.clipboard.writeText(newlyCreatedConfig.callbackUrl)}
+                  className="p-2 text-muted-foreground hover:text-foreground hover:bg-accent rounded flex-shrink-0"
+                  title="Copy Callback URL"
+                >
+                  <Copy size={16} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <p className="text-xs text-muted-foreground mt-4">
+            Add this callback URL to your identity provider's allowed redirect URIs, then test the connection.
           </p>
         </div>
       )}
@@ -632,6 +714,34 @@ export default function SSOSettingsPage() {
                         <> | Domains: {config.allowed_email_domains}</>
                       )}
                     </p>
+                    <div className="mt-2 p-2 bg-muted rounded text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground">Config ID:</span>
+                        <code className="font-mono text-foreground select-all">{config.id}</code>
+                        <button
+                          type="button"
+                          onClick={() => navigator.clipboard.writeText(config.id)}
+                          className="text-muted-foreground hover:text-foreground"
+                          title="Copy Config ID"
+                        >
+                          <ExternalLink size={12} />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-muted-foreground">Callback URL:</span>
+                        <code className="font-mono text-foreground select-all break-all">
+                          {window.location.origin}/api/v1/auth/sso/{config.id}/callback
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => navigator.clipboard.writeText(`${window.location.origin}/api/v1/auth/sso/${config.id}/callback`)}
+                          className="text-muted-foreground hover:text-foreground flex-shrink-0"
+                          title="Copy Callback URL"
+                        >
+                          <ExternalLink size={12} />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">

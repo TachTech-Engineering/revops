@@ -12,6 +12,7 @@ import IOCSearchPage from './pages/IOCSearchPage'
 import SettingsPage from './pages/SettingsPage'
 import WebhooksPage from './pages/WebhooksPage'
 import RoleManagementPage from './pages/RoleManagementPage'
+import UserManagementPage from './pages/UserManagementPage'
 import AuditLogPage from './pages/AuditLogPage'
 import ScheduledReportsPage from './pages/ScheduledReportsPage'
 import IncidentsPage from './pages/IncidentsPage'
@@ -129,6 +130,7 @@ function App() {
                 <Route path="/webhooks" element={<WebhooksPage />} />
                 <Route path="/enrichment" element={<EnrichmentPipelinesPage />} />
                 <Route path="/roles" element={<RoleManagementPage />} />
+                <Route path="/users" element={<UserManagementPage />} />
                 <Route path="/audit" element={<AuditLogPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/settings/ai" element={<AISettingsPage />} />

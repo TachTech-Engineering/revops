@@ -3,6 +3,7 @@ from fastapi import APIRouter
 from app.api.v1 import (
     auth,
     sso_config,
+    users,
     alerts,
     rules,
     converter,
@@ -59,6 +60,7 @@ api_router = APIRouter()
 
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(sso_config.router, prefix="/organizations/{organization_id}/sso", tags=["sso-config"])
+api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
 api_router.include_router(rules.router, prefix="/rules", tags=["rules"])

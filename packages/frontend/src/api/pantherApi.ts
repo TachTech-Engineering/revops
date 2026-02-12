@@ -1,5 +1,7 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react'
+import type { BaseQueryFn, FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query'
 import type { RootState } from '../store'
+import { setTokens, logout } from '../store/authSlice'
 import type {
   Alert,
   AlertSummary,
@@ -16,23 +18,69 @@ import type {
   PaginatedResponse,
 } from '../types'
 
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+
+const baseQuery = fetchBaseQuery({
+  baseUrl: `${API_BASE}/api/v1`,
+  prepareHeaders: (headers, { getState }) => {
+    const state = getState() as RootState
+    const { accessToken, userEmail } = state.auth
+    if (accessToken) {
+      headers.set('Authorization', `Bearer ${accessToken}`)
+    }
+    if (userEmail) {
+      headers.set('X-User-Email', userEmail)
+    }
+    return headers
+  },
+})
+
+// Wrapper that handles token refresh on 401
+const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError> = async (
+  args,
+  api,
+  extraOptions
+) => {
+  let result = await baseQuery(args, api, extraOptions)
+
+  if (result.error && result.error.status === 401) {
+    // Try to refresh the token
+    const state = api.getState() as RootState
+    const refreshToken = state.auth.refreshToken
+
+    if (refreshToken) {
+      const refreshResult = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      })
+
+      if (refreshResult.ok) {
+        const data = await refreshResult.json()
+        // Store the new tokens
+        api.dispatch(setTokens({
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token,
+        }))
+        // Retry the original request with new token
+        result = await baseQuery(args, api, extraOptions)
+      } else {
+        // Refresh failed - log out
+        api.dispatch(logout())
+      }
+    } else {
+      // No refresh token - log out
+      api.dispatch(logout())
+    }
+  }
+
+  return result
+}
+
 export const revopsApi = createApi({
   reducerPath: 'revopsApi',
-  baseQuery: fetchBaseQuery({
-    baseUrl: `${import.meta.env.VITE_API_BASE_URL || ''}/api/v1`,
-    prepareHeaders: (headers, { getState }) => {
-      const state = getState() as RootState
-      const { accessToken, userEmail } = state.auth
-      if (accessToken) {
-        headers.set('Authorization', `Bearer ${accessToken}`)
-      }
-      if (userEmail) {
-        headers.set('X-User-Email', userEmail)
-      }
-      return headers
-    },
-  }),
-  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'SuppressionRule', 'Settings', 'Webhook', 'UserRole', 'AuditLog', 'Playbook', 'ScheduledReport', 'Incident', 'CorrelationRule', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Recommendation', 'SimulationRun', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleVersion', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'OnCallSchedule', 'TrendAnalytics', 'Anomaly', 'AISettings'],
+  baseQuery: baseQueryWithReauth,
+  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'SuppressionRule', 'Settings', 'Webhook', 'UserRole', 'User', 'AuditLog', 'Playbook', 'ScheduledReport', 'Incident', 'CorrelationRule', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Recommendation', 'SimulationRun', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleVersion', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'OnCallSchedule', 'TrendAnalytics', 'Anomaly', 'AISettings'],
   endpoints: (builder) => ({
     // Alerts
     listAlerts: builder.query<PaginatedResponse<AlertSummary>, AlertFilters>({
@@ -337,6 +385,37 @@ export const revopsApi = createApi({
         method: 'DELETE',
       }),
       invalidatesTags: ['UserRole'],
+    }),
+
+    // User Management (actual user accounts)
+    listUsers: builder.query<UserListResponse, UserListFilters>({
+      query: (filters) => ({
+        url: '/users',
+        params: filters,
+      }),
+      providesTags: ['User'],
+    }),
+
+    getUser: builder.query<UserAccountResponse, string>({
+      query: (id) => `/users/${id}`,
+      providesTags: (_result, _error, id) => [{ type: 'User', id }],
+    }),
+
+    updateUser: builder.mutation<UserAccountResponse, { id: string; role?: string; is_active?: boolean }>({
+      query: ({ id, ...update }) => ({
+        url: `/users/${id}`,
+        method: 'PATCH',
+        body: update,
+      }),
+      invalidatesTags: ['User'],
+    }),
+
+    deleteUser: builder.mutation<void, string>({
+      query: (id) => ({
+        url: `/users/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['User'],
     }),
 
     // Audit Logs
@@ -1691,6 +1770,14 @@ export const revopsApi = createApi({
       invalidatesTags: ['AlertCluster'],
     }),
 
+    deleteAlertCluster: builder.mutation<void, string>({
+      query: (id) => ({
+        url: `/alert-clusters/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['AlertCluster'],
+    }),
+
     // ==================== Feature 6: AI Playbook Generation ====================
     listPlaybookTemplates: builder.query<PlaybookTemplateListResponse, { isApproved?: boolean; minConfidence?: number; page?: number; pageSize?: number }>({
       query: (params) => ({
@@ -2096,7 +2183,34 @@ export interface ThreatIntelStatus {
   abuseipdb: { configured: boolean; supported_types: string[] }
 }
 
-// User Role Types
+// User Account Types (actual user accounts)
+export interface UserAccountResponse {
+  id: string
+  email: string
+  name: string | null
+  role: 'admin' | 'analyst' | 'viewer'
+  is_active: boolean
+  sso_provider: string | null
+  created_at: string
+  last_login_at: string | null
+}
+
+export interface UserListResponse {
+  items: UserAccountResponse[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface UserListFilters {
+  page?: number
+  page_size?: number
+  search?: string
+  role?: string
+  is_active?: boolean
+}
+
+// User Role Types (role pre-assignments)
 export interface UserRoleResponse {
   id: string
   email: string
@@ -3943,6 +4057,10 @@ export const {
   useCreateUserRoleMutation,
   useUpdateUserRoleMutation,
   useDeleteUserRoleMutation,
+  useListUsersQuery,
+  useGetUserQuery,
+  useUpdateUserMutation,
+  useDeleteUserMutation,
   useListAuditLogsQuery,
   useGetAuditActionsQuery,
   useGetAuditResourceTypesQuery,
@@ -4137,6 +4255,7 @@ export const {
   useUpdateAlertClusterMutation,
   useGenerateClustersMutation,
   useMergeClustersMutation,
+  useDeleteAlertClusterMutation,
   // Feature 6: AI Playbook Generation
   useListPlaybookTemplatesQuery,
   useGetPlaybookTemplateQuery,

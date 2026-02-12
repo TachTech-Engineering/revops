@@ -52,6 +52,24 @@ TACTIC_LABELS = {
     MitreTactic.IMPACT: "Impact",
 }
 
+# Map MITRE tactic IDs (TAxxxx) to tactic enum values (use hyphens to match MitreTactic enum)
+TACTIC_ID_MAP = {
+    "TA0043": "reconnaissance",
+    "TA0042": "resource-development",
+    "TA0001": "initial-access",
+    "TA0002": "execution",
+    "TA0003": "persistence",
+    "TA0004": "privilege-escalation",
+    "TA0005": "defense-evasion",
+    "TA0006": "credential-access",
+    "TA0007": "discovery",
+    "TA0008": "lateral-movement",
+    "TA0009": "collection",
+    "TA0011": "command-and-control",
+    "TA0010": "exfiltration",
+    "TA0040": "impact",
+}
+
 
 class MitreMappingCreate(BaseModel):
     rule_id: str
@@ -318,17 +336,24 @@ async def get_alert_coverage(
 
                 # Process tactics
                 for tactic in tactics:
-                    tactic_lower = tactic.lower().replace(' ', '_').replace('-', '_')
-                    if tactic_lower not in tactic_data:
-                        tactic_data[tactic_lower] = {
+                    # Normalize tactic: handle both TA IDs (TA0005) and names (defense-evasion)
+                    tactic_upper = tactic.upper()
+                    if tactic_upper in TACTIC_ID_MAP:
+                        tactic_key = TACTIC_ID_MAP[tactic_upper]
+                    else:
+                        # Keep hyphens, just lowercase and replace spaces
+                        tactic_key = tactic.lower().replace(' ', '-').replace('_', '-')
+
+                    if tactic_key not in tactic_data:
+                        tactic_data[tactic_key] = {
                             'alert_count': 0,
                             'techniques': set(),
                             'rules': set(),
                         }
-                    tactic_data[tactic_lower]['alert_count'] += 1
-                    tactic_data[tactic_lower]['rules'].add(rule_name)
+                    tactic_data[tactic_key]['alert_count'] += 1
+                    tactic_data[tactic_key]['rules'].add(rule_name)
                     for tech in techniques:
-                        tactic_data[tactic_lower]['techniques'].add(tech)
+                        tactic_data[tactic_key]['techniques'].add(tech)
 
                 # Process techniques
                 for technique in techniques:
@@ -386,17 +411,23 @@ async def get_alert_coverage(
 
         # Process tactics
         for tactic in tactics:
-            tactic_lower = tactic.lower().replace(' ', '_').replace('-', '_')
-            if tactic_lower not in tactic_data:
-                tactic_data[tactic_lower] = {
+            # Normalize tactic: handle both TA IDs (TA0005) and names (defense_evasion)
+            tactic_upper = tactic.upper()
+            if tactic_upper in TACTIC_ID_MAP:
+                tactic_key = TACTIC_ID_MAP[tactic_upper]
+            else:
+                tactic_key = tactic.lower().replace(' ', '_').replace('-', '_')
+
+            if tactic_key not in tactic_data:
+                tactic_data[tactic_key] = {
                     'alert_count': 0,
                     'techniques': set(),
                     'rules': set(),
                 }
-            tactic_data[tactic_lower]['alert_count'] += alert_count
-            tactic_data[tactic_lower]['rules'].add(rule_name)
+            tactic_data[tactic_key]['alert_count'] += alert_count
+            tactic_data[tactic_key]['rules'].add(rule_name)
             for tech in techniques:
-                tactic_data[tactic_lower]['techniques'].add(tech)
+                tactic_data[tactic_key]['techniques'].add(tech)
 
         # Process techniques
         for technique in techniques:

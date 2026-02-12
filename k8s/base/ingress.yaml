@@ -1,17 +1,14 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: panther-dashboard-ingress
-  namespace: panther-dashboard
+  name: revops-ingress
+  namespace: revops
   annotations:
     kubernetes.io/ingress.class: "gce"
     kubernetes.io/ingress.global-static-ip-name: "panther-dashboard-ip"
-    networking.gke.io/managed-certificates: "panther-dashboard-cert"
-    kubernetes.io/ingress.allow-http: "false"
 spec:
   rules:
-    - host: panther-dashboard.example.com
-      http:
+    - http:
         paths:
           - path: /api/*
             pathType: ImplementationSpecific
@@ -27,12 +24,3 @@ spec:
                 name: frontend
                 port:
                   number: 80
----
-apiVersion: networking.gke.io/v1
-kind: ManagedCertificate
-metadata:
-  name: panther-dashboard-cert
-  namespace: panther-dashboard
-spec:
-  domains:
-    - panther-dashboard.example.com

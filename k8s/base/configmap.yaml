@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: backend-config
-  namespace: panther-dashboard
+  namespace: revops
 data:
   LOG_LEVEL: "INFO"
   CORS_ORIGINS: "https://panther-dashboard.example.com"

@@ -187,12 +187,20 @@ export default function ConnectorEditorPage() {
 
     setTestResult(null)
     try {
-      // For new connectors, we need to create a temp connector or the backend should support testing without saving
       if (isEditing) {
+        // Save credentials first if any were entered, then test
+        if (Object.keys(formData.credentials).length > 0) {
+          await updateConnector({
+            id: connectorId!,
+            update: {
+              credentials: formData.credentials,
+              config: Object.keys(formData.config).length > 0 ? formData.config : undefined,
+            },
+          }).unwrap()
+        }
         const result = await testConnector(connectorId!).unwrap()
         setTestResult(result)
       } else {
-        // Create, test, then delete if test only
         setTestResult({ success: false, message: 'Save the connector first to test the connection' })
       }
     } catch (err) {

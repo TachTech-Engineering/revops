@@ -37,7 +37,10 @@ from app.services.sso_service import (
     get_org_by_email_domain,
     initiate_sso_flow,
     complete_sso_flow,
+    org_has_sso_enabled,
+    get_org_sso_provider_names,
 )
+from app.config import settings
 
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
@@ -156,7 +159,24 @@ async def login(
 ):
     """
     Authenticate a user and return access and refresh tokens.
+
+    If the user's organization has SSO enabled, password login is blocked
+    and users must authenticate via SSO instead.
     """
+    # First check if user exists and get their org to check SSO enforcement
+    user = await get_user_by_email(db, request.email)
+
+    if user and user.organization_id:
+        # Check if organization has SSO enabled - if so, block password login
+        if await org_has_sso_enabled(db, user.organization_id):
+            providers = await get_org_sso_provider_names(db, user.organization_id)
+            provider_list = ", ".join(providers) if providers else "SSO"
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Password login is disabled for your organization. Please sign in using {provider_list}.",
+            )
+
+    # Proceed with normal authentication
     user = await authenticate_user(db, request.email, request.password)
 
     if not user:
@@ -412,8 +432,11 @@ async def sso_authorize(
             detail="Invalid SSO configuration ID",
         )
 
-    # Build callback URL
-    callback_url = str(request.url_for("sso_callback", config_id=config_id))
+    # Build callback URL - use public base URL if configured (for behind proxies/load balancers)
+    if settings.public_base_url:
+        callback_url = f"{settings.public_base_url.rstrip('/')}/api/v1/auth/sso/{config_id}/callback"
+    else:
+        callback_url = str(request.url_for("sso_callback", config_id=config_id))
 
     try:
         return await initiate_sso_flow(request, db, config_uuid, callback_url)
