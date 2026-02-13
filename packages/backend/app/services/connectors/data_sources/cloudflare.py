@@ -5,12 +5,15 @@ Integrates with Cloudflare to fetch and normalize security events from
 WAF, Bot Management, DDoS Protection, and Zero Trust.
 """
 
+import logging
 import time
 import uuid
 from datetime import datetime
 from typing import Any, Optional
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from app.db.models import NormalizedAlert, ConnectorCategory
 from app.services.connectors.base import (
@@ -111,6 +114,18 @@ class CloudflareConnector(DataSourceConnector):
         start_time = time.time()
         try:
             account_id = self.config.get("account_id")
+            api_token = self.credentials.get("api_token", "")
+
+            # Debug logging
+            logger.info(f"Cloudflare test_connection: account_id={account_id}")
+            logger.info(f"Cloudflare test_connection: credentials keys={list(self.credentials.keys())}")
+            logger.info(f"Cloudflare test_connection: api_token present={bool(api_token)}, length={len(api_token) if api_token else 0}")
+
+            if not api_token:
+                return ConnectionTestResult(
+                    success=False,
+                    message="API token is missing - please enter your Cloudflare API token",
+                )
 
             async with httpx.AsyncClient(timeout=30.0) as client:
                 # Test by verifying token
@@ -118,6 +133,8 @@ class CloudflareConnector(DataSourceConnector):
                     f"{self.BASE_URL}/user/tokens/verify",
                     headers=self._get_headers(),
                 )
+
+                logger.info(f"Cloudflare API response: status={response.status_code}")
 
             latency_ms = int((time.time() - start_time) * 1000)
 
