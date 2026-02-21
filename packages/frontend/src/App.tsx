@@ -37,6 +37,7 @@ import AlertsPage from './pages/UnifiedAlertsPage'
 import AlertDetailPage from './pages/AlertDetailPage'
 // New Feature Pages
 import ClusteredAlertsPage from './pages/ClusteredAlertsPage'
+import ClusteredAlertDetailPage from './pages/ClusteredAlertDetailPage'
 import EscalationPoliciesPage from './pages/EscalationPoliciesPage'
 import OnCallSchedulesPage from './pages/OnCallSchedulesPage'
 import AssetCriticalityPage from './pages/AssetCriticalityPage'
@@ -91,9 +92,10 @@ function App() {
               <Routes>
                 <Route path="/" element={<Dashboard />} />
                 {/* Security Operations */}
-                <Route path="/alerts" element={<AlertsPage />} />
-                <Route path="/alerts/:alertId" element={<AlertDetailPage />} />
+                <Route path="/alerts" index element={<AlertsPage />} />
                 <Route path="/alerts/clusters" element={<ClusteredAlertsPage />} />
+                <Route path="/alerts/clusters/:id" element={<ClusteredAlertDetailPage />} />
+                <Route path="/alerts/:alertId" element={<AlertDetailPage />} />
                 <Route path="/incidents" element={<IncidentsPage />} />
                 <Route path="/incidents/:id" element={<IncidentDetailPage />} />
                 {/* On-Call & Escalation */}

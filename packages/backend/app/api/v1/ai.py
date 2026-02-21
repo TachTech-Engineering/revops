@@ -1,6 +1,7 @@
 """
 AI-powered summarization and conversion API endpoints.
 """
+import json
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
@@ -881,6 +882,115 @@ class AIChatResponse(BaseModel):
     model: str
     action_taken: Optional[str] = None
     action_data: Optional[dict] = None
+
+
+class NLQRequest(BaseModel):
+    query: str
+    provider: Optional[str] = None
+
+
+class NLQResponse(BaseModel):
+    answer: str
+    sql: Optional[str] = None
+    results: Optional[list] = None
+    explanation: Optional[str] = None
+    provider: str
+    model: str
+
+
+@router.post("/ask", response_model=NLQResponse)
+async def ask_your_data(
+    request: NLQRequest,
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Ask questions about your security data in natural language.
+    Translates English to SQL and executes it safely.
+    """
+    # 1. Determine provider and get key
+    provider_str = request.provider or "anthropic"
+    provider_name = provider_str.lower()
+    org_api_key, org_model = await get_org_api_key(db, org_id, provider_name)
+    
+    if not org_api_key and not settings.anthropic_api_key and not settings.openai_api_key:
+        raise HTTPException(status_code=400, detail="No LLM provider configured")
+
+    # 2. Define the schema context for the LLM
+    schema_context = """
+    Table: normalized_alerts
+    Columns:
+    - id (UUID)
+    - organization_id (UUID)
+    - title (String): Alert title
+    - description (Text): Detailed description
+    - severity (String): critical, high, medium, low, info
+    - status (String): open, triaged, resolved, dismissed
+    - source_type (String): e.g., cloudflare, crowdstrike, panther
+    - rule_id (String): ID of the detection rule
+    - rule_name (String): Human-readable rule name
+    - timestamp (DateTime): When the event occurred
+    - ingested_at (DateTime): When we received it
+    - entities (JSONB): List of entities like IPs, emails, hostnames
+    """
+
+    prompt = f"""You are a specialized SQL assistant for a security platform.
+    Translate the following natural language security question into a valid PostgreSQL query.
+    
+    Database Schema:
+    {schema_context}
+    
+    Constraints:
+    - Always include: WHERE organization_id = '{org_id}'
+    - Use ILIKE for case-insensitive text search.
+    - Return ONLY the SQL query, no explanation or other text.
+    - Limit results to 50 unless specified otherwise.
+    
+    Question: {request.query}
+    
+    SQL:"""
+
+    try:
+        # 3. Call LLM to get SQL
+        llm_provider = LLMProvider(provider_name)
+        result = await llm_service._call_llm_with_key(prompt, llm_provider, org_api_key, org_model)
+        generated_sql = result["summary"].strip().replace("```sql", "").replace("```", "").strip()
+        
+        # Security Check: Basic SQL injection prevention
+        forbidden = ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE", "GRANT", "REVOKE"]
+        if any(word in generated_sql.upper() for word in forbidden):
+            raise ValueError("Generated query contains forbidden keywords for safety.")
+
+        # 4. Execute the SQL
+        from sqlalchemy import text
+        execution_result = await db.execute(text(generated_sql))
+        rows = execution_result.mappings().all()
+        
+        # 5. Get a natural language explanation of the results
+        explanation_prompt = f"""Given this security question: "{request.query}"
+        And these results from the database: {json.dumps([dict(r) for r in rows[:5]], default=str)}
+        
+        Provide a concise (1-2 sentence) summary of what was found."""
+        
+        exp_result = await llm_service._call_llm_with_key(explanation_prompt, llm_provider, org_api_key, org_model)
+        
+        return NLQResponse(
+            answer=exp_result["summary"].strip(),
+            sql=generated_sql,
+            results=[dict(r) for r in rows],
+            explanation=None,
+            provider=provider_name,
+            model=result["model"]
+        )
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"NLQ Failed: {str(e)}", exc_info=True)
+        return NLQResponse(
+            answer=f"I couldn't process that query: {str(e)}",
+            provider=provider_name,
+            model="error"
+        )
 
 
 async def _execute_alert_lookup(

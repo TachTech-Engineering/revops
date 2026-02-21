@@ -88,6 +88,7 @@ from app.db.models import (
     AlertCluster,
     AlertClusterStatus,
     AlertClusterMember,
+    OrganizationAPIKeys,
     # Playbook Templates
     PlaybookTemplate,
     IncidentResolutionPattern,
@@ -206,6 +207,7 @@ __all__ = [
     "AlertCluster",
     "AlertClusterStatus",
     "AlertClusterMember",
+    "OrganizationAPIKeys",
     # Playbook Templates
     "PlaybookTemplate",
     "IncidentResolutionPattern",

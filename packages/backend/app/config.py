@@ -34,8 +34,8 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4"
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-sonnet-4-20250514"
-    default_llm_provider: str = "openai"
+    anthropic_model: str = "claude-3-5-sonnet-latest"
+    default_llm_provider: str = "anthropic"
 
     # Attack Simulation (Phase 5)
     atomic_red_team_path: str = ""  # Local path or GitHub URL

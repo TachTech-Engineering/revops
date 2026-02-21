@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { FileJson, FileSpreadsheet, CheckSquare, Square, X } from 'lucide-react'
-import { useListAlertsQuery, useUpdateAlertMutation, useBulkUpdateAlertsMutation } from '../api/pantherApi'
+import { FileJson, FileSpreadsheet, CheckSquare, Square, X, Search, Sparkles, Database, ChevronRight } from 'lucide-react'
+import { useListAlertsQuery, useUpdateAlertMutation, useBulkUpdateAlertsMutation, useAskYourDataMutation } from '../api/pantherApi'
 import { getSeverityColor, getStatusColor, formatDate } from '../lib/utils'
 import type { AlertStatus, Severity } from '../types'
 
@@ -10,6 +10,11 @@ export default function AlertsPage() {
   const [severityFilter, setSeverityFilter] = useState<Severity | ''>('')
   const [selectedAlerts, setSelectedAlerts] = useState<Set<string>>(new Set())
   const [bulkStatus, setBulkStatus] = useState<AlertStatus | ''>('')
+  
+  // NLQ State
+  const [nlqQuery, setNlqQuery] = useState('')
+  const [nlqResult, setNlqResult] = useState<{ answer: string; sql: string; results: any[] } | null>(null)
+  const [isNlqOpen, setIsNlqOpen] = useState(false)
 
   const { data, isLoading, error } = useListAlertsQuery({
     status: statusFilter || undefined,
@@ -19,6 +24,20 @@ export default function AlertsPage() {
 
   const [updateAlert] = useUpdateAlertMutation()
   const [bulkUpdateAlerts, { isLoading: isBulkUpdating }] = useBulkUpdateAlertsMutation()
+  const [askYourData, { isLoading: isAsking }] = useAskYourDataMutation()
+
+  const handleNlqSearch = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!nlqQuery.trim()) return
+    
+    try {
+      const result = await askYourData({ query: nlqQuery }).unwrap()
+      setNlqResult(result)
+      setIsNlqOpen(true)
+    } catch (err) {
+      console.error('NLQ failed:', err)
+    }
+  }
 
   const handleStatusChange = async (alertId: string, newStatus: AlertStatus) => {
     try {
@@ -130,6 +149,77 @@ export default function AlertsPage() {
             Export CSV {selectedAlerts.size > 0 && `(${selectedAlerts.size})`}
           </button>
         </div>
+      </div>
+
+      {/* AI Ask Your Data Search Bar */}
+      <div className="bg-card border rounded-lg p-4 shadow-sm">
+        <form onSubmit={handleNlqSearch} className="relative">
+          <Sparkles className="absolute left-3 top-1/2 -translate-y-1/2 text-primary" size={18} />
+          <input
+            type="text"
+            value={nlqQuery}
+            onChange={(e) => setNlqQuery(e.target.value)}
+            placeholder="Ask your data anything... (e.g. 'Show me critical alerts from the last 24 hours')"
+            className="w-full bg-background border rounded-md pl-10 pr-24 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/50"
+          />
+          <button
+            type="submit"
+            disabled={isAsking}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 px-4 py-1.5 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+          >
+            {isAsking ? 'Thinking...' : 'Search'}
+          </button>
+        </form>
+
+        {isNlqOpen && nlqResult && (
+          <div className="mt-4 border-t pt-4 space-y-4">
+            <div className="flex items-start gap-3 bg-primary/5 p-3 rounded-md border border-primary/20">
+              <Sparkles className="text-primary mt-0.5 shrink-0" size={16} />
+              <div className="text-sm">
+                <p className="font-medium text-primary mb-1">AI Answer</p>
+                <p className="text-muted-foreground leading-relaxed">{nlqResult.answer}</p>
+              </div>
+            </div>
+
+            <details className="group">
+              <summary className="flex items-center gap-2 text-xs font-medium text-muted-foreground cursor-pointer hover:text-foreground">
+                <Database size={12} />
+                <span>Generated SQL Query</span>
+                <ChevronRight size={12} className="group-open:rotate-90 transition-transform" />
+              </summary>
+              <pre className="mt-2 p-3 bg-muted rounded-md text-[10px] overflow-x-auto font-mono">
+                {nlqResult.sql}
+              </pre>
+            </details>
+
+            {nlqResult.results && nlqResult.results.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground px-1">Matching Results ({nlqResult.results.length})</p>
+                <div className="grid gap-2">
+                  {nlqResult.results.slice(0, 5).map((alert: any) => (
+                    <div key={alert.id} className="flex items-center justify-between p-2 bg-card border rounded-md hover:bg-muted/50 transition-colors">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-xs font-medium">{alert.title}</span>
+                        <span className="text-[10px] text-muted-foreground">{alert.source_system} • {alert.severity}</span>
+                      </div>
+                      <Link to={`/alerts/${alert.id}`} className="text-primary hover:underline text-[10px] font-medium">View Detail</Link>
+                    </div>
+                  ))}
+                  {nlqResult.results.length > 5 && (
+                    <p className="text-[10px] text-center text-muted-foreground italic pt-1">...and {nlqResult.results.length - 5} more results</p>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            <button 
+              onClick={() => setIsNlqOpen(false)}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              Clear Search
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filters */}

@@ -3,6 +3,7 @@ import { Bell, X, AlertTriangle, AlertCircle, Info, ExternalLink } from 'lucide-
 import { Link } from 'react-router-dom'
 import { useAlertWebSocket, AlertNotification } from '../../hooks/useWebSocket'
 import { cn } from '../../lib/utils'
+import PantherLogo from '../common/PantherLogo'
 
 const severityConfig = {
   CRITICAL: {
@@ -35,6 +36,13 @@ const severityConfig = {
     textColor: 'text-gray-400',
     borderColor: 'border-gray-500/50',
   },
+}
+
+const sourceIcons: Record<string, React.ReactNode> = {
+  cloudflare: <img src="/icons/cloudflare-v2.png" alt="Cloudflare" className="w-full h-full object-contain" />,
+  crowdstrike_falcon: <img src="/icons/crowdstrike.png" alt="CrowdStrike" className="w-full h-full object-contain" />,
+  panther: <PantherLogo size={16} />,
+  okta: <span className="text-xs">🔐</span>,
 }
 
 interface Toast {
@@ -162,8 +170,14 @@ export default function AlertNotifications() {
                         className="flex gap-3 p-3 hover:bg-muted/50 transition-colors"
                         onClick={() => setShowDropdown(false)}
                       >
-                        <div className={cn("p-1.5 rounded", config.bgColor)}>
-                          <Icon size={16} className={config.textColor} />
+                        <div className={cn("p-1.5 rounded flex items-center justify-center w-8 h-8", config.bgColor)}>
+                          {alert.sourceType && sourceIcons[alert.sourceType] ? (
+                            <div className="w-5 h-5 flex items-center justify-center">
+                              {sourceIcons[alert.sourceType]}
+                            </div>
+                          ) : (
+                            <Icon size={16} className={config.textColor} />
+                          )}
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-start justify-between gap-2">
@@ -219,8 +233,14 @@ export default function AlertNotifications() {
                 config.borderColor
               )}
             >
-              <div className={cn("p-1.5 rounded shrink-0", config.bgColor)}>
-                <Icon size={16} className={config.textColor} />
+              <div className={cn("p-1.5 rounded shrink-0 flex items-center justify-center w-8 h-8", config.bgColor)}>
+                {toast.alert.sourceType && sourceIcons[toast.alert.sourceType] ? (
+                  <div className="w-5 h-5 flex items-center justify-center">
+                    {sourceIcons[toast.alert.sourceType]}
+                  </div>
+                ) : (
+                  <Icon size={16} className={config.textColor} />
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-2">

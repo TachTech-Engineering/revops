@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Layers,
   RefreshCw,
@@ -15,6 +16,7 @@ import {
   useUpdateAlertClusterMutation,
   useMergeClustersMutation,
   useDeleteAlertClusterMutation,
+  useBulkDeleteAlertClustersMutation,
 } from '../api/pantherApi'
 import { cn } from '../lib/utils'
 
@@ -50,6 +52,7 @@ export default function ClusteredAlertsPage() {
   const [updateCluster] = useUpdateAlertClusterMutation()
   const [mergeClusters, { isLoading: isMerging }] = useMergeClustersMutation()
   const [deleteCluster] = useDeleteAlertClusterMutation()
+  const [bulkDeleteClusters, { isLoading: isBulkDeleting }] = useBulkDeleteAlertClustersMutation()
 
   const handleGenerate = async () => {
     try {
@@ -61,6 +64,20 @@ export default function ClusteredAlertsPage() {
       refetch()
     } catch (err) {
       console.error('Failed to generate clusters:', err)
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedClusters.size === 0) return
+    if (!confirm(`Are you sure you want to delete ${selectedClusters.size} clusters? This cannot be undone.`)) return
+
+    try {
+      await bulkDeleteClusters({ clusterIds: Array.from(selectedClusters) }).unwrap()
+      setSelectedClusters(new Set())
+      refetch()
+    } catch (err) {
+      console.error('Failed to bulk delete clusters:', err)
+      alert('Failed to bulk delete clusters')
     }
   }
 
@@ -124,6 +141,22 @@ export default function ClusteredAlertsPage() {
 
         <div className="h-6 w-px bg-border hidden sm:block" />
 
+        <div className="flex items-center gap-2 px-3 py-1.5 border rounded-md bg-background">
+          <input
+            type="checkbox"
+            checked={data?.clusters?.length > 0 && selectedClusters.size === data.clusters.length}
+            onChange={(e) => {
+              if (e.target.checked && data?.clusters) {
+                setSelectedClusters(new Set(data.clusters.map((c) => c.id)))
+              } else {
+                setSelectedClusters(new Set())
+              }
+            }}
+            className="rounded border-gray-600"
+          />
+          <span className="text-sm font-medium">Select All</span>
+        </div>
+
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
@@ -152,6 +185,16 @@ export default function ClusteredAlertsPage() {
         </span>
 
         <div className="flex items-center gap-2 ml-auto">
+          {selectedClusters.size > 0 && (
+            <button
+              onClick={handleBulkDelete}
+              disabled={isBulkDeleting}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-destructive text-destructive-foreground rounded-md hover:bg-destructive/90 text-sm disabled:opacity-50"
+            >
+              <Trash2 size={14} />
+              Delete Selected ({selectedClusters.size})
+            </button>
+          )}
           {selectedClusters.size >= 2 && (
             <button
               onClick={() => setShowMergeModal(true)}
@@ -269,9 +312,12 @@ export default function ClusteredAlertsPage() {
                     <option value="resolved">Resolved</option>
                     <option value="dismissed">Dismissed</option>
                   </select>
-                  <button className="flex items-center justify-center gap-1 px-3 py-1.5 text-sm border rounded hover:bg-accent">
+                  <Link
+                    to={`/alerts/clusters/${cluster.id}`}
+                    className="flex items-center justify-center gap-1 px-3 py-1.5 text-sm border rounded hover:bg-accent transition-colors"
+                  >
                     View <ChevronRight size={14} />
-                  </button>
+                  </Link>
                   <button
                     onClick={() => handleDelete(cluster.id, cluster.name)}
                     className="flex items-center justify-center gap-1 px-3 py-1.5 text-sm border border-red-500/50 rounded hover:bg-red-500/20 text-red-400"

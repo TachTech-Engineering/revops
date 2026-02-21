@@ -66,7 +66,7 @@ const connectorTypeLabels: Record<string, { label: string; icon: string | ReactN
   mimecast: { label: 'Mimecast', icon: '📨', category: 'Email Security' },
   microsoft_defender_email: { label: 'Defender for Office 365', icon: '📬', category: 'Email Security' },
   // Network Security
-  cloudflare: { label: 'Cloudflare', icon: '🟠', category: 'Network' },
+  cloudflare: { label: 'Cloudflare', icon: <img src="/icons/cloudflare-v2.png" alt="Cloudflare" className="w-7 h-7 object-contain" />, category: 'Network' },
   darktrace: { label: 'Darktrace', icon: '🌐', category: 'Network' },
   vectra: { label: 'Vectra', icon: '📡', category: 'Network' },
   // Action Connectors

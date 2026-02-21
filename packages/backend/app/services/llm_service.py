@@ -12,7 +12,11 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db.models import AISummaryCache, LLMProvider
+from app.db.models import AISummaryCache, LLMProvider, OrganizationAPIKeys
+from app.services.encryption_service import decrypt_credential
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class LLMService:
@@ -206,7 +210,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
                         {"role": "system", "content": "You are a security analyst assistant that helps analyze and summarize security alerts and incidents."},
                         {"role": "user", "content": prompt},
                     ],
-                    "max_tokens": 1500,
+                    "max_tokens": 2000,
                     "temperature": 0.3,
                 },
                 timeout=60.0,
@@ -242,7 +246,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
                 },
                 json={
                     "model": settings.anthropic_model,
-                    "max_tokens": 1500,
+                    "max_tokens": 2000,
                     "messages": [
                         {"role": "user", "content": prompt},
                     ],
@@ -378,6 +382,92 @@ Be concise but thorough. This summary should enable quick decision-making."""
 
         return sanitized
 
+    async def cluster_alerts(self, db: AsyncSession, organization_id: uuid.UUID, alerts: list[dict]) -> dict:
+        """
+        Generate a name and narrative summary for a cluster of alerts using org-specific keys.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Generating AI narrative for cluster with {len(alerts)} alerts for org {organization_id}")
+        
+        prompt = f"""Analyze this cluster of related security alerts and provide exactly two lines:
+NAME: [A concise professional name for this cluster, max 6 words]
+STORY: [A one-sentence narrative connecting these events]
+
+Alerts:
+{json.dumps(alerts[:10], indent=2)}
+"""
+        
+        try:
+            key_data = await self._get_org_api_key(db, organization_id)
+            if key_data:
+                result = await self._call_llm_with_key(prompt, LLMProvider(key_data["provider"]), key_data["api_key"], key_data.get("model"))
+            else:
+                # Fallback to system key, but check which one is actually configured
+                if settings.anthropic_api_key:
+                    provider = LLMProvider.ANTHROPIC
+                elif settings.openai_api_key:
+                    provider = LLMProvider.OPENAI
+                else:
+                    raise ValueError("No LLM keys configured (system or org)")
+                
+                result = await self._call_llm(prompt, provider)
+            
+            text = result["summary"].strip()
+            lines = text.split('\n')
+            
+            cluster_name = f"Cluster: {alerts[0].get('title')}"
+            narrative = f"Automated cluster of {len(alerts)} alerts."
+            
+            for line in lines:
+                if line.startswith("NAME:"):
+                    cluster_name = line.replace("NAME:", "").strip()
+                elif line.startswith("STORY:"):
+                    narrative = line.replace("STORY:", "").strip()
+            
+            return {"name": cluster_name, "narrative": narrative}
+        except Exception as e:
+            logger.error(f"AI Narrative generation failed: {str(e)}", exc_info=True)
+            return {
+                "name": f"Cluster: {alerts[0].get('title', 'Security Events')}",
+                "narrative": f"Automated cluster of {len(alerts)} alerts based on shared entities."
+            }
+
+    async def _get_org_api_key(self, db: AsyncSession, organization_id: uuid.UUID) -> Optional[dict]:
+        """Fetch and decrypt an active API key for the organization."""
+        from app.db import OrganizationAPIKeys
+        from app.services.encryption_service import decrypt_credential
+        
+        result = await db.execute(
+            select(OrganizationAPIKeys).where(
+                and_(
+                    OrganizationAPIKeys.organization_id == organization_id,
+                    OrganizationAPIKeys.is_active == True
+                )
+            )
+        )
+        key_record = result.scalar_one_or_none()
+        if not key_record:
+            return None
+            
+        decrypted = decrypt_credential(key_record.api_key_encrypted)
+        logger.info(f"Retrieved key for {key_record.provider}. Key starts with: {decrypted[:8]}...")
+        
+        return {
+            "provider": key_record.provider,
+            "api_key": decrypted,
+            "model": key_record.model
+        }
+
+    async def _call_llm_with_key(self, prompt: str, provider: LLMProvider, api_key: str, model: Optional[str] = None) -> dict:
+        """Call LLM provider with a specific key."""
+        if provider == LLMProvider.OPENAI:
+            return await self._call_openai_with_key(prompt, api_key, model)
+        elif provider == LLMProvider.ANTHROPIC:
+            return await self._call_anthropic_with_key(prompt, api_key, model)
+        else:
+            raise ValueError(f"Unsupported LLM provider: {provider}")
+
     async def get_settings(self) -> dict:
         """Get current LLM configuration."""
         return {
@@ -495,41 +585,56 @@ Be concise but thorough. This summary should enable quick decision-making."""
         """Call Anthropic API with a custom API key."""
         model_to_use = model or settings.anthropic_model
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "Content-Type": "application/json",
-                    "anthropic-version": "2023-06-01",
-                },
-                json={
-                    "model": model_to_use,
-                    "max_tokens": 100,
-                    "messages": [
-                        {"role": "user", "content": prompt},
-                    ],
-                    "system": "You are a security analyst assistant.",
-                },
-                timeout=30.0,
-            )
+        async def make_request(m):
+            async with httpx.AsyncClient() as client:
+                return await client.post(
+                    "https://api.anthropic.com/v1/messages",
+                    headers={
+                        "x-api-key": api_key,
+                        "Content-Type": "application/json",
+                        "anthropic-version": "2023-06-01",
+                    },
+                    json={
+                        "model": m,
+                        "max_tokens": 2000,
+                        "messages": [
+                            {"role": "user", "content": prompt},
+                        ],
+                        "system": "You are a security analyst assistant.",
+                    },
+                    timeout=30.0,
+                )
 
-            if response.status_code == 401:
-                raise ValueError("Invalid Anthropic API key")
-            elif response.status_code == 429:
-                raise ValueError("Anthropic rate limit exceeded")
-            elif response.status_code == 404:
-                raise ValueError(f"Model '{model_to_use}' not found or you don't have access")
+        response = await make_request(model_to_use)
 
-            response.raise_for_status()
-            data = response.json()
+        # Fallback logic for 404 Model Not Found
+        if response.status_code == 404:
+            fallbacks = ["claude-3-5-sonnet-20240620", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"]
+            logger.warning(f"Model {model_to_use} not found. Trying fallbacks: {fallbacks}")
+            for fallback_model in fallbacks:
+                if fallback_model == model_to_use:
+                    continue
+                response = await make_request(fallback_model)
+                if response.status_code != 404:
+                    model_to_use = fallback_model
+                    break
 
-            return {
-                "summary": data["content"][0]["text"],
-                "model": model_to_use,
-                "input_tokens": data.get("usage", {}).get("input_tokens", 0),
-                "output_tokens": data.get("usage", {}).get("output_tokens", 0),
-            }
+        if response.status_code == 401:
+            raise ValueError("Invalid Anthropic API key")
+        elif response.status_code == 429:
+            raise ValueError("Anthropic rate limit exceeded")
+        elif response.status_code == 404:
+            raise ValueError(f"Model '{model_to_use}' and all fallbacks not found")
+
+        response.raise_for_status()
+        data = response.json()
+
+        return {
+            "summary": data["content"][0]["text"],
+            "model": model_to_use,
+            "input_tokens": data.get("usage", {}).get("input_tokens", 0),
+            "output_tokens": data.get("usage", {}).get("output_tokens", 0),
+        }
 
 
 # Singleton instance

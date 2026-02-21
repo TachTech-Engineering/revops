@@ -10,11 +10,15 @@ import {
   XCircle,
   CheckCircle2,
   Archive,
+  Sparkles,
+  Database,
+  ChevronRight,
 } from 'lucide-react'
 import {
   useListUnifiedAlertsQuery,
   useListConnectorsQuery,
   useBulkUpdateAlertsMutation,
+  useAskYourDataMutation,
 } from '../api/pantherApi'
 import { cn } from '../lib/utils'
 import { formatRelativeTime } from '../lib/dateUtils'
@@ -68,7 +72,7 @@ const sourceTypeConfig: Record<string, { label: string; icon: string | ReactNode
   mimecast: { label: 'Mimecast', icon: '📨', category: 'Email' },
   microsoft_defender_email: { label: 'Defender for Office 365', icon: '📬', category: 'Email' },
   // Network Security
-  cloudflare: { label: 'Cloudflare', icon: '🟠', category: 'Network' },
+  cloudflare: { label: 'Cloudflare', icon: <img src="/icons/cloudflare-v2.png" alt="Cloudflare" className="w-5 h-5 object-contain" />, category: 'Network' },
   darktrace: { label: 'Darktrace', icon: '🌐', category: 'Network' },
   vectra: { label: 'Vectra', icon: '📡', category: 'Network' },
 }
@@ -89,6 +93,25 @@ export default function UnifiedAlertsPage() {
   })
   const [selectedAlerts, setSelectedAlerts] = useState<Set<string>>(new Set())
   const [bulkUpdateAlerts] = useBulkUpdateAlertsMutation()
+  
+  // NLQ State
+  const [nlqQuery, setNlqQuery] = useState('')
+  const [nlqResult, setNlqResult] = useState<{ answer: string; sql: string; results: any[] } | null>(null)
+  const [isNlqOpen, setIsNlqOpen] = useState(false)
+  const [askYourData, { isLoading: isAsking }] = useAskYourDataMutation()
+
+  const handleNlqSearch = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!nlqQuery.trim()) return
+    
+    try {
+      const result = await askYourData({ query: nlqQuery }).unwrap()
+      setNlqResult(result)
+      setIsNlqOpen(true)
+    } catch (err) {
+      console.error('NLQ failed:', err)
+    }
+  }
 
   // Determine status filter based on tab
   const getStatusFilter = () => {
@@ -173,130 +196,156 @@ export default function UnifiedAlertsPage() {
 
   return (
     <div className="space-y-4">
-      {/* Header with Filters */}
-      <div className="flex items-center gap-3 p-3 bg-card rounded-lg border flex-wrap">
-        <div className="flex items-center gap-2 mr-1">
-          <AlertCircle className="text-primary" size={20} />
-          <h1 className="text-lg font-bold">Alerts</h1>
+      {/* Integrated AI Search & Filter Header */}
+      <div className="flex items-center gap-2 p-2 bg-card rounded-lg border shadow-sm flex-wrap xl:flex-nowrap">
+        {/* Page Title & Sparkles */}
+        <div className="flex items-center gap-2 px-2 shrink-0">
+          <AlertCircle className="text-primary" size={18} />
+          <h1 className="text-base font-bold hidden sm:block">Alerts</h1>
         </div>
 
-        <div className="h-6 w-px bg-border hidden sm:block" />
+        <div className="h-6 w-px bg-border hidden lg:block" />
 
-        {/* Tabs */}
-        <div className="flex items-center gap-1">
+        {/* AI Search Bar - Expanded to fill middle */}
+        <form onSubmit={handleNlqSearch} className="relative flex-grow min-w-[200px]">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+          <input
+            type="text"
+            value={nlqQuery}
+            onChange={(e) => setNlqQuery(e.target.value)}
+            placeholder="Ask AI..."
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-md pl-8 pr-16 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-primary/50 text-zinc-200"
+          />
           <button
-            onClick={() => {
-              setActiveTab('active')
-              setFilters((prev) => ({ ...prev, status: '', page: 1 }))
-            }}
-            className={cn(
-              'px-3 py-1 text-sm font-medium rounded-md transition-colors',
-              activeTab === 'active'
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-accent'
-            )}
+            type="submit"
+            disabled={isAsking}
+            className="absolute right-1 top-1/2 -translate-y-1/2 px-2 py-0.5 bg-primary text-primary-foreground rounded text-[10px] font-bold hover:bg-primary/90 disabled:opacity-50"
           >
-            Active
+            {isAsking ? '...' : 'ASK'}
           </button>
-          <button
-            onClick={() => {
-              setActiveTab('resolved')
-              setFilters((prev) => ({ ...prev, status: '', page: 1 }))
-            }}
-            className={cn(
-              'px-3 py-1 text-sm font-medium rounded-md transition-colors',
-              activeTab === 'resolved'
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:bg-accent'
-            )}
+        </form>
+
+        <div className="h-6 w-px bg-border hidden xl:block" />
+
+        {/* Filters Row */}
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+          {/* Tabs */}
+          <div className="flex items-center bg-muted/50 rounded-md p-0.5">
+            <button
+              onClick={() => {
+                setActiveTab('active')
+                setFilters((prev) => ({ ...prev, status: '', page: 1 }))
+              }}
+              className={cn(
+                'px-2 py-1 text-[10px] font-bold rounded uppercase transition-colors',
+                activeTab === 'active' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'
+              )}
+            >
+              Active
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('resolved')
+                setFilters((prev) => ({ ...prev, status: '', page: 1 }))
+              }}
+              className={cn(
+                'px-2 py-1 text-[10px] font-bold rounded uppercase transition-colors',
+                activeTab === 'resolved' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent'
+              )}
+            >
+              Resolved
+            </button>
+          </div>
+
+          {/* Quick Selects */}
+          <select
+            value={filters.severity}
+            onChange={(e) => handleFilterChange('severity', e.target.value)}
+            className="bg-background border rounded px-1.5 py-1 text-[11px] focus:outline-none"
           >
-            Resolved
+            <option value="">Severity</option>
+            {Object.entries(severityConfig).map(([key, cfg]) => (
+              <option key={key} value={key}>{cfg.label}</option>
+            ))}
+          </select>
+
+          {/* Date Range - Compact */}
+          <div className="flex items-center gap-1 bg-muted/30 px-1.5 py-1 rounded border border-zinc-800">
+            <span className="text-[10px] font-bold text-zinc-500 uppercase">From</span>
+            <input
+              type="date"
+              value={filters.start_date}
+              onChange={(e) => handleFilterChange('start_date', e.target.value)}
+              className="bg-transparent border-none p-0 text-[11px] focus:ring-0 w-[95px]"
+            />
+            <span className="text-[10px] font-bold text-zinc-500 uppercase ml-1">To</span>
+            <input
+              type="date"
+              value={filters.end_date}
+              onChange={(e) => handleFilterChange('end_date', e.target.value)}
+              className="bg-transparent border-none p-0 text-[11px] focus:ring-0 w-[95px]"
+            />
+          </div>
+
+          <button
+            onClick={() => refetch()}
+            className="p-1.5 hover:bg-muted rounded-md transition-colors"
+            title="Refresh"
+          >
+            <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
           </button>
         </div>
-
-        <div className="h-6 w-px bg-border hidden sm:block" />
-
-        {/* Filters */}
-        <select
-          value={filters.source_type}
-          onChange={(e) => handleFilterChange('source_type', e.target.value)}
-          className="px-2 py-1.5 rounded-md border bg-background text-sm"
-        >
-          <option value="">All Sources</option>
-          {Object.entries(sourceTypeConfig).map(([key, cfg]) => (
-            <option key={key} value={key}>
-              {cfg.label}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={filters.severity}
-          onChange={(e) => handleFilterChange('severity', e.target.value)}
-          className="px-2 py-1.5 rounded-md border bg-background text-sm"
-        >
-          <option value="">All Severities</option>
-          {Object.entries(severityConfig).map(([key, cfg]) => (
-            <option key={key} value={key}>
-              {cfg.label}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={filters.status}
-          onChange={(e) => handleFilterChange('status', e.target.value)}
-          className="px-2 py-1.5 rounded-md border bg-background text-sm"
-        >
-          <option value="">All Statuses</option>
-          {Object.entries(statusConfig).map(([key, cfg]) => (
-            <option key={key} value={key}>
-              {cfg.label}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={filters.connector_id}
-          onChange={(e) => handleFilterChange('connector_id', e.target.value)}
-          className="px-2 py-1.5 rounded-md border bg-background text-sm"
-        >
-          <option value="">All Connectors</option>
-          {connectors?.items.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-
-        <input
-          type="date"
-          value={filters.start_date}
-          onChange={(e) => handleFilterChange('start_date', e.target.value)}
-          className="px-2 py-1.5 rounded-md border bg-background text-sm"
-          title="Start Date"
-        />
-
-        <input
-          type="date"
-          value={filters.end_date}
-          onChange={(e) => handleFilterChange('end_date', e.target.value)}
-          className="px-2 py-1.5 rounded-md border bg-background text-sm"
-          title="End Date"
-        />
-
-        <span className="text-sm text-muted-foreground">
-          {alerts?.total || 0} alerts
-        </span>
-
-        <button
-          onClick={() => refetch()}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-muted text-muted-foreground rounded-md text-sm hover:bg-accent ml-auto"
-        >
-          <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
-          Refresh
-        </button>
       </div>
+
+      {/* AI Search Results Overlay (if open) */}
+      {isNlqOpen && nlqResult && (
+        <div className="bg-zinc-900 border border-primary/20 rounded-lg p-4 shadow-xl animate-in fade-in slide-in-from-top-2 duration-200">
+          <div className="flex items-start gap-3">
+            <Sparkles className="text-primary mt-0.5 shrink-0" size={16} />
+            <div className="text-sm">
+              <p className="font-bold text-primary text-xs uppercase tracking-wider mb-1">AI Insights</p>
+              <p className="text-zinc-200 leading-relaxed">{nlqResult.answer}</p>
+            </div>
+            <button onClick={() => setIsNlqOpen(false)} className="ml-auto text-zinc-500 hover:text-white">
+              <XCircle size={16} />
+            </button>
+          </div>
+          
+          <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold text-zinc-500 uppercase">Results ({nlqResult?.results?.length || 0})</p>
+              <div className="space-y-1 max-h-[200px] overflow-y-auto pr-2">
+                {nlqResult?.results && nlqResult.results.length > 0 ? (
+                  // Check if it's a count result (e.g. SELECT COUNT(*))
+                  (nlqResult.results[0]?.count !== undefined || nlqResult.results[0]?.count_1 !== undefined) ? (
+                    <div className="p-4 bg-primary/10 border border-primary/20 rounded-md text-center">
+                      <p className="text-3xl font-bold text-primary">
+                        {nlqResult.results[0]?.count ?? nlqResult.results[0]?.count_1}
+                      </p>
+                      <p className="text-[10px] text-zinc-500 uppercase mt-1">Total Found</p>
+                    </div>
+                  ) : (
+                    nlqResult.results.slice(0, 10).map((alert: any) => (
+                      <Link key={alert.id || Math.random()} to={alert.id ? `/alerts/${alert.id}` : '#'} className="flex items-center justify-between p-2 bg-zinc-950 border border-zinc-800 rounded hover:border-primary/50 transition-colors">
+                        <span className="text-[11px] font-medium truncate">{alert.title || 'Result'}</span>
+                        <ChevronRight size={12} className="text-zinc-600" />
+                      </Link>
+                    ))
+                  )
+                ) : (
+                  <p className="text-xs text-zinc-500 italic p-2">No direct matches found.</p>
+                )}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <p className="text-[10px] font-bold text-zinc-500 uppercase">Search Logic (SQL)</p>
+              <pre className="p-3 bg-black/50 rounded text-[10px] font-mono text-zinc-400 border border-zinc-800 h-[200px] overflow-auto">
+                {nlqResult.sql}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bulk Actions Toolbar */}
       {isSomeSelected && (

@@ -1778,6 +1778,23 @@ export const revopsApi = createApi({
       invalidatesTags: ['AlertCluster'],
     }),
 
+    bulkDeleteAlertClusters: builder.mutation<{ status: string; deleted_count: number }, { clusterIds: string[] }>({
+      query: (data) => ({
+        url: '/alert-clusters/bulk-delete',
+        method: 'POST',
+        body: { cluster_ids: data.clusterIds },
+      }),
+      invalidatesTags: ['AlertCluster'],
+    }),
+
+    askYourData: builder.mutation<{ answer: string; sql: string; results: any[]; provider: string; model: string }, { query: string; provider?: string }>({
+      query: (data) => ({
+        url: '/ai/ask',
+        method: 'POST',
+        body: data,
+      }),
+    }),
+
     // ==================== Feature 6: AI Playbook Generation ====================
     listPlaybookTemplates: builder.query<PlaybookTemplateListResponse, { isApproved?: boolean; minConfidence?: number; page?: number; pageSize?: number }>({
       query: (params) => ({
@@ -4255,7 +4272,10 @@ export const {
   useUpdateAlertClusterMutation,
   useGenerateClustersMutation,
   useMergeClustersMutation,
-  useDeleteAlertClusterMutation,
+     useDeleteAlertClusterMutation,
+     useBulkDeleteAlertClustersMutation,
+   useAskYourDataMutation,
+  
   // Feature 6: AI Playbook Generation
   useListPlaybookTemplatesQuery,
   useGetPlaybookTemplateQuery,

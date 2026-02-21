@@ -83,14 +83,27 @@ class AlertPoller:
 
             # Broadcast new alerts and trigger escalations
             for alert in new_alerts:
+                title = alert.get("title", "")
+                description = alert.get("description", "")
+                
+                # Infer source type
+                source_type = "panther"
+                if "cloudflare" in title.lower() or "cloudflare" in description.lower():
+                    source_type = "cloudflare"
+                elif "crowdstrike" in title.lower() or "falcon" in title.lower():
+                    source_type = "crowdstrike_falcon"
+                elif "okta" in title.lower():
+                    source_type = "okta"
+
                 alert_data = {
                     "id": alert.get("id"),
-                    "title": alert.get("title"),
+                    "title": title,
                     "severity": alert.get("severity"),
                     "status": alert.get("status"),
                     "createdAt": alert.get("createdAt"),
                     "ruleName": alert.get("rule", {}).get("displayName") or alert.get("rule", {}).get("id"),
-                    "description": alert.get("description", ""),
+                    "description": description,
+                    "sourceType": source_type,
                 }
 
                 # Broadcast via WebSocket

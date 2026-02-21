@@ -12,6 +12,7 @@ export interface AlertNotification {
   status: string
   createdAt: string
   ruleName?: string
+  sourceType?: string
 }
 
 interface UseWebSocketOptions {

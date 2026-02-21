@@ -120,6 +120,14 @@ class CloudflareConnector(DataSourceConnector):
             logger.info(f"Cloudflare test_connection: account_id={account_id}")
             logger.info(f"Cloudflare test_connection: credentials keys={list(self.credentials.keys())}")
             logger.info(f"Cloudflare test_connection: api_token present={bool(api_token)}, length={len(api_token) if api_token else 0}")
+            if api_token:
+                # Log masked token for debugging (first 4 and last 4 chars)
+                masked = f"{api_token[:4]}...{api_token[-4:]}" if len(api_token) > 8 else "***"
+                logger.info(f"Cloudflare test_connection: api_token masked={masked}")
+                # Check for whitespace issues
+                if api_token != api_token.strip():
+                    logger.warning("Cloudflare test_connection: api_token has leading/trailing whitespace!")
+                    api_token = api_token.strip()
 
             if not api_token:
                 return ConnectionTestResult(
@@ -128,10 +136,15 @@ class CloudflareConnector(DataSourceConnector):
                 )
 
             async with httpx.AsyncClient(timeout=30.0) as client:
-                # Test by verifying token
+                # Test by verifying token - use account-specific endpoint
+                headers = self._get_headers()
+                # Log sanitized headers
+                logger.info(f"Cloudflare request headers (sanitized): Authorization=Bearer {'*' * 20}, Content-Type={headers.get('Content-Type')}")
+                verify_url = f"{self.BASE_URL}/accounts/{account_id}/tokens/verify" if account_id else f"{self.BASE_URL}/user/tokens/verify"
+                logger.info(f"Cloudflare verify URL: {verify_url}")
                 response = await client.get(
-                    f"{self.BASE_URL}/user/tokens/verify",
-                    headers=self._get_headers(),
+                    verify_url,
+                    headers=headers,
                 )
 
                 logger.info(f"Cloudflare API response: status={response.status_code}")
@@ -152,6 +165,12 @@ class CloudflareConnector(DataSourceConnector):
                     )
 
             if response.status_code == 401:
+                # Log response body for debugging
+                try:
+                    error_body = response.json()
+                    logger.warning(f"Cloudflare 401 response: {error_body}")
+                except Exception:
+                    logger.warning(f"Cloudflare 401 response text: {response.text[:500]}")
                 return ConnectionTestResult(
                     success=False,
                     message="Authentication failed - check API token",
@@ -225,7 +244,6 @@ class CloudflareConnector(DataSourceConnector):
                             datetime
                             rayName
                             ruleId
-                            ruleName
                             source
                             userAgent
                             matchIndex
@@ -272,11 +290,13 @@ class CloudflareConnector(DataSourceConnector):
 
     def normalize_alert(self, raw_alert: dict[str, Any]) -> NormalizedAlert:
         """Normalize a Cloudflare security event to the unified schema."""
-        # Parse timestamp
+        # Parse timestamp - ensure naive datetime for database compatibility
         created_at = datetime.utcnow()
         if raw_alert.get("datetime"):
             try:
-                created_at = datetime.fromisoformat(raw_alert["datetime"].replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(raw_alert["datetime"].replace("Z", "+00:00"))
+                # Convert to naive UTC datetime for database
+                created_at = dt.replace(tzinfo=None)
             except (ValueError, TypeError):
                 pass
 

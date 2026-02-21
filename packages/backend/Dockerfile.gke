@@ -1,0 +1,26 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Copy and install requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy panther_sdk
+COPY panther_sdk /app/panther_sdk
+RUN pip install --no-cache-dir -e /app/panther_sdk
+
+# Copy application
+COPY app ./app
+
+# Create non-root user and set permissions
+RUN useradd --create-home --shell /bin/bash appuser && \
+    chown -R appuser:appuser /app
+
+USER appuser
+
+ENV PYTHONPATH=/app:/app/panther_sdk
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
