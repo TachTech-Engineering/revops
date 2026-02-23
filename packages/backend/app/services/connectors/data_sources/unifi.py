@@ -4,7 +4,7 @@ UniFi Network Data Source Connector
 Fetches security events (IDS/IPS threats, alarms, and security-related system events)
 from Ubiquiti UniFi Network controllers into the unified alerts dashboard.
 
-Supports both standard UniFi Controllers and UDM Pro/UCG devices.
+Uses API key authentication (create in UniFi Settings > Integrations).
 """
 
 import time
@@ -25,6 +25,8 @@ from app.services.connectors.base import (
 # Security-relevant event types to ingest
 SECURITY_EVENT_TYPES = {
     "EVT_IPS_IpsAlert",
+    "EVT_IPS_IpReputation",
+    "EVT_IPS_Fingerprint",
     "EVT_AD_Login",
     "EVT_AD_LoginFailed",
     "EVT_AD_AdminLogin",
@@ -40,6 +42,7 @@ SECURITY_EVENT_TYPES = {
     "EVT_AP_PossibleInterference",
     "EVT_SW_StpBlockPortActive",
     "EVT_SW_AclDeny",
+    "EVT_GW_VPN",
 }
 
 # MITRE ATT&CK mappings for IDS categories
@@ -81,13 +84,12 @@ class UnifiConnector(DataSourceConnector):
     UniFi Network data source connector.
 
     Fetches IDS/IPS events, alarms, and security-relevant system events
-    from UniFi controllers using session-based authentication.
-
-    Supports both standard UniFi Controllers and UDM Pro/UCG devices.
+    from UniFi controllers using API key authentication.
     """
 
-    # Session cache to maintain authenticated sessions
-    _session_cache: dict[str, tuple[dict[str, str], float]] = {}
+    def __init__(self, connector_id: uuid.UUID, config: dict[str, Any], credentials: dict[str, Any]):
+        super().__init__(connector_id, config, credentials)
+        self._http_client: Optional[httpx.AsyncClient] = None
 
     @classmethod
     def get_metadata(cls) -> ConnectorMetadata:
@@ -100,28 +102,17 @@ class UnifiConnector(DataSourceConnector):
             config_schema={
                 "type": "object",
                 "properties": {
-                    "controller_url": {
-                        "type": "string",
-                        "title": "Controller URL",
-                        "description": "UniFi controller URL (e.g., https://192.168.1.1:8443)",
-                    },
                     "site": {
                         "type": "string",
                         "title": "Site",
                         "description": "UniFi site name",
                         "default": "default",
                     },
-                    "is_udm": {
-                        "type": "boolean",
-                        "title": "UDM/UCG Device",
-                        "description": "Enable if using UDM Pro, UDM SE, or UCG (changes API path)",
-                        "default": False,
-                    },
                     "verify_ssl": {
                         "type": "boolean",
                         "title": "Verify SSL",
                         "description": "Verify SSL certificate (disable for self-signed certs)",
-                        "default": True,
+                        "default": False,
                     },
                     "event_types": {
                         "type": "array",
@@ -133,107 +124,68 @@ class UnifiConnector(DataSourceConnector):
                         },
                         "default": ["ids", "alarms", "events"],
                     },
+                    "include_alarms": {
+                        "type": "boolean",
+                        "title": "Include Alarms",
+                        "description": "Also fetch UniFi alarms/alerts",
+                        "default": True,
+                    },
                 },
-                "required": ["controller_url"],
+                "required": [],
             },
             credentials_schema={
                 "type": "object",
                 "properties": {
-                    "username": {
+                    "controller_url": {
                         "type": "string",
-                        "title": "Username",
-                        "description": "UniFi admin username",
+                        "title": "Controller URL",
+                        "description": "UniFi controller URL (e.g., https://192.168.1.1)",
                     },
-                    "password": {
+                    "api_key": {
                         "type": "string",
-                        "title": "Password",
-                        "description": "UniFi admin password",
+                        "title": "API Key",
+                        "description": "UniFi Network API key (create in Settings > Integrations)",
                         "format": "password",
                     },
                 },
-                "required": ["username", "password"],
+                "required": ["controller_url", "api_key"],
             },
         )
 
     def _get_controller_url(self) -> str:
         """Get the configured controller URL with trailing slash removed."""
-        url = self.config.get("controller_url", "")
+        url = self.credentials.get("controller_url", "")
         return url.rstrip("/")
 
     def _get_site(self) -> str:
         """Get the configured site name."""
         return self.config.get("site", "default")
 
-    def _is_udm(self) -> bool:
-        """Check if using UDM Pro/UCG device."""
-        return self.config.get("is_udm", False)
-
-    def _get_api_prefix(self) -> str:
-        """Get API prefix based on controller type."""
-        if self._is_udm():
-            return "/proxy/network"
-        return ""
-
     def _get_verify_ssl(self) -> bool:
         """Get SSL verification setting."""
-        return self.config.get("verify_ssl", True)
+        return self.config.get("verify_ssl", False)
 
     def _get_event_types(self) -> list[str]:
         """Get configured event types to fetch."""
         return self.config.get("event_types", ["ids", "alarms", "events"])
 
-    def _get_cache_key(self) -> str:
-        """Generate cache key for session management."""
-        return f"{self._get_controller_url()}:{self.credentials.get('username', '')}"
+    def _get_headers(self) -> dict[str, str]:
+        """Get API request headers with API key."""
+        return {
+            "X-API-KEY": self.credentials.get("api_key", ""),
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
 
-    async def _login(self, client: httpx.AsyncClient) -> dict[str, str]:
-        """
-        Authenticate with the UniFi controller.
-
-        Returns:
-            Dictionary of cookies for authenticated session
-        """
-        cache_key = self._get_cache_key()
-
-        # Check cache for valid session
-        if cache_key in self._session_cache:
-            cookies, expiry = self._session_cache[cache_key]
-            if time.time() < expiry:
-                return cookies
-
-        base_url = self._get_controller_url()
-
-        # Determine login endpoint based on controller type
-        if self._is_udm():
-            login_url = f"{base_url}/api/auth/login"
-        else:
-            login_url = f"{base_url}/api/login"
-
-        response = await client.post(
-            login_url,
-            json={
-                "username": self.credentials.get("username", ""),
-                "password": self.credentials.get("password", ""),
-            },
-        )
-
-        if response.status_code not in (200, 204):
-            error_msg = "Authentication failed"
-            try:
-                error_data = response.json()
-                if "meta" in error_data and "msg" in error_data["meta"]:
-                    error_msg = error_data["meta"]["msg"]
-            except Exception:
-                pass
-            raise Exception(f"Login failed: {response.status_code} - {error_msg}")
-
-        # Extract cookies
-        cookies = dict(response.cookies)
-
-        # Cache session for 30 minutes
-        self._session_cache[cache_key] = (cookies, time.time() + 1800)
-
-        return cookies
+    async def _get_client(self) -> httpx.AsyncClient:
+        """Get or create HTTP client."""
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.AsyncClient(
+                timeout=30.0,
+                verify=self._get_verify_ssl(),
+                headers=self._get_headers(),
+            )
+        return self._http_client
 
     async def test_connection(self) -> ConnectionTestResult:
         """Test connection to UniFi controller."""
@@ -244,60 +196,68 @@ class UnifiConnector(DataSourceConnector):
 
         try:
             base_url = self._get_controller_url()
-            api_prefix = self._get_api_prefix()
-            site = self._get_site()
-
-            async with httpx.AsyncClient(
-                timeout=30.0,
-                verify=self._get_verify_ssl(),
-            ) as client:
-                # Authenticate
-                cookies = await self._login(client)
-
-                # Test API access by querying site info
-                response = await client.get(
-                    f"{base_url}{api_prefix}/api/s/{site}/stat/sysinfo",
-                    cookies=cookies,
+            if not base_url:
+                return ConnectionTestResult(
+                    success=False,
+                    message="Controller URL is required",
                 )
 
+            if not self.credentials.get("api_key"):
+                return ConnectionTestResult(
+                    success=False,
+                    message="API Key is required",
+                )
+
+            client = await self._get_client()
+            site = self._get_site()
+
+            # Test API connection by listing sites
+            response = await client.get(f"{base_url}/proxy/network/integration/v1/sites")
             latency_ms = int((time.time() - start_time) * 1000)
 
             if response.status_code == 200:
                 data = response.json()
-                meta = data.get("meta", {})
-                if meta.get("rc") == "ok":
-                    return ConnectionTestResult(
-                        success=True,
-                        message="Successfully connected to UniFi controller",
-                        details={
-                            "controller_url": base_url,
-                            "site": site,
-                            "is_udm": self._is_udm(),
-                        },
-                        latency_ms=latency_ms,
+                sites = data if isinstance(data, list) else [data]
+
+                # Try to get device count
+                device_count = 0
+                try:
+                    devices_resp = await client.get(
+                        f"{base_url}/proxy/network/api/s/{site}/stat/device"
                     )
-                else:
-                    return ConnectionTestResult(
-                        success=False,
-                        message=f"API error: {meta.get('msg', 'Unknown error')}",
-                        latency_ms=latency_ms,
-                    )
+                    if devices_resp.status_code == 200:
+                        devices_data = devices_resp.json()
+                        device_count = len(devices_data.get("data", []))
+                except Exception:
+                    pass
+
+                return ConnectionTestResult(
+                    success=True,
+                    message="Successfully connected to UniFi Network API",
+                    details={
+                        "sites_count": len(sites),
+                        "site_names": [s.get("name", s.get("desc", "unknown")) for s in sites[:5]],
+                        "device_count": device_count,
+                        "controller_url": base_url,
+                    },
+                    latency_ms=latency_ms,
+                )
             elif response.status_code == 401:
                 return ConnectionTestResult(
                     success=False,
-                    message="Authentication failed - check credentials",
+                    message="Authentication failed - check your API key",
                     latency_ms=latency_ms,
                 )
             elif response.status_code == 403:
                 return ConnectionTestResult(
                     success=False,
-                    message="Access denied - check user permissions",
+                    message="Access forbidden - API key may lack permissions",
                     latency_ms=latency_ms,
                 )
             else:
                 return ConnectionTestResult(
                     success=False,
-                    message=f"API returned status {response.status_code}",
+                    message=f"API returned status {response.status_code}: {response.text[:200]}",
                     latency_ms=latency_ms,
                 )
 
@@ -340,38 +300,33 @@ class UnifiConnector(DataSourceConnector):
 
         try:
             base_url = self._get_controller_url()
-            api_prefix = self._get_api_prefix()
             site = self._get_site()
+            client = await self._get_client()
 
             # Convert since to Unix timestamp (milliseconds)
             since_ts = int(since.timestamp() * 1000)
+            now_ts = int(datetime.utcnow().timestamp() * 1000)
 
-            async with httpx.AsyncClient(
-                timeout=60.0,
-                verify=self._get_verify_ssl(),
-            ) as client:
-                cookies = await self._login(client)
+            # Fetch IDS/IPS events
+            if "ids" in event_types:
+                ids_alerts = await self._fetch_ids_events(
+                    client, base_url, site, since_ts, now_ts, limit
+                )
+                normalized_alerts.extend(ids_alerts)
 
-                # Fetch IDS/IPS events
-                if "ids" in event_types:
-                    ids_alerts = await self._fetch_ids_events(
-                        client, cookies, base_url, api_prefix, site, since_ts, limit
-                    )
-                    normalized_alerts.extend(ids_alerts)
+            # Fetch alarms
+            if "alarms" in event_types or self.config.get("include_alarms", True):
+                alarm_alerts = await self._fetch_alarms(
+                    client, base_url, site, since_ts, limit
+                )
+                normalized_alerts.extend(alarm_alerts)
 
-                # Fetch alarms
-                if "alarms" in event_types:
-                    alarm_alerts = await self._fetch_alarms(
-                        client, cookies, base_url, api_prefix, site, since_ts, limit
-                    )
-                    normalized_alerts.extend(alarm_alerts)
-
-                # Fetch security-relevant system events
-                if "events" in event_types:
-                    event_alerts = await self._fetch_security_events(
-                        client, cookies, base_url, api_prefix, site, since_ts, limit
-                    )
-                    normalized_alerts.extend(event_alerts)
+            # Fetch security-relevant system events
+            if "events" in event_types:
+                event_alerts = await self._fetch_security_events(
+                    client, base_url, site, since_ts, now_ts, limit
+                )
+                normalized_alerts.extend(event_alerts)
 
             logger.info(f"UniFi fetched {len(normalized_alerts)} events")
 
@@ -394,103 +349,107 @@ class UnifiConnector(DataSourceConnector):
     async def _fetch_ids_events(
         self,
         client: httpx.AsyncClient,
-        cookies: dict[str, str],
         base_url: str,
-        api_prefix: str,
         site: str,
         since_ts: int,
+        now_ts: int,
         limit: int,
     ) -> list[NormalizedAlert]:
         """Fetch IDS/IPS events from UniFi controller."""
-        response = await client.get(
-            f"{base_url}{api_prefix}/api/s/{site}/stat/ips/event",
-            cookies=cookies,
-            params={
-                "start": since_ts,
-                "_limit": limit,
-            },
-        )
+        try:
+            response = await client.get(
+                f"{base_url}/proxy/network/api/s/{site}/stat/ips/event",
+                params={
+                    "start": since_ts,
+                    "end": now_ts,
+                    "_limit": limit,
+                },
+            )
 
-        if response.status_code != 200:
+            if response.status_code != 200:
+                return []
+
+            data = response.json()
+            if data.get("meta", {}).get("rc") != "ok":
+                return []
+
+            events = data.get("data", [])
+            return [self._normalize_ids_event(event) for event in events]
+        except Exception:
             return []
-
-        data = response.json()
-        if data.get("meta", {}).get("rc") != "ok":
-            return []
-
-        events = data.get("data", [])
-        return [self._normalize_ids_event(event) for event in events]
 
     async def _fetch_alarms(
         self,
         client: httpx.AsyncClient,
-        cookies: dict[str, str],
         base_url: str,
-        api_prefix: str,
         site: str,
         since_ts: int,
         limit: int,
     ) -> list[NormalizedAlert]:
         """Fetch alarms from UniFi controller."""
-        response = await client.get(
-            f"{base_url}{api_prefix}/api/s/{site}/stat/alarm",
-            cookies=cookies,
-        )
+        try:
+            response = await client.get(
+                f"{base_url}/proxy/network/api/s/{site}/stat/alarm",
+            )
 
-        if response.status_code != 200:
+            if response.status_code != 200:
+                return []
+
+            data = response.json()
+            if data.get("meta", {}).get("rc") != "ok":
+                return []
+
+            alarms = data.get("data", [])
+
+            # Filter by time
+            filtered_alarms = []
+            for alarm in alarms:
+                alarm_time = alarm.get("time", alarm.get("datetime", 0))
+                if isinstance(alarm_time, (int, float)) and alarm_time >= since_ts:
+                    filtered_alarms.append(alarm)
+
+            return [self._normalize_alarm(alarm) for alarm in filtered_alarms[:limit]]
+        except Exception:
             return []
-
-        data = response.json()
-        if data.get("meta", {}).get("rc") != "ok":
-            return []
-
-        alarms = data.get("data", [])
-
-        # Filter by time
-        filtered_alarms = []
-        for alarm in alarms:
-            alarm_time = alarm.get("time", alarm.get("datetime", 0))
-            if isinstance(alarm_time, (int, float)) and alarm_time >= since_ts:
-                filtered_alarms.append(alarm)
-
-        return [self._normalize_alarm(alarm) for alarm in filtered_alarms[:limit]]
 
     async def _fetch_security_events(
         self,
         client: httpx.AsyncClient,
-        cookies: dict[str, str],
         base_url: str,
-        api_prefix: str,
         site: str,
         since_ts: int,
+        now_ts: int,
         limit: int,
     ) -> list[NormalizedAlert]:
         """Fetch security-relevant system events from UniFi controller."""
-        response = await client.get(
-            f"{base_url}{api_prefix}/api/s/{site}/stat/event",
-            cookies=cookies,
-            params={
-                "start": since_ts,
-                "_limit": limit * 2,  # Fetch more since we'll filter
-            },
-        )
+        try:
+            response = await client.get(
+                f"{base_url}/proxy/network/api/s/{site}/stat/event",
+                params={
+                    "start": since_ts,
+                    "end": now_ts,
+                    "_limit": limit * 2,  # Fetch more since we'll filter
+                },
+            )
 
-        if response.status_code != 200:
+            if response.status_code != 200:
+                return []
+
+            data = response.json()
+            if data.get("meta", {}).get("rc") != "ok":
+                return []
+
+            events = data.get("data", [])
+
+            # Filter for security-relevant events only
+            security_events = [
+                event for event in events
+                if self._is_security_event(event)
+            ]
+
+            return [self._normalize_security_event(event) for event in security_events[:limit]]
+        except Exception:
             return []
-
-        data = response.json()
-        if data.get("meta", {}).get("rc") != "ok":
-            return []
-
-        events = data.get("data", [])
-
-        # Filter for security-relevant events only
-        security_events = [
-            event for event in events
-            if self._is_security_event(event)
-        ]
-
-        return [self._normalize_security_event(event) for event in security_events[:limit]]
 
     def _is_security_event(self, event: dict[str, Any]) -> bool:
         """Check if an event is security-relevant."""
