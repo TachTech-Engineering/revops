@@ -26,6 +26,7 @@ from app.services.connectors.data_sources.entra_id import EntraIDConnector
 
 # Network Security
 from app.services.connectors.data_sources.cloudflare import CloudflareConnector
+from app.services.connectors.data_sources.unifi import UnifiConnector
 
 __all__ = [
     # SIEM
@@ -46,4 +47,5 @@ __all__ = [
     "EntraIDConnector",
     # Network Security
     "CloudflareConnector",
+    "UnifiConnector",
 ]

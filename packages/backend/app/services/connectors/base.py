@@ -326,6 +326,7 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     from app.services.connectors.data_sources.entra_id import EntraIDConnector
     # Network Security
     from app.services.connectors.data_sources.cloudflare import CloudflareConnector
+    from app.services.connectors.data_sources.unifi import UnifiConnector
 
     # SIEM
     registry.register_data_source("panther", PantherDataSourceConnector)
@@ -345,6 +346,7 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     registry.register_data_source("entra_id", EntraIDConnector)
     # Network Security
     registry.register_data_source("cloudflare", CloudflareConnector)
+    registry.register_data_source("unifi", UnifiConnector)
 
     # Import and register action connectors
     from app.services.connectors.actions.jira import JiraActionConnector
