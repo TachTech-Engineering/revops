@@ -117,7 +117,7 @@ class UnifiConnector(DataSourceConnector):
             connector_id=self.connector_id,
             callback=self._on_syslog_message,
             source_ips=[source_ip] if source_ip else [],
-            hostname_patterns=[r"UDM", r"USG", r"UAP", r"USW", r"UniFi"],
+            hostname_patterns=[r"UDM", r"USG", r"UAP", r"USW", r"UniFi", r"Dream Machine", r"Dream.Machine"],
         )
         self._registered_handlers.add(self.connector_id)
         logger.info(f"UniFi connector {self.connector_id} registered for syslog")

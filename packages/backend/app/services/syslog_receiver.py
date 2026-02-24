@@ -152,6 +152,19 @@ class SyslogReceiverService:
             r"(.*)"  # Message
         )
 
+        # UniFi CEF format: TIMESTAMP TIMESTAMP HOSTNAME CEF:0|Vendor|Product|Version|EventID|Name|...
+        self._unifi_cef_pattern = re.compile(
+            r"(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+"  # BSD timestamp
+            r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s+"  # ISO timestamp
+            r"(.+?)\s+"  # Hostname (e.g., "DK Dream Machine Pro")
+            r"CEF:(\d+)\|"  # CEF version
+            r"([^|]*)\|"  # Vendor
+            r"([^|]*)\|"  # Product
+            r"([^|]*)\|"  # Version
+            r"([^|]*)\|"  # Event ID
+            r"(.*)"  # Rest of message
+        )
+
     async def start(self, udp_port: int = 514, tcp_port: int = 514, bind_address: str = "0.0.0.0") -> None:
         """Start the syslog receiver on specified ports."""
         if self._running:
@@ -281,7 +294,23 @@ class SyslogReceiverService:
         """Parse a raw syslog message."""
         raw = raw.strip()
 
-        # Try RFC 5424 first
+        # Try UniFi CEF format first (most specific)
+        match = self._unifi_cef_pattern.match(raw)
+        if match:
+            return SyslogMessage(
+                timestamp=self._parse_timestamp(match.group(2)),  # ISO timestamp
+                facility=1,  # user
+                severity=6,  # info (will be overridden by CEF severity if present)
+                hostname=match.group(3),  # e.g., "DK Dream Machine Pro"
+                app_name=match.group(6),  # Product (e.g., "UniFi OS")
+                process_id=None,
+                message=f"CEF:{match.group(4)}|{match.group(5)}|{match.group(6)}|{match.group(7)}|{match.group(8)}|{match.group(9)}",
+                raw=raw,
+                source_ip=source_ip,
+                source_port=source_port,
+            )
+
+        # Try RFC 5424 format
         match = self._rfc5424_pattern.match(raw)
         if match:
             pri = int(match.group(1))
@@ -315,7 +344,7 @@ class SyslogReceiverService:
                 source_port=source_port,
             )
 
-        # Fallback: minimal parsing
+        # Fallback: minimal parsing for standard syslog
         if raw.startswith("<"):
             try:
                 end_pri = raw.index(">")
@@ -335,6 +364,21 @@ class SyslogReceiverService:
                 )
             except (ValueError, IndexError):
                 pass
+
+        # Last resort: accept any message
+        if raw and len(raw) > 5:
+            return SyslogMessage(
+                timestamp=datetime.utcnow(),
+                facility=1,
+                severity=6,
+                hostname="unknown",
+                app_name="unknown",
+                process_id=None,
+                message=raw,
+                raw=raw,
+                source_ip=source_ip,
+                source_port=source_port,
+            )
 
         return None
 
