@@ -103,6 +103,10 @@ class Settings(BaseSettings):
     alert_sync_batch_size: int = 100
     alert_sync_max_age_days: int = 30
 
+    # Syslog Receiver (for UniFi and other syslog-based integrations)
+    syslog_port: int = 5514  # Using 5514 to avoid needing elevated privileges
+    syslog_bind_address: str = "0.0.0.0"
+
     # Logging
     log_level: str = "INFO"
 

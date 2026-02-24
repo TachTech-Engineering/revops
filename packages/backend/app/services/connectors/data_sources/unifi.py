@@ -2,17 +2,18 @@
 UniFi Network Data Source Connector
 
 Fetches security events (IDS/IPS threats, alarms, and security-related system events)
-from Ubiquiti UniFi Network controllers into the unified alerts dashboard.
+from Ubiquiti UniFi Network controllers.
 
-Uses API key authentication (create in UniFi Settings > Integrations).
+Supports two modes:
+1. Syslog (recommended) - UniFi pushes logs to our syslog receiver
+2. API - Polls UniFi controller directly (requires network access)
 """
 
-import time
+import logging
+import re
 import uuid
 from datetime import datetime
 from typing import Any, Optional
-
-import httpx
 
 from app.db.models import NormalizedAlert, ConnectorCategory
 from app.services.connectors.base import (
@@ -20,62 +21,73 @@ from app.services.connectors.base import (
     ConnectorMetadata,
     ConnectionTestResult,
 )
+from app.services.syslog_receiver import get_syslog_receiver, SyslogMessage
+
+logger = logging.getLogger(__name__)
 
 
-# Security-relevant event types to ingest
-SECURITY_EVENT_TYPES = {
-    "EVT_IPS_IpsAlert",
-    "EVT_IPS_IpReputation",
-    "EVT_IPS_Fingerprint",
-    "EVT_AD_Login",
-    "EVT_AD_LoginFailed",
-    "EVT_AD_AdminLogin",
-    "EVT_AD_AdminLoginFailed",
-    "EVT_WG_Connected",
-    "EVT_WG_Disconnected",
-    "EVT_WG_Authorization",
-    "EVT_WG_AuthorizationFailed",
-    "EVT_LU_Blocked",
-    "EVT_LU_Connected",
-    "EVT_LU_Disconnected",
-    "EVT_AP_DetectedRogueAP",
-    "EVT_AP_PossibleInterference",
-    "EVT_SW_StpBlockPortActive",
-    "EVT_SW_AclDeny",
-    "EVT_GW_VPN",
+# UniFi log patterns for parsing syslog messages
+UNIFI_PATTERNS = {
+    # IDS/IPS events from Suricata
+    "ids_alert": re.compile(
+        r"(?:suricata|snort).*?\[(?P<gid>\d+):(?P<sid>\d+):(?P<rev>\d+)\]\s+"
+        r"(?P<signature>.*?)\s+\[Classification:\s*(?P<classification>.*?)\]\s+"
+        r"\[Priority:\s*(?P<priority>\d+)\].*?"
+        r"(?P<src_ip>\d+\.\d+\.\d+\.\d+)(?::(?P<src_port>\d+))?\s*->\s*"
+        r"(?P<dst_ip>\d+\.\d+\.\d+\.\d+)(?::(?P<dst_port>\d+))?",
+        re.IGNORECASE
+    ),
+    # Firewall block events
+    "firewall_block": re.compile(
+        r"\[(?P<rule_name>.*?)\].*?"
+        r"IN=(?P<in_iface>\S*)\s+OUT=(?P<out_iface>\S*)\s+"
+        r"(?:MAC=(?P<mac>\S+)\s+)?"
+        r"SRC=(?P<src_ip>\S+)\s+DST=(?P<dst_ip>\S+)\s+"
+        r".*?PROTO=(?P<proto>\S+)"
+        r"(?:.*?SPT=(?P<src_port>\d+))?"
+        r"(?:.*?DPT=(?P<dst_port>\d+))?",
+        re.IGNORECASE
+    ),
+    # Admin login events
+    "admin_login": re.compile(
+        r"(?:admin|ubnt-systemmgr).*?"
+        r"(?P<action>login|logout|failed login)\s+"
+        r"(?:from\s+)?(?P<src_ip>\d+\.\d+\.\d+\.\d+)?",
+        re.IGNORECASE
+    ),
+    # VPN events
+    "vpn_event": re.compile(
+        r"(?:ipsec|openvpn|wireguard|l2tp).*?"
+        r"(?P<action>established|terminated|failed|connected|disconnected)\s*"
+        r"(?:.*?peer[=:\s]+(?P<peer>\S+))?",
+        re.IGNORECASE
+    ),
+    # Threat detection
+    "threat_detection": re.compile(
+        r"(?:threat|malware|botnet|suspicious).*?"
+        r"(?P<threat_type>\S+).*?"
+        r"(?:from|src)[=:\s]+(?P<src_ip>\d+\.\d+\.\d+\.\d+)?.*?"
+        r"(?:to|dst)[=:\s]+(?P<dst_ip>\d+\.\d+\.\d+\.\d+)?",
+        re.IGNORECASE
+    ),
 }
 
-# MITRE ATT&CK mappings for IDS categories
-MITRE_MAPPINGS: dict[str, tuple[list[str], list[str]]] = {
-    # Reconnaissance
-    "ET SCAN": (["TA0043"], ["T1595"]),
-    "ET POLICY": (["TA0043"], ["T1592"]),
-    "GPL SCAN": (["TA0043"], ["T1595"]),
-    # Initial Access
-    "ET EXPLOIT": (["TA0001"], ["T1190"]),
-    "GPL EXPLOIT": (["TA0001"], ["T1190"]),
-    "ET WEB_SERVER": (["TA0001"], ["T1190"]),
-    "ET WEB_CLIENT": (["TA0001"], ["T1189"]),
-    # Execution
-    "ET MALWARE": (["TA0002"], ["T1059"]),
-    "GPL MALWARE": (["TA0002"], ["T1059"]),
-    "ET TROJAN": (["TA0002"], ["T1059"]),
-    "GPL TROJAN": (["TA0002"], ["T1059"]),
-    # Command and Control
-    "ET CNC": (["TA0011"], ["T1071"]),
-    "ET BOTNET": (["TA0011"], ["T1071"]),
-    "GPL BOTNET": (["TA0011"], ["T1071"]),
-    # Credential Access
-    "ET ATTACK_RESPONSE": (["TA0006"], ["T1110"]),
-    "GPL ATTACK_RESPONSE": (["TA0006"], ["T1110"]),
-    # Lateral Movement
-    "ET RPC": (["TA0008"], ["T1021"]),
-    "GPL RPC": (["TA0008"], ["T1021"]),
-    "ET NETBIOS": (["TA0008"], ["T1021"]),
-    "GPL NETBIOS": (["TA0008"], ["T1021"]),
-    # Exfiltration
-    "ET DNS": (["TA0010"], ["T1048"]),
-    "GPL DNS": (["TA0010"], ["T1048"]),
+# Severity mapping for different event types
+SEVERITY_MAP = {
+    "ids_alert": "high",
+    "firewall_block": "info",
+    "admin_login": "medium",
+    "vpn_event": "medium",
+    "threat_detection": "critical",
+}
+
+# MITRE ATT&CK mappings
+MITRE_MAPPINGS = {
+    "ids_alert": {"tactics": ["Initial Access", "Execution"], "techniques": ["T1190", "T1059"]},
+    "firewall_block": {"tactics": ["Defense Evasion"], "techniques": ["T1036"]},
+    "admin_login": {"tactics": ["Initial Access", "Persistence"], "techniques": ["T1078"]},
+    "vpn_event": {"tactics": ["Command and Control"], "techniques": ["T1573"]},
+    "threat_detection": {"tactics": ["Command and Control"], "techniques": ["T1071"]},
 }
 
 
@@ -83,13 +95,36 @@ class UnifiConnector(DataSourceConnector):
     """
     UniFi Network data source connector.
 
-    Fetches IDS/IPS events, alarms, and security-relevant system events
-    from UniFi controllers using API key authentication.
+    Receives security events via syslog from UniFi controllers.
+    Configure your UniFi to send syslog to this server's IP on port 5514.
     """
+
+    _registered_handlers: set[uuid.UUID] = set()
 
     def __init__(self, connector_id: uuid.UUID, config: dict[str, Any], credentials: dict[str, Any]):
         super().__init__(connector_id, config, credentials)
-        self._http_client: Optional[httpx.AsyncClient] = None
+        self._register_syslog_handler()
+
+    def _register_syslog_handler(self) -> None:
+        """Register this connector with the syslog receiver."""
+        if self.connector_id in self._registered_handlers:
+            return
+
+        syslog_receiver = get_syslog_receiver()
+        source_ip = self.config.get("source_ip", "")
+
+        syslog_receiver.register_handler(
+            connector_id=self.connector_id,
+            callback=self._on_syslog_message,
+            source_ips=[source_ip] if source_ip else [],
+            hostname_patterns=[r"UDM", r"USG", r"UAP", r"USW", r"UniFi"],
+        )
+        self._registered_handlers.add(self.connector_id)
+        logger.info(f"UniFi connector {self.connector_id} registered for syslog")
+
+    def _on_syslog_message(self, message: SyslogMessage) -> None:
+        """Callback for incoming syslog messages (used for real-time processing if needed)."""
+        pass  # Messages are buffered by the syslog receiver
 
     @classmethod
     def get_metadata(cls) -> ConnectorMetadata:
@@ -97,38 +132,22 @@ class UnifiConnector(DataSourceConnector):
             connector_type="unifi",
             category=ConnectorCategory.DATA_SOURCE,
             display_name="UniFi Network",
-            description="Ubiquiti UniFi Network - IDS/IPS events, alarms, and security events",
+            description="Ubiquiti UniFi Network - IDS/IPS events via Syslog",
             icon="ubiquiti",
             config_schema={
                 "type": "object",
                 "properties": {
-                    "site": {
+                    "source_ip": {
                         "type": "string",
-                        "title": "Site",
-                        "description": "UniFi site name",
-                        "default": "default",
+                        "title": "UniFi Source IP",
+                        "description": "IP address of your UniFi controller (for filtering syslog messages). Leave empty to accept from any IP.",
+                        "default": "",
                     },
-                    "verify_ssl": {
-                        "type": "boolean",
-                        "title": "Verify SSL",
-                        "description": "Verify SSL certificate (disable for self-signed certs)",
-                        "default": False,
-                    },
-                    "event_types": {
-                        "type": "array",
-                        "title": "Event Types",
-                        "description": "Which event types to fetch",
-                        "items": {
-                            "type": "string",
-                            "enum": ["ids", "alarms", "events"],
-                        },
-                        "default": ["ids", "alarms", "events"],
-                    },
-                    "include_alarms": {
-                        "type": "boolean",
-                        "title": "Include Alarms",
-                        "description": "Also fetch UniFi alarms/alerts",
-                        "default": True,
+                    "syslog_info": {
+                        "type": "string",
+                        "title": "Syslog Configuration",
+                        "description": "Configure your UniFi to send syslog to: {server_ip}:5514",
+                        "readOnly": True,
                     },
                 },
                 "required": [],
@@ -136,148 +155,44 @@ class UnifiConnector(DataSourceConnector):
             credentials_schema={
                 "type": "object",
                 "properties": {
-                    "controller_url": {
+                    "syslog_token": {
                         "type": "string",
-                        "title": "Controller URL",
-                        "description": "UniFi controller URL (e.g., https://192.168.1.1)",
-                    },
-                    "api_key": {
-                        "type": "string",
-                        "title": "API Key",
-                        "description": "UniFi Network API key (create in Settings > Integrations)",
+                        "title": "Verification Token (Optional)",
+                        "description": "Optional token to verify syslog messages are from your UniFi",
                         "format": "password",
                     },
                 },
-                "required": ["controller_url", "api_key"],
+                "required": [],
             },
         )
 
-    def _get_controller_url(self) -> str:
-        """Get the configured controller URL with trailing slash removed."""
-        url = self.credentials.get("controller_url", "")
-        return url.rstrip("/")
-
-    def _get_site(self) -> str:
-        """Get the configured site name."""
-        return self.config.get("site", "default")
-
-    def _get_verify_ssl(self) -> bool:
-        """Get SSL verification setting."""
-        return self.config.get("verify_ssl", False)
-
-    def _get_event_types(self) -> list[str]:
-        """Get configured event types to fetch."""
-        return self.config.get("event_types", ["ids", "alarms", "events"])
-
-    def _get_headers(self) -> dict[str, str]:
-        """Get API request headers with API key."""
-        return {
-            "X-API-KEY": self.credentials.get("api_key", ""),
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create HTTP client."""
-        if self._http_client is None or self._http_client.is_closed:
-            self._http_client = httpx.AsyncClient(
-                timeout=30.0,
-                verify=self._get_verify_ssl(),
-                headers=self._get_headers(),
-            )
-        return self._http_client
-
     async def test_connection(self) -> ConnectionTestResult:
-        """Test connection to UniFi controller."""
-        import logging
-
-        logger = logging.getLogger(__name__)
-        start_time = time.time()
-
+        """Test that syslog receiver is running and ready."""
         try:
-            base_url = self._get_controller_url()
-            if not base_url:
-                return ConnectionTestResult(
-                    success=False,
-                    message="Controller URL is required",
-                )
+            syslog_receiver = get_syslog_receiver()
+            buffer_size = syslog_receiver.get_buffer_size(self.connector_id)
 
-            if not self.credentials.get("api_key"):
-                return ConnectionTestResult(
-                    success=False,
-                    message="API Key is required",
-                )
+            # Re-register handler if needed
+            self._register_syslog_handler()
 
-            client = await self._get_client()
-            site = self._get_site()
-
-            # Test API connection by listing sites
-            response = await client.get(f"{base_url}/proxy/network/integration/v1/sites")
-            latency_ms = int((time.time() - start_time) * 1000)
-
-            if response.status_code == 200:
-                data = response.json()
-                sites = data if isinstance(data, list) else [data]
-
-                # Try to get device count
-                device_count = 0
-                try:
-                    devices_resp = await client.get(
-                        f"{base_url}/proxy/network/api/s/{site}/stat/device"
-                    )
-                    if devices_resp.status_code == 200:
-                        devices_data = devices_resp.json()
-                        device_count = len(devices_data.get("data", []))
-                except Exception:
-                    pass
-
-                return ConnectionTestResult(
-                    success=True,
-                    message="Successfully connected to UniFi Network API",
-                    details={
-                        "sites_count": len(sites),
-                        "site_names": [s.get("name", s.get("desc", "unknown")) for s in sites[:5]],
-                        "device_count": device_count,
-                        "controller_url": base_url,
-                    },
-                    latency_ms=latency_ms,
-                )
-            elif response.status_code == 401:
-                return ConnectionTestResult(
-                    success=False,
-                    message="Authentication failed - check your API key",
-                    latency_ms=latency_ms,
-                )
-            elif response.status_code == 403:
-                return ConnectionTestResult(
-                    success=False,
-                    message="Access forbidden - API key may lack permissions",
-                    latency_ms=latency_ms,
-                )
-            else:
-                return ConnectionTestResult(
-                    success=False,
-                    message=f"API returned status {response.status_code}: {response.text[:200]}",
-                    latency_ms=latency_ms,
-                )
-
-        except httpx.TimeoutException:
-            logger.error("UniFi connection timed out")
             return ConnectionTestResult(
-                success=False,
-                message="Connection timed out",
+                success=True,
+                message="Syslog receiver is ready. Configure your UniFi to send logs to this server on port 5514.",
+                details={
+                    "mode": "syslog",
+                    "port": 5514,
+                    "buffered_messages": buffer_size,
+                    "source_ip_filter": self.config.get("source_ip", "any"),
+                    "instructions": "In UniFi: Settings → Integrations → Activity Logging → SIEM Server",
+                },
+                latency_ms=0,
             )
-        except httpx.ConnectError as e:
-            logger.error(f"UniFi connection error: {e}")
-            return ConnectionTestResult(
-                success=False,
-                message="Connection error: Unable to connect to controller",
-            )
+
         except Exception as e:
-            logger.exception(f"UniFi connection error: {e}")
+            logger.exception(f"UniFi syslog test error: {e}")
             return ConnectionTestResult(
                 success=False,
-                message=f"Connection error: {str(e)}",
+                message=f"Syslog receiver error: {str(e)}",
             )
 
     async def fetch_alerts(
@@ -286,437 +201,198 @@ class UnifiConnector(DataSourceConnector):
         limit: int = 100,
         cursor: Optional[str] = None,
     ) -> tuple[list[NormalizedAlert], Optional[str]]:
-        """
-        Fetch security events from UniFi controller.
-
-        Fetches IDS/IPS events, alarms, and security-relevant system events
-        based on configuration.
-        """
-        import logging
-
-        logger = logging.getLogger(__name__)
-        normalized_alerts: list[NormalizedAlert] = []
-        event_types = self._get_event_types()
-
+        """Fetch alerts from the syslog buffer."""
         try:
-            base_url = self._get_controller_url()
-            site = self._get_site()
-            client = await self._get_client()
+            syslog_receiver = get_syslog_receiver()
+            messages = syslog_receiver.get_buffered_messages(self.connector_id, limit)
 
-            # Convert since to Unix timestamp (milliseconds)
-            since_ts = int(since.timestamp() * 1000)
-            now_ts = int(datetime.utcnow().timestamp() * 1000)
+            normalized_alerts = []
+            for msg in messages:
+                # Filter by timestamp
+                if msg.timestamp < since:
+                    continue
 
-            # Fetch IDS/IPS events
-            if "ids" in event_types:
-                ids_alerts = await self._fetch_ids_events(
-                    client, base_url, site, since_ts, now_ts, limit
-                )
-                normalized_alerts.extend(ids_alerts)
+                # Parse and normalize the message
+                alert = self._normalize_syslog_message(msg)
+                if alert:
+                    normalized_alerts.append(alert)
 
-            # Fetch alarms
-            if "alarms" in event_types or self.config.get("include_alarms", True):
-                alarm_alerts = await self._fetch_alarms(
-                    client, base_url, site, since_ts, limit
-                )
-                normalized_alerts.extend(alarm_alerts)
+            logger.info(f"UniFi syslog: processed {len(normalized_alerts)} alerts from {len(messages)} messages")
 
-            # Fetch security-relevant system events
-            if "events" in event_types:
-                event_alerts = await self._fetch_security_events(
-                    client, base_url, site, since_ts, now_ts, limit
-                )
-                normalized_alerts.extend(event_alerts)
-
-            logger.info(f"UniFi fetched {len(normalized_alerts)} events")
-
-            # Sort by timestamp and apply limit
-            normalized_alerts.sort(key=lambda x: x.created_at_source)
-            if len(normalized_alerts) > limit:
-                normalized_alerts = normalized_alerts[:limit]
-
-            # Generate cursor for pagination (timestamp of last event)
-            next_cursor = None
-            if normalized_alerts:
-                last_ts = int(normalized_alerts[-1].created_at_source.timestamp() * 1000)
-                next_cursor = str(last_ts)
-
-            return normalized_alerts, next_cursor
+            return normalized_alerts, None
 
         except Exception as e:
-            raise Exception(f"Failed to fetch events from UniFi: {str(e)}")
+            raise Exception(f"Failed to fetch UniFi syslog alerts: {str(e)}")
 
-    async def _fetch_ids_events(
-        self,
-        client: httpx.AsyncClient,
-        base_url: str,
-        site: str,
-        since_ts: int,
-        now_ts: int,
-        limit: int,
-    ) -> list[NormalizedAlert]:
-        """Fetch IDS/IPS events from UniFi controller."""
-        try:
-            response = await client.get(
-                f"{base_url}/proxy/network/api/s/{site}/stat/ips/event",
-                params={
-                    "start": since_ts,
-                    "end": now_ts,
-                    "_limit": limit,
-                },
-            )
+    def _normalize_syslog_message(self, msg: SyslogMessage) -> Optional[NormalizedAlert]:
+        """Normalize a syslog message to the unified alert schema."""
+        # Try to match against known patterns
+        event_type = None
+        event_data: dict[str, Any] = {}
 
-            if response.status_code != 200:
-                return []
+        for pattern_name, pattern in UNIFI_PATTERNS.items():
+            match = pattern.search(msg.message)
+            if match:
+                event_type = pattern_name
+                event_data = match.groupdict()
+                break
 
-            data = response.json()
-            if data.get("meta", {}).get("rc") != "ok":
-                return []
-
-            events = data.get("data", [])
-            return [self._normalize_ids_event(event) for event in events]
-        except Exception:
-            return []
-
-    async def _fetch_alarms(
-        self,
-        client: httpx.AsyncClient,
-        base_url: str,
-        site: str,
-        since_ts: int,
-        limit: int,
-    ) -> list[NormalizedAlert]:
-        """Fetch alarms from UniFi controller."""
-        try:
-            response = await client.get(
-                f"{base_url}/proxy/network/api/s/{site}/stat/alarm",
-            )
-
-            if response.status_code != 200:
-                return []
-
-            data = response.json()
-            if data.get("meta", {}).get("rc") != "ok":
-                return []
-
-            alarms = data.get("data", [])
-
-            # Filter by time
-            filtered_alarms = []
-            for alarm in alarms:
-                alarm_time = alarm.get("time", alarm.get("datetime", 0))
-                if isinstance(alarm_time, (int, float)) and alarm_time >= since_ts:
-                    filtered_alarms.append(alarm)
-
-            return [self._normalize_alarm(alarm) for alarm in filtered_alarms[:limit]]
-        except Exception:
-            return []
-
-    async def _fetch_security_events(
-        self,
-        client: httpx.AsyncClient,
-        base_url: str,
-        site: str,
-        since_ts: int,
-        now_ts: int,
-        limit: int,
-    ) -> list[NormalizedAlert]:
-        """Fetch security-relevant system events from UniFi controller."""
-        try:
-            response = await client.get(
-                f"{base_url}/proxy/network/api/s/{site}/stat/event",
-                params={
-                    "start": since_ts,
-                    "end": now_ts,
-                    "_limit": limit * 2,  # Fetch more since we'll filter
-                },
-            )
-
-            if response.status_code != 200:
-                return []
-
-            data = response.json()
-            if data.get("meta", {}).get("rc") != "ok":
-                return []
-
-            events = data.get("data", [])
-
-            # Filter for security-relevant events only
-            security_events = [
-                event for event in events
-                if self._is_security_event(event)
-            ]
-
-            return [self._normalize_security_event(event) for event in security_events[:limit]]
-        except Exception:
-            return []
-
-    def _is_security_event(self, event: dict[str, Any]) -> bool:
-        """Check if an event is security-relevant."""
-        event_key = event.get("key", "")
-        return event_key in SECURITY_EVENT_TYPES
-
-    def normalize_alert(self, raw_alert: dict[str, Any]) -> NormalizedAlert:
-        """
-        Normalize a raw alert from UniFi.
-
-        Dispatches to the appropriate normalizer based on event type.
-        """
-        # Determine event type and dispatch
-        if "inner_alert_signature" in raw_alert:
-            return self._normalize_ids_event(raw_alert)
-        elif "archived" in raw_alert and "key" not in raw_alert:
-            return self._normalize_alarm(raw_alert)
-        else:
-            return self._normalize_security_event(raw_alert)
-
-    def _normalize_ids_event(self, event: dict[str, Any]) -> NormalizedAlert:
-        """Normalize an IDS/IPS event to the unified alert schema."""
-        # Extract action and signature
-        action = event.get("inner_alert_action", "alert")
-        signature = event.get("inner_alert_signature", "Unknown IDS Event")
-        category = event.get("catname", "")
+        # If no specific pattern matched, use generic parsing
+        if not event_type:
+            event_type = "system_event"
+            event_data = {"message": msg.message}
 
         # Build title
-        title = f"[{action.upper()}] {signature}"
-
-        # Build description with network details
-        src_ip = event.get("src_ip", "unknown")
-        dst_ip = event.get("dst_ip", "unknown")
-        src_port = event.get("src_port", "")
-        dst_port = event.get("dst_port", "")
-        protocol = event.get("proto", "").upper()
-        src_country = event.get("src_country_name", "")
-        dst_country = event.get("dst_country_name", "")
-
-        description_parts = [
-            f"Category: {category}" if category else None,
-            f"Source: {src_ip}:{src_port}" if src_port else f"Source: {src_ip}",
-            f"Destination: {dst_ip}:{dst_port}" if dst_port else f"Destination: {dst_ip}",
-            f"Protocol: {protocol}" if protocol else None,
-            f"Source Country: {src_country}" if src_country else None,
-            f"Destination Country: {dst_country}" if dst_country else None,
-        ]
-        description = " | ".join(filter(None, description_parts))
-
-        # Map severity
-        inner_severity = event.get("inner_alert_severity", 2)
-        severity = self._map_ids_severity(inner_severity)
-
-        # Build tags
-        tags = []
-        if action:
-            tags.append(f"action:{action}")
-        if category:
-            tags.append(f"category:{category.split()[0] if category else ''}")
-        if protocol:
-            tags.append(f"protocol:{protocol.lower()}")
-        if src_country:
-            tags.append(f"src_country:{src_country}")
-        if dst_country:
-            tags.append(f"dst_country:{dst_country}")
-
-        # Get MITRE mappings
-        mitre_tactics, mitre_techniques = self._map_mitre(category)
-
-        # Parse timestamp
-        timestamp_ms = event.get("timestamp", event.get("time", 0))
-        if timestamp_ms:
-            created_at = datetime.utcfromtimestamp(timestamp_ms / 1000)
-        else:
-            created_at = datetime.utcnow()
-
-        return NormalizedAlert(
-            id=uuid.uuid4(),
-            connector_id=self.connector_id,
-            source_type="unifi",
-            external_id=event.get("_id", str(uuid.uuid4())),
-            title=title,
-            description=description,
-            severity=severity,
-            status="open",
-            created_at_source=created_at,
-            updated_at_source=None,
-            rule_id=str(event.get("inner_alert_signature_id", "")),
-            rule_name=signature,
-            tags=tags,
-            mitre_tactics=mitre_tactics,
-            mitre_techniques=mitre_techniques,
-            raw_data=event,
-            ingested_at=datetime.utcnow(),
-        )
-
-    def _normalize_alarm(self, alarm: dict[str, Any]) -> NormalizedAlert:
-        """Normalize an alarm to the unified alert schema."""
-        # Get alarm details
-        key = alarm.get("key", "")
-        msg = alarm.get("msg", "UniFi Alarm")
-
-        # Build title
-        title = f"[ALARM] {msg}"
+        title = self._build_title(event_type, event_data, msg)
 
         # Build description
-        description_parts = []
-        if "ap_name" in alarm:
-            description_parts.append(f"AP: {alarm['ap_name']}")
-        if "client_name" in alarm or "guest" in alarm:
-            client = alarm.get("client_name") or alarm.get("guest", {}).get("name", "Unknown")
-            description_parts.append(f"Client: {client}")
-        if "gw_name" in alarm:
-            description_parts.append(f"Gateway: {alarm['gw_name']}")
+        description = self._build_description(event_type, event_data, msg)
 
-        description = " | ".join(description_parts) if description_parts else msg
+        # Get severity
+        severity = self._get_severity(event_type, event_data, msg)
 
-        # Determine severity based on alarm type
-        severity = "medium"
-        if "critical" in key.lower() or "intrusion" in key.lower():
-            severity = "critical"
-        elif "warning" in key.lower() or "failed" in key.lower():
-            severity = "high"
-        elif "info" in key.lower():
-            severity = "info"
-
-        # Determine status from archived flag
-        status = "closed" if alarm.get("archived", False) else "open"
-
-        # Parse timestamp
-        timestamp_ms = alarm.get("time", alarm.get("datetime", 0))
-        if timestamp_ms:
-            created_at = datetime.utcfromtimestamp(timestamp_ms / 1000)
-        else:
-            created_at = datetime.utcnow()
+        # Get MITRE mappings
+        mitre = MITRE_MAPPINGS.get(event_type, {})
 
         # Build tags
-        tags = [f"alarm_type:{key}"]
-        if "site_name" in alarm:
-            tags.append(f"site:{alarm['site_name']}")
+        tags = [
+            f"source:{msg.hostname}",
+            f"event_type:{event_type}",
+            f"facility:{msg.facility_name}",
+        ]
+        if event_data.get("src_ip"):
+            tags.append(f"src_ip:{event_data['src_ip']}")
+        if event_data.get("dst_ip"):
+            tags.append(f"dst_ip:{event_data['dst_ip']}")
 
         return NormalizedAlert(
             id=uuid.uuid4(),
             connector_id=self.connector_id,
             source_type="unifi",
-            external_id=alarm.get("_id", str(uuid.uuid4())),
-            title=title,
-            description=description,
-            severity=severity,
-            status=status,
-            created_at_source=created_at,
-            updated_at_source=None,
-            rule_id=key,
-            rule_name=key,
-            tags=tags,
-            mitre_tactics=[],
-            mitre_techniques=[],
-            raw_data=alarm,
-            ingested_at=datetime.utcnow(),
-        )
-
-    def _normalize_security_event(self, event: dict[str, Any]) -> NormalizedAlert:
-        """Normalize a security-relevant system event to the unified alert schema."""
-        event_key = event.get("key", "Unknown Event")
-        msg = event.get("msg", event_key)
-
-        # Build title
-        title = f"[EVENT] {msg}"
-
-        # Build description with context
-        description_parts = []
-        if "user" in event:
-            description_parts.append(f"User: {event['user']}")
-        if "client" in event:
-            description_parts.append(f"Client: {event['client']}")
-        if "hostname" in event:
-            description_parts.append(f"Hostname: {event['hostname']}")
-        if "ip" in event:
-            description_parts.append(f"IP: {event['ip']}")
-        if "ap" in event:
-            description_parts.append(f"AP: {event['ap']}")
-
-        description = " | ".join(description_parts) if description_parts else msg
-
-        # Map severity based on event type
-        severity = self._map_event_severity(event_key)
-
-        # Parse timestamp
-        timestamp_ms = event.get("time", event.get("datetime", 0))
-        if timestamp_ms:
-            created_at = datetime.utcfromtimestamp(timestamp_ms / 1000)
-        else:
-            created_at = datetime.utcnow()
-
-        # Build tags
-        tags = [f"event_type:{event_key}"]
-        if "site_name" in event:
-            tags.append(f"site:{event['site_name']}")
-        if "subsystem" in event:
-            tags.append(f"subsystem:{event['subsystem']}")
-
-        # Map MITRE for certain event types
-        mitre_tactics: list[str] = []
-        mitre_techniques: list[str] = []
-
-        if "LoginFailed" in event_key or "AuthorizationFailed" in event_key:
-            mitre_tactics = ["TA0006"]  # Credential Access
-            mitre_techniques = ["T1110"]  # Brute Force
-        elif "RogueAP" in event_key:
-            mitre_tactics = ["TA0001"]  # Initial Access
-            mitre_techniques = ["T1200"]  # Hardware Additions
-        elif "Blocked" in event_key:
-            mitre_tactics = ["TA0005"]  # Defense Evasion
-            mitre_techniques = []
-
-        return NormalizedAlert(
-            id=uuid.uuid4(),
-            connector_id=self.connector_id,
-            source_type="unifi",
-            external_id=event.get("_id", str(uuid.uuid4())),
+            external_id=f"unifi-{msg.source_ip}-{msg.timestamp.timestamp()}",
             title=title,
             description=description,
             severity=severity,
             status="open",
-            created_at_source=created_at,
+            created_at_source=msg.timestamp,
             updated_at_source=None,
-            rule_id=event_key,
-            rule_name=event_key,
+            rule_id=event_type,
+            rule_name=f"UniFi {event_type.replace('_', ' ').title()}",
             tags=tags,
-            mitre_tactics=mitre_tactics,
-            mitre_techniques=mitre_techniques,
-            raw_data=event,
+            mitre_tactics=mitre.get("tactics", []),
+            mitre_techniques=mitre.get("techniques", []),
+            raw_data={
+                "syslog": {
+                    "facility": msg.facility_name,
+                    "severity": msg.severity_name,
+                    "hostname": msg.hostname,
+                    "app_name": msg.app_name,
+                    "source_ip": msg.source_ip,
+                },
+                "parsed": event_data,
+                "raw_message": msg.raw,
+            },
             ingested_at=datetime.utcnow(),
         )
 
-    def _map_ids_severity(self, severity: int) -> str:
-        """Map IDS severity (1-3) to standard values."""
-        severity_map = {
-            1: "critical",
-            2: "high",
-            3: "medium",
-        }
-        return severity_map.get(severity, "medium")
-
-    def _map_event_severity(self, event_key: str) -> str:
-        """Map event type to severity."""
-        if "LoginFailed" in event_key or "AuthorizationFailed" in event_key:
-            return "medium"
-        elif "Blocked" in event_key:
-            return "medium"
-        elif "RogueAP" in event_key:
-            return "high"
-        elif "Interference" in event_key:
-            return "low"
-        elif "StpBlockPortActive" in event_key or "AclDeny" in event_key:
-            return "medium"
+    def _build_title(self, event_type: str, data: dict, msg: SyslogMessage) -> str:
+        """Build alert title based on event type."""
+        if event_type == "ids_alert":
+            return f"IDS Alert: {data.get('signature', 'Unknown threat')}"
+        elif event_type == "firewall_block":
+            return f"Firewall Block: {data.get('src_ip', '?')} → {data.get('dst_ip', '?')}:{data.get('dst_port', '?')}"
+        elif event_type == "admin_login":
+            action = data.get('action', 'event').title()
+            return f"Admin {action} from {data.get('src_ip', 'unknown')}"
+        elif event_type == "vpn_event":
+            return f"VPN {data.get('action', 'event').title()}: {data.get('peer', 'unknown')}"
+        elif event_type == "threat_detection":
+            return f"Threat Detected: {data.get('threat_type', 'unknown')}"
         else:
+            return f"UniFi Event: {msg.message[:100]}"
+
+    def _build_description(self, event_type: str, data: dict, msg: SyslogMessage) -> str:
+        """Build alert description."""
+        lines = [
+            f"Source Device: {msg.hostname} ({msg.source_ip})",
+            f"Facility: {msg.facility_name}, Severity: {msg.severity_name}",
+            "",
+        ]
+
+        if event_type == "ids_alert":
+            lines.extend([
+                f"Signature: {data.get('signature', 'Unknown')}",
+                f"Classification: {data.get('classification', 'Unknown')}",
+                f"Priority: {data.get('priority', '?')}",
+                f"Source: {data.get('src_ip', '?')}:{data.get('src_port', '?')}",
+                f"Destination: {data.get('dst_ip', '?')}:{data.get('dst_port', '?')}",
+            ])
+        elif event_type == "firewall_block":
+            lines.extend([
+                f"Rule: {data.get('rule_name', 'Unknown')}",
+                f"Protocol: {data.get('proto', '?')}",
+                f"Source: {data.get('src_ip', '?')}:{data.get('src_port', '?')}",
+                f"Destination: {data.get('dst_ip', '?')}:{data.get('dst_port', '?')}",
+                f"Interface: {data.get('in_iface', '?')} → {data.get('out_iface', '?')}",
+            ])
+        else:
+            lines.append(f"Message: {msg.message}")
+
+        return "\n".join(lines)
+
+    def _get_severity(self, event_type: str, data: dict, msg: SyslogMessage) -> str:
+        """Determine alert severity."""
+        # IDS alerts use their priority
+        if event_type == "ids_alert":
+            priority = data.get("priority", "3")
+            try:
+                p = int(priority)
+                if p <= 1:
+                    return "critical"
+                elif p == 2:
+                    return "high"
+                else:
+                    return "medium"
+            except ValueError:
+                return "high"
+
+        # Admin login failures are high severity
+        if event_type == "admin_login" and "failed" in str(data.get("action", "")).lower():
+            return "high"
+
+        # Use syslog severity
+        if msg.severity <= 2:  # emerg, alert, crit
+            return "critical"
+        elif msg.severity == 3:  # err
+            return "high"
+        elif msg.severity == 4:  # warning
+            return "medium"
+        elif msg.severity <= 5:  # notice
             return "low"
+        else:
+            return "info"
 
-    def _map_mitre(self, catname: str) -> tuple[list[str], list[str]]:
-        """Map IDS category to MITRE ATT&CK tactics and techniques."""
-        if not catname:
-            return [], []
+        return SEVERITY_MAP.get(event_type, "info")
 
-        # Check for matching category prefix
-        for prefix, (tactics, techniques) in MITRE_MAPPINGS.items():
-            if catname.startswith(prefix):
-                return tactics, techniques
-
-        return [], []
+    def normalize_alert(self, raw_alert: dict[str, Any]) -> NormalizedAlert:
+        """Normalize a raw alert (not used in syslog mode)."""
+        # This is required by the base class but not used in syslog mode
+        return NormalizedAlert(
+            id=uuid.uuid4(),
+            connector_id=self.connector_id,
+            source_type="unifi",
+            external_id=str(uuid.uuid4()),
+            title="UniFi Event",
+            description=str(raw_alert),
+            severity="info",
+            status="open",
+            created_at_source=datetime.utcnow(),
+            updated_at_source=None,
+            rule_id="unknown",
+            rule_name="Unknown",
+            tags=[],
+            mitre_tactics=[],
+            mitre_techniques=[],
+            raw_data=raw_alert,
+            ingested_at=datetime.utcnow(),
+        )

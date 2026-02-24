@@ -10,3 +10,4 @@ resources:
   - backend-deployment.yaml
   - redis-deployment.yaml
   - ingress.yaml
+  - syslog-service.yaml

@@ -11,6 +11,7 @@ from app.api.v1.router import api_router
 from app.config import settings
 from app.db import init_db
 from app.jobs.connector_sync import start_connector_sync_scheduler, stop_connector_sync_scheduler
+from app.services.syslog_receiver import get_syslog_receiver
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -31,6 +32,15 @@ async def lifespan(app: FastAPI):
     sync_task = asyncio.create_task(start_connector_sync_scheduler())
     logger.info("Connector sync scheduler started")
 
+    # Start syslog receiver for UniFi and other syslog-based connectors
+    syslog_receiver = get_syslog_receiver()
+    syslog_port = getattr(settings, "syslog_port", 514)
+    try:
+        await syslog_receiver.start(udp_port=syslog_port, tcp_port=syslog_port)
+        logger.info(f"Syslog receiver started on port {syslog_port}")
+    except Exception as e:
+        logger.warning(f"Could not start syslog receiver: {e} (may require elevated privileges)")
+
     yield
 
     # Shutdown
@@ -41,6 +51,9 @@ async def lifespan(app: FastAPI):
         await sync_task
     except asyncio.CancelledError:
         pass
+
+    # Stop syslog receiver
+    await syslog_receiver.stop()
 
 
 app = FastAPI(
