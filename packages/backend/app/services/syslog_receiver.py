@@ -68,6 +68,7 @@ class SyslogProtocol(asyncio.DatagramProtocol):
         """Process received UDP datagram."""
         try:
             message = data.decode("utf-8", errors="replace")
+            logger.info(f"Syslog UDP received from {addr[0]}:{addr[1]} - {len(data)} bytes: {message[:100]}")
             self.receiver._process_message(message, addr[0], addr[1])
         except Exception as e:
             logger.error(f"Error processing syslog datagram: {e}")
@@ -266,10 +267,12 @@ class SyslogReceiverService:
 
     def _process_message(self, raw_message: str, source_ip: str, source_port: int) -> None:
         """Parse and route a syslog message to registered handlers."""
+        logger.info(f"Processing syslog message from {source_ip}: {raw_message[:80]}")
         parsed = self._parse_message(raw_message, source_ip, source_port)
         if not parsed:
-            logger.debug(f"Failed to parse syslog message: {raw_message[:100]}")
+            logger.warning(f"Failed to parse syslog message: {raw_message[:100]}")
             return
+        logger.info(f"Parsed syslog: hostname={parsed.hostname}, app={parsed.app_name}, handlers={len(self._handlers)}")
 
         # Route to matching handlers
         for connector_id, handler in self._handlers.items():
