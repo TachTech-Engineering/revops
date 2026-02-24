@@ -1,6 +1,6 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'gcr.io/$PROJECT_ID/panther-backend:revops-v30', '-f', 'Dockerfile.gke', '.']
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/panther-backend:revops-v31', '-f', 'Dockerfile.gke', '.']
     dir: 'packages/backend'
 images:
-  - 'gcr.io/$PROJECT_ID/panther-backend:revops-v30'
+  - 'gcr.io/$PROJECT_ID/panther-backend:revops-v31'
