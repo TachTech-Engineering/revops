@@ -80,7 +80,7 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
 export const revopsApi = createApi({
   reducerPath: 'revopsApi',
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'SuppressionRule', 'Settings', 'Webhook', 'UserRole', 'User', 'AuditLog', 'Playbook', 'ScheduledReport', 'Incident', 'CorrelationRule', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Recommendation', 'SimulationRun', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleVersion', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'OnCallSchedule', 'TrendAnalytics', 'Anomaly', 'AISettings'],
+  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'SuppressionRule', 'Settings', 'Webhook', 'UserRole', 'User', 'AuditLog', 'Playbook', 'ScheduledReport', 'Incident', 'CorrelationRule', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Recommendation', 'SimulationRun', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleVersion', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'OnCallSchedule', 'TrendAnalytics', 'Anomaly', 'AISettings', 'ComplianceFramework', 'ComplianceControl', 'ComplianceAssessment', 'ExecutiveMetrics', 'ThreatHunt', 'HuntResult'],
   endpoints: (builder) => ({
     // Alerts
     listAlerts: builder.query<PaginatedResponse<AlertSummary>, AlertFilters>({
@@ -2016,6 +2016,209 @@ export const revopsApi = createApi({
         params,
       }),
       providesTags: ['TrendAnalytics'],
+    }),
+
+    // ==================== Compliance Dashboard ====================
+
+    listComplianceFrameworks: builder.query<ComplianceFrameworkListResponse, ComplianceFrameworkFilters>({
+      query: (params) => ({
+        url: '/compliance/frameworks',
+        params,
+      }),
+      providesTags: ['ComplianceFramework'],
+    }),
+
+    getComplianceFramework: builder.query<ComplianceFramework, string>({
+      query: (id) => `/compliance/frameworks/${id}`,
+      providesTags: (_result, _error, id) => [{ type: 'ComplianceFramework', id }],
+    }),
+
+    createComplianceFramework: builder.mutation<ComplianceFramework, CreateComplianceFrameworkRequest>({
+      query: (body) => ({
+        url: '/compliance/frameworks',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['ComplianceFramework'],
+    }),
+
+    updateComplianceFramework: builder.mutation<ComplianceFramework, { id: string; data: UpdateComplianceFrameworkRequest }>({
+      query: ({ id, data }) => ({
+        url: `/compliance/frameworks/${id}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: (_result, _error, { id }) => [{ type: 'ComplianceFramework', id }, 'ComplianceFramework'],
+    }),
+
+    deleteComplianceFramework: builder.mutation<void, string>({
+      query: (id) => ({
+        url: `/compliance/frameworks/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['ComplianceFramework'],
+    }),
+
+    listComplianceControls: builder.query<ComplianceControlListResponse, { frameworkId: string; status?: string; search?: string; page?: number; pageSize?: number }>({
+      query: ({ frameworkId, ...params }) => ({
+        url: `/compliance/frameworks/${frameworkId}/controls`,
+        params,
+      }),
+      providesTags: ['ComplianceControl'],
+    }),
+
+    updateComplianceControl: builder.mutation<ComplianceControl, { id: string; data: UpdateComplianceControlRequest }>({
+      query: ({ id, data }) => ({
+        url: `/compliance/controls/${id}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: ['ComplianceControl', 'ComplianceFramework'],
+    }),
+
+    getComplianceDashboardSummary: builder.query<ComplianceDashboardSummary, void>({
+      query: () => '/compliance/dashboard/summary',
+      providesTags: ['ComplianceFramework', 'ComplianceControl'],
+    }),
+
+    createComplianceAssessment: builder.mutation<ComplianceAssessment, { frameworkId: string; data: CreateAssessmentRequest }>({
+      query: ({ frameworkId, data }) => ({
+        url: `/compliance/frameworks/${frameworkId}/assessments`,
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: ['ComplianceFramework', 'ComplianceAssessment'],
+    }),
+
+    listComplianceAssessments: builder.query<ComplianceAssessment[], string>({
+      query: (frameworkId) => `/compliance/frameworks/${frameworkId}/assessments`,
+      providesTags: ['ComplianceAssessment'],
+    }),
+
+    exportComplianceReport: builder.mutation<Blob, ExportComplianceReportRequest>({
+      query: (body) => ({
+        url: '/compliance/reports/export',
+        method: 'POST',
+        body,
+        responseHandler: (response) => response.blob(),
+      }),
+    }),
+
+    // ==================== Executive Summary ====================
+
+    getExecutiveMetrics: builder.query<ExecutiveMetrics, { days?: number; endDate?: string }>({
+      query: (params) => ({
+        url: '/executive/metrics',
+        params,
+      }),
+      providesTags: ['ExecutiveMetrics'],
+    }),
+
+    getTopRiskAreas: builder.query<RiskAreasResponse, { days?: number; limit?: number }>({
+      query: (params) => ({
+        url: '/executive/risk-areas',
+        params,
+      }),
+      providesTags: ['ExecutiveMetrics'],
+    }),
+
+    getTeamPerformance: builder.query<TeamPerformanceResponse, { days?: number }>({
+      query: (params) => ({
+        url: '/executive/team-performance',
+        params,
+      }),
+      providesTags: ['ExecutiveMetrics'],
+    }),
+
+    getSLACompliance: builder.query<SLAComplianceResponse, { days?: number }>({
+      query: (params) => ({
+        url: '/executive/sla-compliance',
+        params,
+      }),
+      providesTags: ['ExecutiveMetrics'],
+    }),
+
+    exportExecutiveReport: builder.mutation<ExportReportResponse, ExportExecutiveReportRequest>({
+      query: (body) => ({
+        url: '/executive/export',
+        method: 'POST',
+        body,
+      }),
+    }),
+
+    // ==================== Threat Hunting ====================
+
+    generateThreatHypothesis: builder.mutation<GeneratedHypothesis, GenerateHypothesisRequest>({
+      query: (body) => ({
+        url: '/threat-hunting/generate-hypothesis',
+        method: 'POST',
+        body,
+      }),
+    }),
+
+    listThreatHunts: builder.query<ThreatHuntListResponse, ThreatHuntFilters>({
+      query: (params) => ({
+        url: '/threat-hunting/hunts',
+        params,
+      }),
+      providesTags: ['ThreatHunt'],
+    }),
+
+    getThreatHunt: builder.query<ThreatHunt, string>({
+      query: (id) => `/threat-hunting/hunts/${id}`,
+      providesTags: (_result, _error, id) => [{ type: 'ThreatHunt', id }],
+    }),
+
+    createThreatHunt: builder.mutation<ThreatHunt, CreateThreatHuntRequest>({
+      query: (body) => ({
+        url: '/threat-hunting/hunts',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['ThreatHunt'],
+    }),
+
+    updateThreatHunt: builder.mutation<ThreatHunt, { id: string; data: UpdateThreatHuntRequest }>({
+      query: ({ id, data }) => ({
+        url: `/threat-hunting/hunts/${id}`,
+        method: 'PATCH',
+        body: data,
+      }),
+      invalidatesTags: (_result, _error, { id }) => [{ type: 'ThreatHunt', id }, 'ThreatHunt'],
+    }),
+
+    deleteThreatHunt: builder.mutation<void, string>({
+      query: (id) => ({
+        url: `/threat-hunting/hunts/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['ThreatHunt'],
+    }),
+
+    addHuntQuery: builder.mutation<HuntQuery, { huntId: string; data: CreateHuntQueryRequest }>({
+      query: ({ huntId, data }) => ({
+        url: `/threat-hunting/hunts/${huntId}/queries`,
+        method: 'POST',
+        body: data,
+      }),
+      invalidatesTags: (_result, _error, { huntId }) => [{ type: 'ThreatHunt', id: huntId }],
+    }),
+
+    executeHuntQuery: builder.mutation<HuntResult, { huntId: string; queryId: string; data?: ExecuteQueryRequest }>({
+      query: ({ huntId, queryId, data }) => ({
+        url: `/threat-hunting/hunts/${huntId}/queries/${queryId}/execute`,
+        method: 'POST',
+        body: data || {},
+      }),
+      invalidatesTags: (_result, _error, { huntId }) => [{ type: 'ThreatHunt', id: huntId }, 'HuntResult'],
+    }),
+
+    getHuntResults: builder.query<HuntResult[], { huntId: string; status?: string }>({
+      query: ({ huntId, ...params }) => ({
+        url: `/threat-hunting/hunts/${huntId}/results`,
+        params,
+      }),
+      providesTags: ['HuntResult'],
     }),
   }),
 })
@@ -4034,6 +4237,347 @@ export interface CoverageHeatmapResponse {
   total_alerts_with_mitre: number
 }
 
+// ==================== Compliance Dashboard Types ====================
+
+export interface ComplianceFramework {
+  id: string
+  name: string
+  description: string | null
+  version: string | null
+  is_active: boolean
+  total_controls: number
+  implemented_controls: number
+  coverage_percentage: number
+  last_assessment_date: string | null
+  next_assessment_date: string | null
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export interface ComplianceControl {
+  id: string
+  framework_id: string
+  control_id: string
+  title: string
+  description: string | null
+  status: 'not_implemented' | 'partial' | 'implemented' | 'not_applicable'
+  evidence: string | null
+  evidence_links: string[]
+  owner: string | null
+  due_date: string | null
+  last_reviewed_at: string | null
+  reviewed_by: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ComplianceAssessment {
+  id: string
+  framework_id: string
+  assessment_date: string
+  coverage_score: number
+  total_controls: number
+  implemented_count: number
+  partial_count: number
+  not_implemented_count: number
+  notes: string | null
+  assessor: string | null
+  created_at: string
+}
+
+export interface ComplianceFrameworkFilters {
+  is_active?: boolean
+  search?: string
+  page?: number
+  page_size?: number
+}
+
+export interface ComplianceFrameworkListResponse {
+  frameworks: ComplianceFramework[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface ComplianceControlListResponse {
+  controls: ComplianceControl[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface CreateComplianceFrameworkRequest {
+  name: string
+  description?: string
+  version?: string
+}
+
+export interface UpdateComplianceFrameworkRequest {
+  name?: string
+  description?: string
+  version?: string
+  is_active?: boolean
+  next_assessment_date?: string
+}
+
+export interface UpdateComplianceControlRequest {
+  status?: 'not_implemented' | 'partial' | 'implemented' | 'not_applicable'
+  evidence?: string
+  evidence_links?: string[]
+  owner?: string
+  due_date?: string
+  notes?: string
+}
+
+export interface CreateAssessmentRequest {
+  notes?: string
+}
+
+export interface ExportComplianceReportRequest {
+  framework_id: string
+  format: 'csv' | 'pdf'
+  include_evidence?: boolean
+}
+
+export interface ComplianceDashboardSummary {
+  total_frameworks: number
+  active_frameworks: number
+  total_controls: number
+  implemented_controls: number
+  partial_controls: number
+  not_implemented_controls: number
+  overall_coverage: number
+  frameworks_by_coverage: { name: string; coverage: number }[]
+  upcoming_assessments: { framework_id: string; framework_name: string; date: string }[]
+}
+
+// ==================== Executive Summary Types ====================
+
+export interface MetricValue {
+  value: number
+  previous_value: number | null
+  change_percent: number | null
+  trend: 'up' | 'down' | 'stable'
+}
+
+export interface ExecutiveMetrics {
+  total_alerts: MetricValue
+  critical_incidents: MetricValue
+  mttr_hours: MetricValue
+  mtta_hours: MetricValue
+  compliance_score: MetricValue
+  open_incidents: MetricValue
+  resolved_incidents: MetricValue
+  false_positive_rate: MetricValue
+  period_start: string
+  period_end: string
+}
+
+export interface RiskArea {
+  category: string
+  description: string
+  alert_count: number
+  incident_count: number
+  severity_score: number
+  trend: 'up' | 'down' | 'stable'
+  change_percent: number
+  top_sources: string[]
+  mitre_techniques: string[]
+}
+
+export interface RiskAreasResponse {
+  risk_areas: RiskArea[]
+  total_risk_score: number
+  risk_trend: 'up' | 'down' | 'stable'
+  period_start: string
+  period_end: string
+}
+
+export interface TeamMemberPerformance {
+  user_id: string
+  username: string
+  display_name: string
+  alerts_handled: number
+  incidents_resolved: number
+  avg_resolution_hours: number
+  escalation_rate: number
+  false_positive_identifications: number
+  accuracy_rate: number
+}
+
+export interface TeamPerformanceResponse {
+  team_members: TeamMemberPerformance[]
+  team_avg_resolution_hours: number
+  team_total_alerts_handled: number
+  team_total_incidents_resolved: number
+  period_start: string
+  period_end: string
+}
+
+export interface SLAMetric {
+  sla_name: string
+  target_hours: number
+  actual_avg_hours: number
+  compliance_rate: number
+  breaches: number
+  total_applicable: number
+  trend: 'up' | 'down' | 'stable'
+}
+
+export interface SLAComplianceResponse {
+  sla_metrics: SLAMetric[]
+  overall_compliance_rate: number
+  total_breaches: number
+  period_start: string
+  period_end: string
+}
+
+export interface ExportExecutiveReportRequest {
+  start_date: string
+  end_date: string
+  include_metrics?: boolean
+  include_risk_areas?: boolean
+  include_team_performance?: boolean
+  include_sla_compliance?: boolean
+  format?: 'pdf' | 'csv'
+}
+
+export interface ExportReportResponse {
+  format: string
+  data?: Record<string, unknown>
+  note?: string
+}
+
+// ==================== Threat Hunting Types ====================
+
+export interface MitreTechnique {
+  id: string
+  name: string
+  tactic: string
+}
+
+export interface GeneratedHypothesis {
+  title: string
+  hypothesis: string
+  rationale: string
+  mitre_techniques: MitreTechnique[]
+  data_sources: string[]
+  suggested_queries: { name: string; description: string; sql: string }[]
+  indicators_to_look_for: string[]
+  priority: 'low' | 'medium' | 'high' | 'critical'
+}
+
+export interface GenerateHypothesisRequest {
+  description: string
+  include_mitre?: boolean
+  include_queries?: boolean
+}
+
+export interface HuntQuery {
+  id: string
+  hunt_id: string
+  name: string
+  description: string | null
+  sql_query: string
+  query_type: 'detection' | 'baseline' | 'enrichment'
+  expected_results: string | null
+  order_index: number
+  created_at: string
+  updated_at: string
+}
+
+export interface ThreatHunt {
+  id: string
+  title: string
+  hypothesis: string
+  description: string | null
+  mitre_techniques: string[]
+  data_sources: string[]
+  status: 'draft' | 'in_progress' | 'completed' | 'cancelled'
+  priority: 'low' | 'medium' | 'high' | 'critical'
+  findings_count: number
+  started_at: string | null
+  completed_at: string | null
+  created_by: string
+  assigned_to: string | null
+  tags: string[]
+  queries: HuntQuery[]
+  created_at: string
+  updated_at: string
+}
+
+export interface ThreatHuntFilters {
+  status?: string
+  priority?: string
+  assigned_to?: string
+  search?: string
+  page?: number
+  page_size?: number
+}
+
+export interface ThreatHuntListResponse {
+  hunts: ThreatHunt[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface CreateHuntQueryRequest {
+  name: string
+  description?: string
+  sql_query: string
+  query_type?: 'detection' | 'baseline' | 'enrichment'
+  expected_results?: string
+  order_index?: number
+}
+
+export interface CreateThreatHuntRequest {
+  title: string
+  hypothesis: string
+  description?: string
+  mitre_techniques?: string[]
+  data_sources?: string[]
+  priority?: 'low' | 'medium' | 'high' | 'critical'
+  assigned_to?: string
+  tags?: string[]
+  queries?: CreateHuntQueryRequest[]
+}
+
+export interface UpdateThreatHuntRequest {
+  title?: string
+  hypothesis?: string
+  description?: string
+  mitre_techniques?: string[]
+  data_sources?: string[]
+  status?: 'draft' | 'in_progress' | 'completed' | 'cancelled'
+  priority?: 'low' | 'medium' | 'high' | 'critical'
+  assigned_to?: string
+  tags?: string[]
+}
+
+export interface ExecuteQueryRequest {
+  timeout_seconds?: number
+  limit_results?: number
+}
+
+export interface HuntResult {
+  id: string
+  hunt_id: string
+  query_id: string | null
+  query_name: string | null
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  results_count: number
+  findings: Record<string, unknown>[]
+  raw_results: Record<string, unknown> | null
+  execution_time_ms: number | null
+  error_message: string | null
+  executed_at: string | null
+  executed_by: string | null
+  created_at: string
+}
+
 export const {
   useListAlertsQuery,
   useGetAlertQuery,
@@ -4309,6 +4853,34 @@ export const {
   useTriggerAnomalyDetectionMutation,
   useGetCoverageAnalysisQuery,
   useGetCoverageHeatmapQuery,
+  // Compliance Dashboard
+  useListComplianceFrameworksQuery,
+  useGetComplianceFrameworkQuery,
+  useCreateComplianceFrameworkMutation,
+  useUpdateComplianceFrameworkMutation,
+  useDeleteComplianceFrameworkMutation,
+  useListComplianceControlsQuery,
+  useUpdateComplianceControlMutation,
+  useGetComplianceDashboardSummaryQuery,
+  useCreateComplianceAssessmentMutation,
+  useListComplianceAssessmentsQuery,
+  useExportComplianceReportMutation,
+  // Executive Summary
+  useGetExecutiveMetricsQuery,
+  useGetTopRiskAreasQuery,
+  useGetTeamPerformanceQuery,
+  useGetSLAComplianceQuery,
+  useExportExecutiveReportMutation,
+  // Threat Hunting
+  useGenerateThreatHypothesisMutation,
+  useListThreatHuntsQuery,
+  useGetThreatHuntQuery,
+  useCreateThreatHuntMutation,
+  useUpdateThreatHuntMutation,
+  useDeleteThreatHuntMutation,
+  useAddHuntQueryMutation,
+  useExecuteHuntQueryMutation,
+  useGetHuntResultsQuery,
 } = revopsApi
 
 // Legacy alias for backwards compatibility

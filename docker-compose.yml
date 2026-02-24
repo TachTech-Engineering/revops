@@ -16,6 +16,8 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
+      - "514:514/udp"   # Syslog UDP (UniFi)
+      - "514:514/tcp"   # Syslog TCP (UniFi)
     volumes:
       # Mount the local panther_sdk for development
       - C:/Source/panther_sdk:/app/panther_sdk_repo:ro

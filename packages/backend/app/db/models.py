@@ -204,6 +204,8 @@ class OrganizationSSO(Base):
     entity_id: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     sso_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     certificate: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # PEM format, encrypted
+    # Additional SAML settings as JSON (idp_entity_id, idp_sso_url, idp_slo_url, idp_x509_cert, etc.)
+    saml_settings: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
     # Email domain restrictions (comma-separated, e.g., "acme.com,acme.org")
     # If set, only users with these email domains can use this SSO
@@ -1986,6 +1988,10 @@ class EscalationPolicy(Base):
         default="[{source}] {severity} Alert: {title}. ID: {id}"
     )
 
+    # Webhook configuration
+    webhook_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # HMAC-SHA256 signing secret
+    webhook_headers: Mapped[dict] = mapped_column(JSON, default=dict)  # Custom headers for webhook requests
+
     # Relationship
     steps: Mapped[list["EscalationStep"]] = relationship("EscalationStep", back_populates="policy", cascade="all, delete-orphan")
 
@@ -2304,3 +2310,238 @@ class AlertPresence(Base):
         Index("ix_alert_presence_alert_org", "alert_id", "organization_id"),
         Index("ix_alert_presence_user", "user_id"),
     )
+
+
+# ==================== FEATURE: CORRELATION TIME WINDOWS ====================
+
+class AlertCorrelationWindow(Base):
+    """
+    Tracks multi-alert correlation windows for threshold-based rules.
+    Used by correlation service to track alert counts within time windows.
+    """
+    __tablename__ = "alert_correlation_windows"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    rule_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    window_key: Mapped[str] = mapped_column(String(500), nullable=False)  # Hash of aggregation fields
+    alert_count: Mapped[int] = mapped_column(Integer, default=0)
+    alert_ids: Mapped[list] = mapped_column(JSON, default=list)
+    first_alert_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_alert_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    triggered: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_correlation_windows_org_rule", "organization_id", "rule_id"),
+        Index("ix_correlation_windows_key", "window_key"),
+    )
+
+
+# ==================== FEATURE: COMPLIANCE DASHBOARD ====================
+
+class ComplianceStatus(str, enum.Enum):
+    NOT_IMPLEMENTED = "not_implemented"
+    PARTIAL = "partial"
+    IMPLEMENTED = "implemented"
+    NOT_APPLICABLE = "not_applicable"
+
+
+class ComplianceFramework(Base):
+    """
+    Compliance framework definition (e.g., SOC2, ISO 27001, HIPAA, PCI DSS).
+    """
+    __tablename__ = "compliance_frameworks"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    total_controls: Mapped[int] = mapped_column(Integer, default=0)
+    implemented_controls: Mapped[int] = mapped_column(Integer, default=0)
+    coverage_percentage: Mapped[float] = mapped_column(default=0.0)
+    last_assessment_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    next_assessment_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    controls: Mapped[list["ComplianceControl"]] = relationship(
+        "ComplianceControl", back_populates="framework", cascade="all, delete-orphan"
+    )
+    assessments: Mapped[list["ComplianceAssessment"]] = relationship(
+        "ComplianceAssessment", back_populates="framework", cascade="all, delete-orphan"
+    )
+
+
+class ComplianceControl(Base):
+    """
+    Individual compliance control within a framework.
+    """
+    __tablename__ = "compliance_controls"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    framework_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("compliance_frameworks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    control_id: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g., "CC1.1"
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[ComplianceStatus] = mapped_column(
+        SQLEnum(ComplianceStatus), default=ComplianceStatus.NOT_IMPLEMENTED
+    )
+    evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence_links: Mapped[list] = mapped_column(JSON, default=list)
+    owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    due_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    reviewed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationship
+    framework: Mapped["ComplianceFramework"] = relationship("ComplianceFramework", back_populates="controls")
+
+    __table_args__ = (
+        Index("ix_compliance_controls_framework", "framework_id"),
+        Index("ix_compliance_controls_unique", "framework_id", "control_id", unique=True),
+    )
+
+
+class ComplianceAssessment(Base):
+    """
+    Point-in-time compliance assessment for a framework.
+    """
+    __tablename__ = "compliance_assessments"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    framework_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("compliance_frameworks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    assessment_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    coverage_score: Mapped[float] = mapped_column(default=0.0)
+    total_controls: Mapped[int] = mapped_column(Integer, default=0)
+    implemented_count: Mapped[int] = mapped_column(Integer, default=0)
+    partial_count: Mapped[int] = mapped_column(Integer, default=0)
+    not_implemented_count: Mapped[int] = mapped_column(Integer, default=0)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    assessor: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationship
+    framework: Mapped["ComplianceFramework"] = relationship("ComplianceFramework", back_populates="assessments")
+
+
+# ==================== FEATURE: THREAT HUNTING ====================
+
+class HuntStatus(str, enum.Enum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    COMPLETED = "completed"
+    ARCHIVED = "archived"
+
+
+class ThreatHunt(Base):
+    """
+    Threat hunting hypothesis and investigation.
+    """
+    __tablename__ = "threat_hunts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    hypothesis: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    mitre_techniques: Mapped[list] = mapped_column(JSONB, default=list)
+    data_sources: Mapped[list] = mapped_column(JSONB, default=list)
+    status: Mapped[HuntStatus] = mapped_column(SQLEnum(HuntStatus), default=HuntStatus.DRAFT)
+    priority: Mapped[str] = mapped_column(String(20), default="medium")
+    findings_count: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    assigned_to: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    tags: Mapped[list] = mapped_column(JSONB, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    queries: Mapped[list["HuntQuery"]] = relationship("HuntQuery", back_populates="hunt", cascade="all, delete-orphan")
+    results: Mapped[list["HuntResult"]] = relationship("HuntResult", back_populates="hunt", cascade="all, delete-orphan")
+
+
+class HuntQuery(Base):
+    """
+    Query associated with a threat hunt.
+    """
+    __tablename__ = "hunt_queries"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    hunt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("threat_hunts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sql_query: Mapped[str] = mapped_column(Text, nullable=False)
+    query_type: Mapped[str] = mapped_column(String(50), default="detection")
+    expected_results: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    order_index: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationship
+    hunt: Mapped["ThreatHunt"] = relationship("ThreatHunt", back_populates="queries")
+
+
+class HuntResultStatus(str, enum.Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class HuntResult(Base):
+    """
+    Execution result from a hunt query.
+    """
+    __tablename__ = "hunt_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    hunt_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("threat_hunts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    query_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("hunt_queries.id", ondelete="SET NULL"), nullable=True
+    )
+    status: Mapped[HuntResultStatus] = mapped_column(SQLEnum(HuntResultStatus), default=HuntResultStatus.PENDING)
+    results_count: Mapped[int] = mapped_column(Integer, default=0)
+    findings: Mapped[list] = mapped_column(JSONB, default=list)
+    raw_results: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    execution_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    executed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Relationship
+    hunt: Mapped["ThreatHunt"] = relationship("ThreatHunt", back_populates="results")

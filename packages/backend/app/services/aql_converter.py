@@ -141,6 +141,67 @@ QRADAR_SPECIFIC_FUNCTIONS = {
     "RULELNAME": "rule_name",
 }
 
+# QRadar category ID to human-readable name mapping
+QRADAR_CATEGORY_MAPPING = {
+    # High Level Categories
+    1001: "Reconnaissance",
+    2001: "DoS",
+    3001: "Authentication",
+    4001: "Access",
+    5001: "Exploit",
+    6001: "Malware",
+    7001: "Suspicious Activity",
+    8001: "System",
+    9001: "Application",
+    10001: "Audit",
+    11001: "Risk Manager",
+    12001: "Risk",
+    13001: "VIS Host Discovery",
+    14001: "SIM Audit",
+    15001: "Policy",
+    16001: "Control",
+    17001: "Asset Profiler",
+    18001: "Potential Exploit",
+
+    # Common Low Level Categories
+    3002: "Brute Force",
+    3003: "Privilege Escalation",
+    3004: "General Authentication",
+    4002: "ACL Allow",
+    4003: "ACL Deny",
+    4004: "Firewall Session Open",
+    4005: "Firewall Session Close",
+    5002: "Buffer Overflow",
+    5003: "SQL Injection",
+    5004: "XSS",
+    6002: "Virus",
+    6003: "Trojan",
+    6004: "Worm",
+    6005: "Spyware",
+    6006: "Ransomware",
+    7002: "Port Scan",
+    7003: "Network Scan",
+    7004: "Suspicious Traffic",
+    7005: "Data Exfiltration",
+    8002: "Startup/Shutdown",
+    8003: "Configuration Change",
+    9002: "App Error",
+    9003: "App Warning",
+}
+
+# QRadar protocol number to name mapping
+QRADAR_PROTOCOL_MAPPING = {
+    1: "ICMP",
+    6: "TCP",
+    17: "UDP",
+    47: "GRE",
+    50: "ESP",
+    51: "AH",
+    58: "ICMPv6",
+    89: "OSPF",
+    132: "SCTP",
+}
+
 
 class AQLConverter:
     """Converts IBM QRadar AQL queries to Python/Panther or SQL."""
@@ -550,24 +611,138 @@ class AQLConverter:
                 '',
                 '',
                 'def ip_in_cidr(ip: str, cidr: str) -> bool:',
-                '    """Check if IP address is in CIDR range."""',
-                '    try:',
-                '        return ipaddress.ip_address(ip) in ipaddress.ip_network(cidr, strict=False)',
-                '    except ValueError:',
+                '    """Check if IP address is in CIDR range (QRadar INCIDR equivalent).',
+                '    ',
+                '    Args:',
+                '        ip: IP address to check (IPv4 or IPv6)',
+                '        cidr: CIDR notation network (e.g., "192.168.1.0/24")',
+                '    ',
+                '    Returns:',
+                '        True if IP is in the CIDR range, False otherwise',
+                '    """',
+                '    if not ip or not cidr:',
                 '        return False',
+                '    try:',
+                '        # Handle both IPv4 and IPv6',
+                '        ip_obj = ipaddress.ip_address(ip.strip())',
+                '        network = ipaddress.ip_network(cidr.strip(), strict=False)',
+                '        return ip_obj in network',
+                '    except (ValueError, TypeError):',
+                '        # Invalid IP or CIDR format',
+                '        return False',
+                '',
+                '',
+                'def ip_in_cidrs(ip: str, cidrs: list) -> bool:',
+                '    """Check if IP address is in any of multiple CIDR ranges."""',
+                '    return any(ip_in_cidr(ip, cidr) for cidr in cidrs)',
                 '',
                 '',
             ])
 
         if 'INREFERENCESET' in functions or 'NOTINREFERENCESET' in functions:
             lines.extend([
-                '# Reference set lookup - implement with Panther lookup tables',
+                '# Reference set implementation using Panther lookup tables',
+                '# To use: Create a Panther Lookup Table with the same name as the QRadar reference set',
+                '',
+                '# Lookup table cache for performance',
+                '_reference_set_cache = {}',
+                '',
+                '',
+                'def get_reference_set(set_name: str) -> set:',
+                '    """Get or load a reference set as a Panther lookup table.',
+                '    ',
+                '    In Panther, create a Lookup Table with columns: value, description, added_date',
+                '    The lookup table name should match the QRadar reference set name.',
+                '    """',
+                '    global _reference_set_cache',
+                '    ',
+                '    if set_name not in _reference_set_cache:',
+                '        try:',
+                '            # Import Panther lookup table at runtime',
+                '            from panther_sdk import lookup_table',
+                '            lt = lookup_table(set_name)',
+                '            # Load all values into a set for O(1) lookup',
+                '            _reference_set_cache[set_name] = set(lt.keys()) if lt else set()',
+                '        except ImportError:',
+                '            # Fallback: read from JSON file if Panther SDK not available',
+                '            import json',
+                '            import os',
+                '            ref_path = os.environ.get("REFERENCE_SETS_PATH", "/var/reference_sets")',
+                '            try:',
+                '                with open(f"{ref_path}/{set_name}.json") as f:',
+                '                    data = json.load(f)',
+                '                    _reference_set_cache[set_name] = set(data.get("values", []))',
+                '            except (FileNotFoundError, json.JSONDecodeError):',
+                '                _reference_set_cache[set_name] = set()',
+                '    ',
+                '    return _reference_set_cache.get(set_name, set())',
+                '',
+                '',
                 'def in_reference_set(set_name: str, value: str) -> bool:',
-                '    """Check if value is in reference set."""',
-                '    # TODO: Implement using Panther lookup tables',
-                '    # from panther_sdk import lookup_table',
-                '    # return lookup_table(set_name).get(value) is not None',
-                '    return False',
+                '    """Check if value is in reference set (QRadar INREFERENCESET equivalent)."""',
+                '    if value is None:',
+                '        return False',
+                '    return str(value).lower() in {v.lower() for v in get_reference_set(set_name)}',
+                '',
+                '',
+                'def not_in_reference_set(set_name: str, value: str) -> bool:',
+                '    """Check if value is NOT in reference set (QRadar NOTINREFERENCESET equivalent)."""',
+                '    if value is None:',
+                '        return True',
+                '    return str(value).lower() not in {v.lower() for v in get_reference_set(set_name)}',
+                '',
+                '',
+            ])
+
+        if 'PROTOCOLNAME' in functions:
+            lines.extend([
+                '# Protocol number to name mapping (QRadar PROTOCOLNAME equivalent)',
+                'PROTOCOL_MAP = {',
+                '    1: "ICMP", 6: "TCP", 17: "UDP", 47: "GRE", 50: "ESP",',
+                '    51: "AH", 58: "ICMPv6", 89: "OSPF", 132: "SCTP",',
+                '}',
+                '',
+                '',
+                'def get_protocol_name(protocol_number) -> str:',
+                '    """Convert protocol number to name (QRadar PROTOCOLNAME equivalent)."""',
+                '    try:',
+                '        return PROTOCOL_MAP.get(int(protocol_number), f"PROTOCOL_{protocol_number}")',
+                '    except (ValueError, TypeError):',
+                '        return str(protocol_number)',
+                '',
+                '',
+            ])
+
+        if 'CATEGORYNAME' in functions or 'QIDNAME' in functions:
+            lines.extend([
+                '# QRadar category ID to name mapping (subset - add more as needed)',
+                'CATEGORY_MAP = {',
+                '    1001: "Reconnaissance", 2001: "DoS", 3001: "Authentication",',
+                '    3002: "Brute Force", 3003: "Privilege Escalation",',
+                '    4001: "Access", 4002: "ACL Allow", 4003: "ACL Deny",',
+                '    5001: "Exploit", 5002: "Buffer Overflow", 5003: "SQL Injection",',
+                '    6001: "Malware", 6002: "Virus", 6003: "Trojan", 6006: "Ransomware",',
+                '    7001: "Suspicious Activity", 7002: "Port Scan", 7005: "Data Exfiltration",',
+                '    8001: "System", 8003: "Configuration Change",',
+                '}',
+                '',
+                '',
+                'def get_category_name(category_id) -> str:',
+                '    """Convert QRadar category ID to name (CATEGORYNAME equivalent)."""',
+                '    try:',
+                '        return CATEGORY_MAP.get(int(category_id), f"CATEGORY_{category_id}")',
+                '    except (ValueError, TypeError):',
+                '        return str(category_id)',
+                '',
+                '',
+                'def get_qid_name(qid) -> str:',
+                '    """Get QID name - requires mapping file or lookup table.',
+                '    ',
+                '    QIDs are QRadar-specific event identifiers. Map these to your',
+                '    log source event types for accurate detection.',
+                '    """',
+                '    # TODO: Implement QID lookup from mapping file or table',
+                '    return f"QID_{qid}"',
                 '',
                 '',
             ])
@@ -775,8 +950,49 @@ class AQLConverter:
         refset_match = re.search(r"INREFERENCESET\s*\(\s*'([^']+)'\s*,\s*(\w+)\s*\)", result, re.IGNORECASE)
         if refset_match:
             setname, field = refset_match.groups()
-            todos.append(f"TODO: Implement reference set '{setname}' lookup")
+            todos.append(f"TODO: Create Panther Lookup Table '{setname}' for reference set")
             return f"in_reference_set('{setname}', event.get('{field}', ''))"
+
+        # NOTINREFERENCESET('setname', field)
+        notrefset_match = re.search(r"NOTINREFERENCESET\s*\(\s*'([^']+)'\s*,\s*(\w+)\s*\)", result, re.IGNORECASE)
+        if notrefset_match:
+            setname, field = notrefset_match.groups()
+            todos.append(f"TODO: Create Panther Lookup Table '{setname}' for reference set")
+            return f"not_in_reference_set('{setname}', event.get('{field}', ''))"
+
+        # PROTOCOLNAME(protocol) = 'TCP'
+        protocolname_match = re.search(r"PROTOCOLNAME\s*\(\s*(\w+)\s*\)\s*=\s*'([^']+)'", result, re.IGNORECASE)
+        if protocolname_match:
+            field, expected = protocolname_match.groups()
+            return f"get_protocol_name(event.get('{field}')) == '{expected}'"
+
+        # CATEGORYNAME(category) = 'Malware'
+        categoryname_match = re.search(r"CATEGORYNAME\s*\(\s*(\w+)\s*\)\s*=\s*'([^']+)'", result, re.IGNORECASE)
+        if categoryname_match:
+            field, expected = categoryname_match.groups()
+            return f"get_category_name(event.get('{field}')) == '{expected}'"
+
+        # CATEGORYNAME(category) LIKE '%Malware%'
+        categoryname_like_match = re.search(r"CATEGORYNAME\s*\(\s*(\w+)\s*\)\s+LIKE\s+'%([^%]+)%'", result, re.IGNORECASE)
+        if categoryname_like_match:
+            field, pattern = categoryname_like_match.groups()
+            return f"'{pattern}' in get_category_name(event.get('{field}'))"
+
+        # QIDNAME(qid) = 'event_name'
+        qidname_match = re.search(r"QIDNAME\s*\(\s*(\w+)\s*\)\s*=\s*'([^']+)'", result, re.IGNORECASE)
+        if qidname_match:
+            field, expected = qidname_match.groups()
+            todos.append(f"TODO: Map QID to your log source event type for '{expected}'")
+            return f"get_qid_name(event.get('{field}')) == '{expected}'"
+
+        # category = 6001 (numeric category check)
+        category_num_match = re.match(r"category\s*=\s*(\d+)", result, re.IGNORECASE)
+        if category_num_match:
+            cat_id = int(category_num_match.group(1))
+            if cat_id in QRADAR_CATEGORY_MAPPING:
+                cat_name = QRADAR_CATEGORY_MAPPING[cat_id]
+                return f"event.get('category') == {cat_id}  # {cat_name}"
+            return f"event.get('category') == {cat_id}"
 
         # field IS NULL -> event.get('field') is None
         null_match = re.match(r"(\w+)\s+IS\s+NULL", result, re.IGNORECASE)

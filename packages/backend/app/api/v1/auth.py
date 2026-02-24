@@ -39,7 +39,14 @@ from app.services.sso_service import (
     complete_sso_flow,
     org_has_sso_enabled,
     get_org_sso_provider_names,
+    # SAML-specific functions
+    initiate_saml_flow,
+    process_saml_response,
+    process_saml_logout,
+    generate_sp_metadata,
+    prepare_saml_request,
 )
+from app.db.models import SSOProvider
 from app.config import settings
 
 router = APIRouter()
@@ -540,3 +547,245 @@ async def detect_sso_for_email(
         }
 
     return {"sso_available": False}
+
+
+# ==================== SAML Endpoints ====================
+# Supports SP-initiated SAML 2.0 SSO flow
+
+
+@router.get("/saml/{config_id}/metadata")
+async def saml_metadata(
+    config_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Get Service Provider (SP) metadata XML for SAML configuration.
+
+    This metadata should be provided to the Identity Provider (IdP) when
+    configuring the SAML integration. It contains the SP entity ID, ACS URL,
+    and signing certificate.
+    """
+    try:
+        config_uuid = UUID(config_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid SSO configuration ID",
+        )
+
+    sso_config = await get_sso_config_by_id(db, config_uuid)
+    if not sso_config:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="SSO configuration not found or disabled",
+        )
+
+    if sso_config.provider != SSOProvider.SAML:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Configuration is not a SAML provider",
+        )
+
+    try:
+        request_data = prepare_saml_request(request)
+        metadata_xml = generate_sp_metadata(sso_config, request_data)
+
+        from fastapi.responses import Response
+        return Response(
+            content=metadata_xml,
+            media_type="application/xml",
+            headers={
+                "Content-Disposition": f'attachment; filename="sp_metadata_{config_id}.xml"'
+            }
+        )
+
+    except ImportError as e:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="SAML support requires python3-saml library",
+        )
+    except Exception as e:
+        import logging
+        logging.error(f"SAML metadata generation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate SP metadata",
+        )
+
+
+@router.get("/saml/{config_id}/login")
+async def saml_login(
+    config_id: str,
+    request: Request,
+    return_to: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Initiate SAML SP-initiated login flow.
+
+    Redirects the user to the Identity Provider's SSO URL with a SAML AuthnRequest.
+
+    Args:
+        config_id: UUID of the SAML SSO configuration
+        return_to: URL to redirect to after successful authentication
+    """
+    try:
+        config_uuid = UUID(config_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid SSO configuration ID",
+        )
+
+    # Store return URL in session
+    if return_to:
+        request.session["saml_return_to"] = return_to
+    request.session["saml_config_id"] = config_id
+
+    try:
+        redirect_url = await initiate_saml_flow(request, db, config_uuid, return_to)
+        return RedirectResponse(url=redirect_url)
+
+    except ImportError as e:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="SAML support requires python3-saml library",
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        import logging
+        logging.error(f"SAML login initiation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to initiate SAML login",
+        )
+
+
+@router.post("/saml/{config_id}/acs")
+async def saml_acs(
+    config_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    SAML Assertion Consumer Service (ACS) endpoint.
+
+    Receives and processes the SAML Response from the Identity Provider.
+    Creates/updates user and redirects to the frontend with authentication tokens.
+    """
+    try:
+        config_uuid = UUID(config_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid SSO configuration ID",
+        )
+
+    try:
+        # Process SAML response
+        user, saml_data = await process_saml_response(request, db, config_uuid)
+
+        # Generate authentication tokens
+        refresh_token = create_refresh_token()
+        await store_refresh_token(db, user.id, refresh_token)
+
+        token_response = generate_token_response(user, refresh_token)
+
+        # Get return URL from session or form data
+        return_to = request.session.pop("saml_return_to", None)
+        request.session.pop("saml_config_id", None)
+
+        # Check RelayState for return URL
+        form = await request.form()
+        relay_state = form.get("RelayState")
+        if relay_state and relay_state.startswith("http"):
+            return_to = relay_state
+
+        # Default frontend URL
+        if not return_to:
+            return_to = "http://localhost:3000"
+
+        # Redirect to frontend with tokens in URL fragment (for SPA)
+        redirect_url = (
+            f"{return_to}/auth/callback"
+            f"#access_token={token_response['access_token']}"
+            f"&refresh_token={token_response['refresh_token']}"
+            f"&token_type={token_response['token_type']}"
+            f"&expires_in={token_response['expires_in']}"
+        )
+
+        return RedirectResponse(url=redirect_url, status_code=303)
+
+    except ImportError as e:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="SAML support requires python3-saml library",
+        )
+    except ValueError as e:
+        import logging
+        logging.error(f"SAML ACS validation error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e),
+        )
+    except Exception as e:
+        import logging
+        logging.error(f"SAML ACS error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="SAML authentication failed. Please try again.",
+        )
+
+
+@router.get("/saml/{config_id}/sls")
+@router.post("/saml/{config_id}/sls")
+async def saml_sls(
+    config_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    SAML Single Logout Service (SLS) endpoint.
+
+    Handles logout requests/responses from the Identity Provider.
+    Supports both GET and POST bindings.
+    """
+    try:
+        config_uuid = UUID(config_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid SSO configuration ID",
+        )
+
+    try:
+        redirect_url = await process_saml_logout(request, db, config_uuid)
+
+        if redirect_url:
+            return RedirectResponse(url=redirect_url)
+
+        # Default redirect after logout
+        return RedirectResponse(url="http://localhost:3000/login")
+
+    except ImportError as e:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="SAML support requires python3-saml library",
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        import logging
+        logging.error(f"SAML SLS error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="SAML logout failed",
+        )

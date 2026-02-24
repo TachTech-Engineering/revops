@@ -276,7 +276,9 @@ class SyslogReceiverService:
 
         # Route to matching handlers
         for connector_id, handler in self._handlers.items():
+            logger.info(f"Checking handler {connector_id}: source_ips={handler.source_ips}, patterns={[p.pattern for p in handler.hostname_patterns]}")
             if self._matches_handler(parsed, handler):
+                logger.info(f"Handler {connector_id} MATCHED - buffering message")
                 try:
                     # Buffer the message
                     buffer = self._message_buffer[connector_id]
@@ -286,12 +288,15 @@ class SyslogReceiverService:
                         # Remove oldest message
                         buffer.pop(0)
                         buffer.append(parsed)
+                    logger.info(f"Buffered message for {connector_id}, buffer size now: {len(buffer)}")
 
                     # Also call the callback if provided
                     if handler.callback:
                         handler.callback(parsed)
                 except Exception as e:
                     logger.error(f"Error in syslog handler for {connector_id}: {e}")
+            else:
+                logger.info(f"Handler {connector_id} did NOT match")
 
     def _parse_message(self, raw: str, source_ip: str, source_port: int) -> Optional[SyslogMessage]:
         """Parse a raw syslog message."""

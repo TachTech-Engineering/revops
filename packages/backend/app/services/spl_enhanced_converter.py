@@ -1240,10 +1240,131 @@ def cidrmatch(cidr: str, ip: str) -> bool:
         if "iplocation" in all_functions or any(cmd.name == 'iplocation' for cmd in parsed.commands):
             helpers.append('''
 def get_ip_location(ip: str) -> dict:
-    """Get geolocation for IP (SPL iplocation equivalent).
-    TODO: Implement with your preferred geolocation service/database.
+    """Get geolocation for IP using MaxMind GeoLite2 database (SPL iplocation equivalent).
+
+    Requires: geoip2 package and MaxMind GeoLite2-City.mmdb file.
+    Set GEOIP_DB_PATH environment variable to the database location.
+
+    Returns dict with: Country, Region, City, lat, lon, timezone, postal_code
     """
-    return {"Country": "Unknown", "Region": "Unknown", "City": "Unknown", "lat": 0, "lon": 0}
+    import os
+    try:
+        import geoip2.database
+        db_path = os.environ.get("GEOIP_DB_PATH", "/var/lib/GeoIP/GeoLite2-City.mmdb")
+        with geoip2.database.Reader(db_path) as reader:
+            response = reader.city(ip)
+            return {
+                "Country": response.country.name or "Unknown",
+                "Region": response.subdivisions.most_specific.name if response.subdivisions else "Unknown",
+                "City": response.city.name or "Unknown",
+                "lat": response.location.latitude or 0,
+                "lon": response.location.longitude or 0,
+                "timezone": response.location.time_zone or "Unknown",
+                "postal_code": response.postal.code or "Unknown",
+            }
+    except Exception:
+        return {"Country": "Unknown", "Region": "Unknown", "City": "Unknown", "lat": 0, "lon": 0}
+''')
+
+        # Add math helper functions if needed
+        math_functions = {"abs", "ceil", "floor", "round", "pow", "sqrt", "log", "ln", "exp"}
+        if math_functions & all_functions:
+            helpers.append('''
+import math
+
+def spl_abs(x):
+    """SPL abs() equivalent."""
+    return abs(float(x)) if x is not None else None
+
+def spl_ceil(x):
+    """SPL ceiling() equivalent."""
+    return math.ceil(float(x)) if x is not None else None
+
+def spl_floor(x):
+    """SPL floor() equivalent."""
+    return math.floor(float(x)) if x is not None else None
+
+def spl_round(x, digits=0):
+    """SPL round() equivalent."""
+    if x is None:
+        return None
+    return round(float(x), int(digits))
+
+def spl_pow(base, exp):
+    """SPL pow() equivalent."""
+    if base is None or exp is None:
+        return None
+    return math.pow(float(base), float(exp))
+
+def spl_sqrt(x):
+    """SPL sqrt() equivalent."""
+    if x is None or float(x) < 0:
+        return None
+    return math.sqrt(float(x))
+
+def spl_log(x, base=10):
+    """SPL log() equivalent (base 10 default)."""
+    if x is None or float(x) <= 0:
+        return None
+    return math.log(float(x), float(base))
+
+def spl_ln(x):
+    """SPL ln() natural log equivalent."""
+    if x is None or float(x) <= 0:
+        return None
+    return math.log(float(x))
+
+def spl_exp(x):
+    """SPL exp() equivalent."""
+    return math.exp(float(x)) if x is not None else None
+''')
+
+        # Add string helper functions if needed
+        string_functions = {"substr", "replace", "split", "mvindex", "mvjoin"}
+        if string_functions & all_functions:
+            helpers.append('''
+def spl_substr(s, start, length=None):
+    """SPL substr() equivalent. 1-indexed, returns substring."""
+    if s is None:
+        return None
+    s = str(s)
+    # SPL uses 1-based indexing
+    start_idx = int(start) - 1 if int(start) > 0 else int(start)
+    if length is None:
+        return s[start_idx:]
+    return s[start_idx:start_idx + int(length)]
+
+def spl_replace(s, pattern, replacement):
+    """SPL replace() equivalent with regex support."""
+    import re
+    if s is None:
+        return None
+    return re.sub(pattern, replacement, str(s))
+
+def spl_split(s, delimiter=" "):
+    """SPL split() equivalent - returns multivalue list."""
+    if s is None:
+        return []
+    return str(s).split(delimiter)
+
+def spl_mvindex(mv, index):
+    """SPL mvindex() equivalent - get item from multivalue field."""
+    if mv is None:
+        return None
+    if isinstance(mv, str):
+        mv = [mv]
+    idx = int(index)
+    if idx < 0:
+        idx = len(mv) + idx
+    return mv[idx] if 0 <= idx < len(mv) else None
+
+def spl_mvjoin(mv, delimiter=" "):
+    """SPL mvjoin() equivalent - join multivalue field."""
+    if mv is None:
+        return None
+    if isinstance(mv, str):
+        return mv
+    return delimiter.join(str(v) for v in mv)
 ''')
 
         return helpers
@@ -1882,6 +2003,24 @@ def get_ip_location(ip: str) -> dict:
             src = upper_match.group(1)
             return f"        {field} = (deep_get(event, '{src}', '') or '').upper()"
 
+        # len(field)
+        len_match = re.match(r'^len\s*\((\w+)\)$', expr, re.IGNORECASE)
+        if len_match:
+            src = len_match.group(1)
+            return f"        {field} = len(str(deep_get(event, '{src}', '') or ''))"
+
+        # trim/ltrim/rtrim
+        trim_match = re.match(r'^(l?r?trim)\s*\((\w+)\)$', expr, re.IGNORECASE)
+        if trim_match:
+            func = trim_match.group(1).lower()
+            src = trim_match.group(2)
+            if func == 'ltrim':
+                return f"        {field} = (deep_get(event, '{src}', '') or '').lstrip()"
+            elif func == 'rtrim':
+                return f"        {field} = (deep_get(event, '{src}', '') or '').rstrip()"
+            else:
+                return f"        {field} = (deep_get(event, '{src}', '') or '').strip()"
+
         # Nested lower(coalesce(...))
         lower_coalesce_match = re.match(r'^lower\s*\(\s*coalesce\s*\((.+)\)\s*\)$', expr, re.IGNORECASE)
         if lower_coalesce_match:
@@ -1890,17 +2029,187 @@ def get_ip_location(ip: str) -> dict:
             gets = [f"deep_get(event, '{f}', None)" for f in fields]
             return f"        {field} = (next((v for v in [{', '.join(gets)}] if v), '') or '').lower()"
 
-        # if(condition, true_val, false_val)
-        if_match = re.match(r'^if\s*\((.+),\s*("[^"]*"|\'[^\']*\'|\d+),\s*("[^"]*"|\'[^\']*\'|\d+)\)$', expr, re.IGNORECASE | re.DOTALL)
+        # if(condition, true_val, false_val) - improved parsing
+        if_match = re.match(r'^if\s*\((.+)\)$', expr, re.IGNORECASE | re.DOTALL)
         if if_match:
-            condition = if_match.group(1).strip()
-            true_val = if_match.group(2)
-            false_val = if_match.group(3)
-            python_cond = self._convert_spl_condition_to_python(condition)
-            if python_cond:
-                return f"        {field} = {true_val} if ({python_cond}) else {false_val}"
+            inner = if_match.group(1)
+            # Parse the if() arguments considering nested parentheses
+            args = self._parse_function_args(inner)
+            if len(args) >= 3:
+                condition = args[0].strip()
+                true_val = self._convert_value_expr(args[1].strip())
+                false_val = self._convert_value_expr(args[2].strip())
+                python_cond = self._convert_spl_condition_to_python(condition)
+                if python_cond:
+                    return f"        {field} = {true_val} if ({python_cond}) else {false_val}"
+                else:
+                    return f"        {field} = {true_val} if ({condition}) else {false_val}  # TODO: verify condition"
+
+        # case(cond1, val1, cond2, val2, ..., default)
+        case_match = re.match(r'^case\s*\((.+)\)$', expr, re.IGNORECASE | re.DOTALL)
+        if case_match:
+            inner = case_match.group(1)
+            args = self._parse_function_args(inner)
+            if len(args) >= 2:
+                lines = [f"        # case() converted to if/elif chain"]
+                for i in range(0, len(args) - 1, 2):
+                    cond = args[i].strip()
+                    val = self._convert_value_expr(args[i + 1].strip())
+                    python_cond = self._convert_spl_condition_to_python(cond) or cond
+                    if i == 0:
+                        lines.append(f"        if {python_cond}:")
+                    else:
+                        lines.append(f"        elif {python_cond}:")
+                    lines.append(f"            {field} = {val}")
+                # Check for default value (odd number of args)
+                if len(args) % 2 == 1:
+                    default_val = self._convert_value_expr(args[-1].strip())
+                    lines.append(f"        else:")
+                    lines.append(f"            {field} = {default_val}")
+                else:
+                    lines.append(f"        else:")
+                    lines.append(f"            {field} = None")
+                return '\n'.join(lines)
+
+        # Math functions: abs, ceil, floor, round, pow, sqrt, log, ln, exp
+        math_match = re.match(r'^(abs|ceil(?:ing)?|floor|round|pow|sqrt|log|ln|exp)\s*\((.+)\)$', expr, re.IGNORECASE)
+        if math_match:
+            func = math_match.group(1).lower()
+            args_str = math_match.group(2)
+            args = self._parse_function_args(args_str)
+
+            if func in ('ceil', 'ceiling'):
+                func = 'ceil'
+
+            if func in ('abs', 'ceil', 'floor', 'sqrt', 'ln', 'exp'):
+                arg = self._convert_field_ref(args[0].strip())
+                return f"        {field} = spl_{func}({arg})"
+            elif func == 'round' and len(args) >= 1:
+                arg = self._convert_field_ref(args[0].strip())
+                digits = args[1].strip() if len(args) > 1 else '0'
+                return f"        {field} = spl_round({arg}, {digits})"
+            elif func == 'pow' and len(args) >= 2:
+                base = self._convert_field_ref(args[0].strip())
+                exp = self._convert_field_ref(args[1].strip())
+                return f"        {field} = spl_pow({base}, {exp})"
+            elif func == 'log' and len(args) >= 1:
+                arg = self._convert_field_ref(args[0].strip())
+                base = args[1].strip() if len(args) > 1 else '10'
+                return f"        {field} = spl_log({arg}, {base})"
+
+        # substr(field, start, length)
+        substr_match = re.match(r'^substr\s*\((.+)\)$', expr, re.IGNORECASE)
+        if substr_match:
+            args = self._parse_function_args(substr_match.group(1))
+            if len(args) >= 2:
+                src = self._convert_field_ref(args[0].strip())
+                start = args[1].strip()
+                length = args[2].strip() if len(args) > 2 else 'None'
+                return f"        {field} = spl_substr({src}, {start}, {length})"
+
+        # replace(field, pattern, replacement)
+        replace_match = re.match(r'^replace\s*\((.+)\)$', expr, re.IGNORECASE)
+        if replace_match:
+            args = self._parse_function_args(replace_match.group(1))
+            if len(args) >= 3:
+                src = self._convert_field_ref(args[0].strip())
+                pattern = args[1].strip()
+                replacement = args[2].strip()
+                return f"        {field} = spl_replace({src}, {pattern}, {replacement})"
+
+        # split(field, delimiter)
+        split_match = re.match(r'^split\s*\((.+)\)$', expr, re.IGNORECASE)
+        if split_match:
+            args = self._parse_function_args(split_match.group(1))
+            if len(args) >= 2:
+                src = self._convert_field_ref(args[0].strip())
+                delimiter = args[1].strip()
+                return f"        {field} = spl_split({src}, {delimiter})"
+
+        # mvindex(mv_field, index)
+        mvindex_match = re.match(r'^mvindex\s*\((.+)\)$', expr, re.IGNORECASE)
+        if mvindex_match:
+            args = self._parse_function_args(mvindex_match.group(1))
+            if len(args) >= 2:
+                src = self._convert_field_ref(args[0].strip())
+                index = args[1].strip()
+                return f"        {field} = spl_mvindex({src}, {index})"
+
+        # mvjoin(mv_field, delimiter)
+        mvjoin_match = re.match(r'^mvjoin\s*\((.+)\)$', expr, re.IGNORECASE)
+        if mvjoin_match:
+            args = self._parse_function_args(mvjoin_match.group(1))
+            if len(args) >= 2:
+                src = self._convert_field_ref(args[0].strip())
+                delimiter = args[1].strip()
+                return f"        {field} = spl_mvjoin({src}, {delimiter})"
+
+        # Simple field assignment: field = value
+        if re.match(r'^".*"$|^\'.*\'$|^\d+$|^\d+\.\d+$', expr):
+            return f"        {field} = {expr}"
+
+        # Field reference: field = other_field
+        if re.match(r'^\w+$', expr):
+            return f"        {field} = deep_get(event, '{expr}', None)"
 
         return None
+
+    def _parse_function_args(self, args_str: str) -> List[str]:
+        """Parse function arguments, handling nested parentheses and quoted strings."""
+        args = []
+        current = ""
+        depth = 0
+        in_string = False
+        string_char = None
+
+        for char in args_str:
+            if char in ('"', "'") and not in_string:
+                in_string = True
+                string_char = char
+                current += char
+            elif char == string_char and in_string:
+                in_string = False
+                string_char = None
+                current += char
+            elif char == '(' and not in_string:
+                depth += 1
+                current += char
+            elif char == ')' and not in_string:
+                depth -= 1
+                current += char
+            elif char == ',' and depth == 0 and not in_string:
+                args.append(current.strip())
+                current = ""
+            else:
+                current += char
+
+        if current.strip():
+            args.append(current.strip())
+
+        return args
+
+    def _convert_field_ref(self, expr: str) -> str:
+        """Convert field reference to deep_get or pass through literals."""
+        expr = expr.strip()
+        # If it's a quoted string or number, return as-is
+        if re.match(r'^".*"$|^\'.*\'$|^\d+$|^\d+\.\d+$', expr):
+            return expr
+        # If it's a field name, convert to deep_get
+        if re.match(r'^\w+$', expr):
+            return f"deep_get(event, '{expr}', None)"
+        # Otherwise return as-is (could be an expression)
+        return expr
+
+    def _convert_value_expr(self, expr: str) -> str:
+        """Convert a value expression for use in Python code."""
+        expr = expr.strip()
+        # If already quoted or numeric, return as-is
+        if re.match(r'^".*"$|^\'.*\'$|^\d+$|^\d+\.\d+$', expr):
+            return expr
+        # If it's a field name, wrap in deep_get
+        if re.match(r'^\w+$', expr):
+            return f"deep_get(event, '{expr}', None)"
+        return expr
 
     def _convert_spl_condition_to_python(self, condition: str) -> Optional[str]:
         """Convert SPL condition to Python boolean expression."""

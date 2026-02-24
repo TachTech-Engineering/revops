@@ -266,19 +266,26 @@ class YARALConverter:
             meta_severity = parsed.meta.get('severity', 'MEDIUM').upper()
             severity = self.SEVERITY_MAP.get(meta_severity, 'MEDIUM')
 
-        # Build the Python rule
+        # Build the Python rule - choose based on rule type
         todos = []
-        source_code = self._generate_python_rule(parsed, rule_id, class_name, severity, todos)
-        test_code = self._generate_test_code(parsed, class_name)
 
         # Determine if threshold rule
         is_threshold = parsed.is_multi_event or '#' in parsed.condition
 
+        if parsed.is_multi_event or parsed.match_section:
+            # Multi-event correlation requires scheduled rule with SQL
+            source_code = self._generate_scheduled_rule(parsed, rule_id, class_name, severity, todos)
+        else:
+            # Single-event rules can use streaming Python
+            source_code = self._generate_python_rule(parsed, rule_id, class_name, severity, todos)
+
+        test_code = self._generate_test_code(parsed, class_name)
+
         recommendation_reasons = []
         if parsed.is_multi_event:
-            recommendation_reasons.append("Multi-event correlation detected - consider scheduled rule")
+            recommendation_reasons.append("Multi-event correlation detected - scheduled rule generated")
         if parsed.match_section:
-            recommendation_reasons.append("Match section for event correlation - requires scheduled rule")
+            recommendation_reasons.append("Match section for event correlation - scheduled rule with SQL generated")
 
         return YARALConversionResult(
             source_code=source_code,
@@ -293,6 +300,232 @@ class YARALConverter:
             recommended_type=parsed.recommended_type,
             recommendation_reasons=recommendation_reasons,
         )
+
+    def _generate_scheduled_rule(
+        self,
+        parsed: YARALParseResult,
+        rule_id: str,
+        class_name: str,
+        severity: str,
+        todos: list,
+    ) -> str:
+        """Generate Panther Scheduled Rule for multi-event YARA-L rules."""
+        lines = [
+            '"""',
+            f'Panther Scheduled Rule: {rule_id}',
+            f'Converted from YARA-L multi-event rule: {parsed.rule_name}',
+            '',
+            'This rule requires scheduled execution to correlate multiple events.',
+        ]
+
+        if parsed.meta.get('description'):
+            lines.append(f'\nDescription: {parsed.meta["description"]}')
+        if parsed.meta.get('author'):
+            lines.append(f'Author: {parsed.meta["author"]}')
+
+        lines.extend([
+            '"""',
+            '',
+            '# Scheduled Rule Configuration',
+            f'# Rule ID: {rule_id}',
+            f'# Schedule: Every 5 minutes (adjust as needed)',
+            f'# Log Types: {", ".join(parsed.log_types)}',
+            '',
+        ])
+
+        # Generate correlation SQL
+        sql_query = self._generate_correlation_sql(parsed, todos)
+
+        lines.extend([
+            '# SQL Query for event correlation',
+            'QUERY = """',
+            sql_query,
+            '"""',
+            '',
+            '',
+            'def rule(event):',
+            '    """',
+            '    Process correlated events from scheduled query.',
+            '    Event contains aggregated data from the SQL query.',
+            '    """',
+        ])
+
+        # Add correlation logic
+        if parsed.match_section:
+            lines.append('    # Match section correlation')
+            for match_condition in parsed.match_section:
+                lines.append(f'    # {match_condition}')
+            lines.append('')
+
+        # Add threshold check if present in condition
+        threshold_match = re.search(r'#(\w+)\s*([><=!]+)\s*(\d+)', parsed.condition)
+        if threshold_match:
+            event_var = threshold_match.group(1)
+            operator = threshold_match.group(2)
+            threshold = threshold_match.group(3)
+            lines.extend([
+                f'    # Threshold check: #{event_var} {operator} {threshold}',
+                f'    event_count = event.get("event_count", 0)',
+                f'    if not (event_count {operator} {threshold}):',
+                f'        return False',
+                '',
+            ])
+            todos.append(f'Verify threshold logic: event count {operator} {threshold}')
+
+        lines.extend([
+            '    return True',
+            '',
+        ])
+
+        # Add title and severity functions
+        title = parsed.meta.get('description', parsed.rule_name or rule_id)
+        lines.extend([
+            '',
+            'def title(event):',
+            f'    return f"{title} - {{event.get(\\"correlation_key\\", \\"unknown\\")}}"',
+            '',
+            '',
+            'def severity(event):',
+            f'    return "{severity}"',
+            '',
+        ])
+
+        # Add dedup function for correlation
+        lines.extend([
+            '',
+            'def dedup(event):',
+            '    """Deduplicate based on correlation key."""',
+            '    return event.get("correlation_key", "")',
+            '',
+        ])
+
+        # Add alert context
+        lines.extend([
+            '',
+            'def alert_context(event):',
+            '    return {',
+            '        "correlation_key": event.get("correlation_key"),',
+            '        "event_count": event.get("event_count"),',
+            '        "first_seen": event.get("first_seen"),',
+            '        "last_seen": event.get("last_seen"),',
+        ])
+
+        context_fields = self._get_context_fields(parsed)
+        for field in context_fields[:5]:
+            lines.append(f'        "{field}": event.get("{field}"),')
+
+        lines.extend([
+            '    }',
+            '',
+        ])
+
+        return '\n'.join(lines)
+
+    def _generate_correlation_sql(self, parsed: YARALParseResult, todos: list) -> str:
+        """Generate SQL for multi-event correlation from YARA-L match section."""
+        # Build SQL based on events and match conditions
+        select_fields = []
+        where_conditions = []
+        group_by_fields = []
+        join_conditions = []
+
+        # Process each event variable
+        event_tables = []
+        for i, event in enumerate(parsed.events):
+            alias = event.get('name', f'e{i}')
+            event_tables.append(alias)
+
+            for condition in event.get('conditions', []):
+                field = condition.get('field', '')
+                value = condition.get('value', '')
+
+                if field and value:
+                    sql_field = self._convert_field_path_to_sql(field, alias)
+                    where_conditions.append(f"{sql_field} = '{value}'")
+
+        # Process match section for joins
+        if parsed.match_section:
+            for match_line in parsed.match_section:
+                # Parse: $e1.field over 5m
+                over_match = re.search(r'\$(\w+)\.(\S+)\s+over\s+(\d+)([smhd])', match_line, re.IGNORECASE)
+                if over_match:
+                    event_var = over_match.group(1)
+                    field = over_match.group(2)
+                    duration = over_match.group(3)
+                    unit = over_match.group(4).lower()
+
+                    sql_field = self._convert_field_path_to_sql(field, event_var)
+                    group_by_fields.append(sql_field)
+
+                    # Add time window
+                    unit_map = {'s': 'SECOND', 'm': 'MINUTE', 'h': 'HOUR', 'd': 'DAY'}
+                    sql_unit = unit_map.get(unit, 'MINUTE')
+                    where_conditions.append(f"p_event_time >= NOW() - INTERVAL '{duration}' {sql_unit}")
+
+                # Parse join conditions: $e1.field = $e2.field
+                join_match = re.search(r'\$(\w+)\.(\S+)\s*=\s*\$(\w+)\.(\S+)', match_line)
+                if join_match:
+                    e1, f1, e2, f2 = join_match.groups()
+                    sql_f1 = self._convert_field_path_to_sql(f1, e1)
+                    sql_f2 = self._convert_field_path_to_sql(f2, e2)
+                    join_conditions.append(f"{sql_f1} = {sql_f2}")
+
+        # Build SELECT clause
+        if group_by_fields:
+            select_fields.append(f"{group_by_fields[0]} AS correlation_key")
+        else:
+            select_fields.append("'all' AS correlation_key")
+
+        select_fields.extend([
+            "COUNT(*) AS event_count",
+            "MIN(p_event_time) AS first_seen",
+            "MAX(p_event_time) AS last_seen",
+        ])
+
+        # Add sample fields for context
+        context_fields = self._get_context_fields(parsed)
+        for field in context_fields[:3]:
+            select_fields.append(f"ANY_VALUE({field}) AS {field.replace('.', '_')}")
+
+        # Build the SQL
+        sql_lines = [
+            "SELECT",
+            "    " + ",\n    ".join(select_fields),
+            "FROM p_any_logs",
+        ]
+
+        if where_conditions:
+            sql_lines.append("WHERE")
+            sql_lines.append("    " + "\n    AND ".join(where_conditions))
+
+        if group_by_fields:
+            sql_lines.append("GROUP BY")
+            sql_lines.append("    " + ", ".join(group_by_fields))
+
+        # Add HAVING for threshold
+        threshold_match = re.search(r'#(\w+)\s*([><=!]+)\s*(\d+)', parsed.condition)
+        if threshold_match:
+            operator = threshold_match.group(2)
+            threshold = threshold_match.group(3)
+            sql_lines.append(f"HAVING COUNT(*) {operator} {threshold}")
+
+        todos.append("Review and adjust SQL query for your specific schema")
+        todos.append("Update table name 'p_any_logs' to match your log table")
+
+        return "\n".join(sql_lines)
+
+    def _convert_field_path_to_sql(self, yaral_path: str, event_alias: str = None) -> str:
+        """Convert YARA-L field path to SQL column reference."""
+        # Remove common YARA-L prefixes
+        path = re.sub(r'^(metadata|principal|target|src|network|about)\.', '', yaral_path)
+
+        # Convert nested paths to JSON extraction for SQL
+        if '.' in path:
+            parts = path.split('.')
+            # Use JSON extraction syntax (PostgreSQL style)
+            return f"{parts[0]}->>{repr('.'.join(parts[1:]))}"
+
+        return path
 
     def _to_class_name(self, name: str) -> str:
         """Convert a name to PascalCase class name."""
@@ -426,11 +659,89 @@ class YARALConverter:
         return python_lines
 
     def _convert_field_path(self, yaral_path: str) -> str:
-        """Convert YARA-L field path to Panther event path."""
-        # Remove leading metadata/principal/target prefixes common in YARA-L
-        path = re.sub(r'^(metadata|principal|target|src|network|about)\.', '', yaral_path)
-        # Convert to dot notation compatible with deep_get
-        return path.replace('_', '.')
+        """Convert YARA-L field path to Panther event path.
+
+        YARA-L uses paths like:
+          $e.principal.ip
+          $e.metadata.event_type
+          $e.target.user.email
+
+        This converts to Panther deep_get compatible paths.
+        """
+        path = yaral_path
+
+        # Remove event variable prefix ($e., $event., etc.)
+        path = re.sub(r'^\$\w+\.', '', path)
+
+        # Map common YARA-L UDM fields to common log field names
+        field_mapping = {
+            'principal.ip': 'sourceIPAddress',
+            'principal.user.email_addresses': 'userIdentity.email',
+            'principal.user.userid': 'userIdentity.userName',
+            'principal.hostname': 'hostname',
+            'principal.process.file.full_path': 'process.executable',
+            'principal.process.command_line': 'process.command_line',
+            'target.ip': 'destinationIPAddress',
+            'target.user.email_addresses': 'targetUser.email',
+            'target.user.userid': 'targetUser.userName',
+            'target.hostname': 'targetHostname',
+            'target.url': 'requestURL',
+            'target.file.full_path': 'file.path',
+            'network.dns.questions.name': 'dns.question.name',
+            'network.http.method': 'httpMethod',
+            'network.http.response_code': 'httpStatusCode',
+            'metadata.event_type': 'eventType',
+            'metadata.product_name': 'productName',
+            'metadata.vendor_name': 'vendorName',
+            'about.file.sha256': 'file.hash.sha256',
+            'about.file.md5': 'file.hash.md5',
+            'security_result.action': 'action',
+            'security_result.category': 'category',
+            'security_result.severity': 'severity',
+        }
+
+        # Check for exact mapping first
+        path_lower = path.lower()
+        for yaral_field, panther_field in field_mapping.items():
+            if path_lower == yaral_field.lower():
+                return panther_field
+
+        # Remove common prefixes for partial matches
+        path = re.sub(r'^(metadata|principal|target|src|network|about|security_result)\.', '', path)
+
+        # Convert underscores in specific contexts (but preserve most)
+        # YARA-L uses underscores, many log formats use camelCase
+        path = re.sub(r'_([a-z])', lambda m: m.group(1).upper(), path)
+
+        return path
+
+    def _validate_regex_pattern(self, pattern: str) -> tuple:
+        """Validate a regex pattern and return (is_valid, error_message).
+
+        Returns tuple of (bool, str) indicating if pattern is valid and any error.
+        """
+        # Remove YARA-L regex delimiters if present
+        pattern = pattern.strip('/')
+
+        # Check for common issues
+        try:
+            re.compile(pattern)
+            return True, ""
+        except re.error as e:
+            return False, str(e)
+
+    def _convert_regex_to_python(self, yaral_regex: str) -> str:
+        """Convert YARA-L regex to Python regex pattern."""
+        pattern = yaral_regex.strip('/')
+
+        # YARA-L regex is mostly compatible with Python, but check for issues
+        is_valid, error = self._validate_regex_pattern(pattern)
+        if not is_valid:
+            # Try to escape problematic characters
+            logger.warning(f"Invalid regex pattern '{pattern}': {error}")
+            pattern = re.escape(pattern)
+
+        return pattern
 
     def _get_context_fields(self, parsed: YARALParseResult) -> list:
         """Get relevant fields for alert context."""

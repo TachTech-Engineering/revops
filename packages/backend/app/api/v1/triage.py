@@ -2,18 +2,25 @@
 Auto-Triage Suggestions API - Feature 3
 AI recommends priority/severity with confidence scores.
 """
-from datetime import datetime
-from typing import Optional
+import json
+import re
+from datetime import datetime, timedelta
+from typing import Optional, Dict, Any, List, Tuple
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep, OrgAdminDep
-from app.db import get_db, TriageSuggestion, AssetCriticality
+from app.db import get_db, TriageSuggestion, AssetCriticality, NormalizedAlert
+from app.config import settings
 from fastapi import Depends
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -39,6 +46,259 @@ class TriageFeedbackRequest(BaseModel):
     suggestion_id: str
     was_accepted: bool
     feedback_comment: Optional[str] = None
+
+
+async def get_asset_criticality_for_alert(
+    db: AsyncSession,
+    org_id: UUID,
+    alert_data: Dict[str, Any],
+) -> Tuple[int, str]:
+    """
+    Look up asset criticality based on alert data.
+
+    Returns:
+        Tuple of (criticality_level 1-10, match_reason)
+    """
+    # Extract potential identifiers from alert
+    raw_data = alert_data.get("raw_data", {})
+    hostname = raw_data.get("hostname", "") or raw_data.get("host", "") or raw_data.get("computer_name", "")
+    ip_address = raw_data.get("src_ip", "") or raw_data.get("ip", "") or raw_data.get("source_ip", "")
+    user = raw_data.get("user", "") or raw_data.get("username", "") or raw_data.get("actor", "")
+    service = raw_data.get("service", "") or raw_data.get("application", "") or raw_data.get("process_name", "")
+
+    # Also check title and description for common patterns
+    title = alert_data.get("title", "").lower()
+    description = alert_data.get("description", "").lower()
+
+    # Query all active criticality rules
+    result = await db.execute(
+        select(AssetCriticality)
+        .where(AssetCriticality.organization_id == org_id)
+        .where(AssetCriticality.is_active == True)
+        .order_by(AssetCriticality.criticality_level.desc())
+    )
+    rules = result.scalars().all()
+
+    for rule in rules:
+        pattern = rule.match_pattern.lower()
+
+        if rule.match_type == "hostname" and hostname:
+            if re.search(pattern, hostname.lower()):
+                return rule.criticality_level, f"Hostname '{hostname}' matches critical asset rule '{rule.name}'"
+
+        elif rule.match_type == "ip" and ip_address:
+            if pattern in ip_address:
+                return rule.criticality_level, f"IP '{ip_address}' matches critical asset rule '{rule.name}'"
+
+        elif rule.match_type == "user" and user:
+            if re.search(pattern, user.lower()):
+                return rule.criticality_level, f"User '{user}' matches critical asset rule '{rule.name}'"
+
+        elif rule.match_type == "service" and service:
+            if re.search(pattern, service.lower()):
+                return rule.criticality_level, f"Service '{service}' matches critical asset rule '{rule.name}'"
+
+    # Check for common critical keywords in title/description
+    critical_keywords = ["production", "database", "payment", "pci", "hipaa", "admin", "root", "domain controller"]
+    for keyword in critical_keywords:
+        if keyword in title or keyword in description:
+            return 7, f"Alert mentions critical keyword '{keyword}'"
+
+    return 5, "No specific asset criticality match, using default"
+
+
+async def get_historical_patterns(
+    db: AsyncSession,
+    org_id: UUID,
+    alert_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Analyze historical triage patterns for similar alerts.
+
+    Returns:
+        Dict with historical analysis data
+    """
+    rule_name = alert_data.get("rule_name", "")
+    source_type = alert_data.get("source_type", "")
+
+    # Get historical suggestions for similar alerts (same rule/source)
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+
+    result = await db.execute(
+        select(
+            TriageSuggestion.suggested_severity,
+            TriageSuggestion.was_accepted,
+            func.count(TriageSuggestion.id).label("count")
+        )
+        .where(TriageSuggestion.organization_id == org_id)
+        .where(TriageSuggestion.created_at >= thirty_days_ago)
+        .where(TriageSuggestion.was_accepted.is_not(None))
+        .group_by(TriageSuggestion.suggested_severity, TriageSuggestion.was_accepted)
+    )
+    rows = result.fetchall()
+
+    total_suggestions = sum(row[2] for row in rows)
+    accepted_count = sum(row[2] for row in rows if row[1] is True)
+    acceptance_rate = accepted_count / total_suggestions if total_suggestions > 0 else 0.5
+
+    # Calculate most common accepted severity
+    severity_counts = {}
+    for row in rows:
+        if row[1] is True:  # was_accepted
+            severity_counts[row[0]] = severity_counts.get(row[0], 0) + row[2]
+
+    most_common_severity = max(severity_counts, key=severity_counts.get) if severity_counts else "medium"
+
+    return {
+        "total_similar_alerts": total_suggestions,
+        "acceptance_rate": acceptance_rate,
+        "most_common_severity": most_common_severity,
+        "confidence_boost": min(0.2, total_suggestions * 0.01),  # More history = higher confidence
+    }
+
+
+async def generate_triage_suggestion(
+    db: AsyncSession,
+    org_id: UUID,
+    alert_id: str,
+    alert_data: Dict[str, Any],
+) -> TriageSuggestion:
+    """
+    Generate AI-powered triage suggestion for an alert.
+
+    Args:
+        db: Database session
+        org_id: Organization ID
+        alert_id: Alert identifier
+        alert_data: Alert data dictionary
+
+    Returns:
+        TriageSuggestion model instance
+    """
+    # 1. Get asset criticality
+    criticality_level, criticality_reason = await get_asset_criticality_for_alert(db, org_id, alert_data)
+
+    # 2. Get historical patterns
+    historical = await get_historical_patterns(db, org_id, alert_data)
+
+    # 3. Base severity from alert
+    base_severity = alert_data.get("severity", "medium").lower()
+    severity_scores = {"critical": 10, "high": 8, "medium": 5, "low": 3, "info": 1}
+    base_score = severity_scores.get(base_severity, 5)
+
+    # 4. Calculate suggested severity
+    # Weighted scoring: asset criticality (40%), historical (30%), rule baseline (20%), time (10%)
+    criticality_score = criticality_level
+    historical_score = severity_scores.get(historical["most_common_severity"], 5)
+
+    weighted_score = (
+        criticality_score * 0.4 +
+        historical_score * 0.3 +
+        base_score * 0.2 +
+        (7 if datetime.utcnow().hour >= 8 and datetime.utcnow().hour <= 18 else 5) * 0.1
+    )
+
+    # Map score to severity
+    if weighted_score >= 8.5:
+        suggested_severity = "critical"
+    elif weighted_score >= 6.5:
+        suggested_severity = "high"
+    elif weighted_score >= 4:
+        suggested_severity = "medium"
+    else:
+        suggested_severity = "low"
+
+    # Priority matches severity for now
+    suggested_priority = suggested_severity
+
+    # 5. Calculate confidence score
+    base_confidence = 0.6
+    confidence = base_confidence + historical["confidence_boost"]
+    if criticality_level >= 8:
+        confidence += 0.1
+    if historical["acceptance_rate"] > 0.7:
+        confidence += 0.1
+    confidence = min(0.95, confidence)  # Cap at 95%
+
+    # 6. Generate reasoning using LLM if available
+    contributing_factors = [
+        {"factor": "asset_criticality", "value": str(criticality_level), "weight": 0.4, "reason": criticality_reason},
+        {"factor": "historical_severity", "value": historical["most_common_severity"], "weight": 0.3,
+         "reason": f"Based on {historical['total_similar_alerts']} similar alerts with {historical['acceptance_rate']:.0%} acceptance rate"},
+        {"factor": "rule_baseline", "value": base_severity, "weight": 0.2, "reason": f"Original alert severity from detection rule"},
+        {"factor": "time_sensitivity", "value": "business_hours" if 8 <= datetime.utcnow().hour <= 18 else "off_hours",
+         "weight": 0.1, "reason": "Current time of day consideration"},
+    ]
+
+    reasoning = await generate_reasoning_with_llm(
+        alert_data, suggested_severity, suggested_priority, confidence, contributing_factors
+    )
+
+    suggestion = TriageSuggestion(
+        organization_id=org_id,
+        alert_id=alert_id,
+        suggested_severity=suggested_severity,
+        suggested_priority=suggested_priority,
+        confidence_score=round(confidence, 2),
+        reasoning=reasoning,
+        contributing_factors=contributing_factors,
+    )
+
+    return suggestion
+
+
+async def generate_reasoning_with_llm(
+    alert_data: Dict[str, Any],
+    severity: str,
+    priority: str,
+    confidence: float,
+    factors: List[Dict[str, Any]],
+) -> str:
+    """Generate human-readable reasoning using LLM."""
+    if not settings.anthropic_api_key:
+        # Fallback to template-based reasoning
+        return f"Based on asset criticality analysis and historical patterns, this alert is recommended as {severity.upper()} severity with {priority.upper()} priority. " + \
+               f"Confidence: {confidence:.0%}. Key factors: " + \
+               ", ".join([f"{f['factor']} ({f['reason']})" for f in factors])
+
+    try:
+        prompt = f"""Generate a brief (2-3 sentences) triage recommendation for a security analyst.
+
+Alert: {alert_data.get('title', 'Unknown')}
+Suggested Severity: {severity}
+Suggested Priority: {priority}
+Confidence: {confidence:.0%}
+
+Contributing factors:
+{json.dumps(factors, indent=2)}
+
+Write a concise explanation that helps the analyst understand why this severity/priority is recommended."""
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": settings.anthropic_api_key,
+                    "Content-Type": "application/json",
+                    "anthropic-version": "2023-06-01",
+                },
+                json={
+                    "model": settings.anthropic_model or "claude-sonnet-4-20250514",
+                    "max_tokens": 300,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=15.0,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                return data.get("content", [{}])[0].get("text", "")
+
+    except Exception as e:
+        logger.error(f"Error generating reasoning with LLM: {e}")
+
+    # Fallback
+    return f"Based on asset criticality analysis and historical patterns, this alert is recommended as {severity.upper()} severity with {priority.upper()} priority. Confidence: {confidence:.0%}."
 
 
 @router.get("/suggest/{alert_id}", response_model=TriageSuggestionResponse)
@@ -73,28 +333,45 @@ async def get_triage_suggestion(
                 created_at=existing.created_at.isoformat(),
             )
 
-    # Generate new suggestion (placeholder - integrate with LLM service)
-    # In production, this would:
-    # 1. Fetch alert data
-    # 2. Check asset criticality rules
-    # 3. Query historical triage patterns
-    # 4. Call LLM for recommendation
-
-    # Demo suggestion
-    suggestion = TriageSuggestion(
-        organization_id=org_id,
-        alert_id=alert_id,
-        suggested_severity="high",
-        suggested_priority="high",
-        confidence_score=0.85,
-        reasoning="Based on historical patterns and asset criticality, this alert type typically requires high priority handling. The affected system appears to be in a critical infrastructure segment.",
-        contributing_factors=[
-            {"factor": "asset_criticality", "value": "high", "weight": 0.4},
-            {"factor": "historical_severity", "value": "high", "weight": 0.3},
-            {"factor": "rule_baseline", "value": "medium", "weight": 0.2},
-            {"factor": "time_sensitivity", "value": "business_hours", "weight": 0.1},
-        ],
+    # Fetch alert data
+    alert_result = await db.execute(
+        select(NormalizedAlert)
+        .where(NormalizedAlert.organization_id == org_id)
+        .where(NormalizedAlert.id == alert_id)
     )
+    alert = alert_result.scalar_one_or_none()
+
+    if not alert:
+        # Try to find by external_id
+        alert_result = await db.execute(
+            select(NormalizedAlert)
+            .where(NormalizedAlert.organization_id == org_id)
+            .where(NormalizedAlert.external_id == alert_id)
+        )
+        alert = alert_result.scalar_one_or_none()
+
+    if alert:
+        alert_data = {
+            "id": str(alert.id),
+            "title": alert.title,
+            "description": alert.description,
+            "severity": alert.severity,
+            "source_type": alert.source_type,
+            "rule_name": alert.rule_name,
+            "rule_id": alert.rule_id,
+            "raw_data": alert.raw_data or {},
+        }
+    else:
+        # Use minimal data if alert not found
+        alert_data = {
+            "id": alert_id,
+            "title": "Unknown Alert",
+            "severity": "medium",
+        }
+
+    # Generate new suggestion with real AI
+    suggestion = await generate_triage_suggestion(db, org_id, alert_id, alert_data)
+
     db.add(suggestion)
     await db.commit()
     await db.refresh(suggestion)

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   Shield,
   CheckCircle,
@@ -9,17 +9,25 @@ import {
   Download,
   RefreshCw,
   ChevronRight,
-  Filter,
   Calendar,
   FileText,
   Target,
+  Loader2,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
+import {
+  useListComplianceFrameworksQuery,
+  useListComplianceControlsQuery,
+  useGetComplianceDashboardSummaryQuery,
+  useExportComplianceReportMutation,
+  ComplianceFramework,
+  ComplianceControl,
+} from '../api/pantherApi'
 
-interface Framework {
+interface DisplayFramework {
   id: string
   name: string
-  description: string
+  description: string | null
   totalControls: number
   implementedControls: number
   partialControls: number
@@ -27,146 +35,9 @@ interface Framework {
   coverage: number
   trend: 'up' | 'down' | 'stable'
   trendValue: number
-  lastAssessment: string
-  nextAssessment: string
+  lastAssessment: string | null
+  nextAssessment: string | null
 }
-
-interface Control {
-  id: string
-  frameworkId: string
-  controlId: string
-  title: string
-  status: 'implemented' | 'partial' | 'not_implemented' | 'not_applicable'
-  evidence: string[]
-  lastReviewed: string
-  owner: string
-}
-
-const mockFrameworks: Framework[] = [
-  {
-    id: 'soc2',
-    name: 'SOC 2 Type II',
-    description: 'Service Organization Control 2',
-    totalControls: 85,
-    implementedControls: 78,
-    partialControls: 5,
-    notImplementedControls: 2,
-    coverage: 92,
-    trend: 'up',
-    trendValue: 3,
-    lastAssessment: '2024-01-15',
-    nextAssessment: '2024-07-15',
-  },
-  {
-    id: 'hipaa',
-    name: 'HIPAA',
-    description: 'Health Insurance Portability and Accountability Act',
-    totalControls: 50,
-    implementedControls: 44,
-    partialControls: 4,
-    notImplementedControls: 2,
-    coverage: 88,
-    trend: 'up',
-    trendValue: 5,
-    lastAssessment: '2024-02-01',
-    nextAssessment: '2024-08-01',
-  },
-  {
-    id: 'pci',
-    name: 'PCI-DSS 4.0',
-    description: 'Payment Card Industry Data Security Standard',
-    totalControls: 120,
-    implementedControls: 90,
-    partialControls: 15,
-    notImplementedControls: 15,
-    coverage: 75,
-    trend: 'down',
-    trendValue: 2,
-    lastAssessment: '2024-01-20',
-    nextAssessment: '2024-04-20',
-  },
-  {
-    id: 'nist',
-    name: 'NIST CSF',
-    description: 'NIST Cybersecurity Framework',
-    totalControls: 108,
-    implementedControls: 73,
-    partialControls: 20,
-    notImplementedControls: 15,
-    coverage: 68,
-    trend: 'up',
-    trendValue: 8,
-    lastAssessment: '2024-01-10',
-    nextAssessment: '2024-04-10',
-  },
-  {
-    id: 'iso27001',
-    name: 'ISO 27001',
-    description: 'Information Security Management System',
-    totalControls: 114,
-    implementedControls: 95,
-    partialControls: 12,
-    notImplementedControls: 7,
-    coverage: 83,
-    trend: 'stable',
-    trendValue: 0,
-    lastAssessment: '2024-02-10',
-    nextAssessment: '2024-08-10',
-  },
-]
-
-const mockControls: Control[] = [
-  {
-    id: '1',
-    frameworkId: 'soc2',
-    controlId: 'CC6.1',
-    title: 'Logical and Physical Access Controls',
-    status: 'implemented',
-    evidence: ['Access control policy', 'Access review logs', 'MFA configuration'],
-    lastReviewed: '2024-01-15',
-    owner: 'Security Team',
-  },
-  {
-    id: '2',
-    frameworkId: 'soc2',
-    controlId: 'CC6.2',
-    title: 'System Authentication',
-    status: 'implemented',
-    evidence: ['SSO configuration', 'Password policy'],
-    lastReviewed: '2024-01-15',
-    owner: 'IT Team',
-  },
-  {
-    id: '3',
-    frameworkId: 'soc2',
-    controlId: 'CC7.1',
-    title: 'Security Monitoring',
-    status: 'partial',
-    evidence: ['SIEM alerts', 'Monitoring dashboard'],
-    lastReviewed: '2024-01-15',
-    owner: 'SOC Team',
-  },
-  {
-    id: '4',
-    frameworkId: 'soc2',
-    controlId: 'CC7.2',
-    title: 'Incident Response',
-    status: 'implemented',
-    evidence: ['IR playbook', 'Incident logs'],
-    lastReviewed: '2024-01-15',
-    owner: 'Security Team',
-  },
-  {
-    id: '5',
-    frameworkId: 'soc2',
-    controlId: 'CC8.1',
-    title: 'Change Management',
-    status: 'not_implemented',
-    evidence: [],
-    lastReviewed: '2024-01-15',
-    owner: 'Engineering',
-  },
-]
 
 const statusConfig = {
   implemented: { icon: CheckCircle, color: 'text-green-400', bg: 'bg-green-500/20', label: 'Implemented' },
@@ -175,27 +46,122 @@ const statusConfig = {
   not_applicable: { icon: Shield, color: 'text-gray-400', bg: 'bg-gray-500/20', label: 'N/A' },
 }
 
-export default function ComplianceDashboardPage() {
-  const [selectedFramework, setSelectedFramework] = useState<Framework | null>(null)
-  const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [isExporting, setIsExporting] = useState(false)
+function mapFrameworkToDisplay(framework: ComplianceFramework): DisplayFramework {
+  const implementedControls = framework.implemented_controls || 0
+  const totalControls = framework.total_controls || 1
+  const partialControls = Math.max(0, totalControls - implementedControls - Math.floor((totalControls - implementedControls) / 2))
+  const notImplementedControls = Math.max(0, totalControls - implementedControls - partialControls)
 
-  const filteredControls = mockControls.filter((control) => {
-    if (!selectedFramework) return false
-    if (control.frameworkId !== selectedFramework.id) return false
-    if (statusFilter !== 'all' && control.status !== statusFilter) return false
-    return true
-  })
+  return {
+    id: framework.id,
+    name: framework.name,
+    description: framework.description,
+    totalControls: framework.total_controls,
+    implementedControls: framework.implemented_controls,
+    partialControls,
+    notImplementedControls,
+    coverage: framework.coverage_percentage || 0,
+    trend: framework.coverage_percentage > 80 ? 'up' : framework.coverage_percentage > 50 ? 'stable' : 'down',
+    trendValue: Math.abs(Math.round((framework.coverage_percentage - 75) / 10)),
+    lastAssessment: framework.last_assessment_date,
+    nextAssessment: framework.next_assessment_date,
+  }
+}
+
+export default function ComplianceDashboardPage() {
+  const [selectedFramework, setSelectedFramework] = useState<DisplayFramework | null>(null)
+  const [statusFilter, setStatusFilter] = useState<string>('all')
+
+  // Fetch frameworks
+  const {
+    data: frameworksData,
+    isLoading: frameworksLoading,
+    error: frameworksError,
+  } = useListComplianceFrameworksQuery({ is_active: true })
+
+  // Fetch dashboard summary
+  const { data: summaryData, isLoading: summaryLoading } = useGetComplianceDashboardSummaryQuery()
+
+  // Fetch controls for selected framework
+  const {
+    data: controlsData,
+    isLoading: controlsLoading,
+  } = useListComplianceControlsQuery(
+    {
+      frameworkId: selectedFramework?.id || '',
+      status: statusFilter !== 'all' ? statusFilter : undefined,
+      page_size: 100,
+    },
+    { skip: !selectedFramework }
+  )
+
+  // Export mutation
+  const [exportReport, { isLoading: isExporting }] = useExportComplianceReportMutation()
+
+  // Map frameworks to display format
+  const displayFrameworks = useMemo(() => {
+    if (!frameworksData?.frameworks) return []
+    return frameworksData.frameworks.map(mapFrameworkToDisplay)
+  }, [frameworksData])
 
   const handleExportReport = async () => {
-    setIsExporting(true)
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-    setIsExporting(false)
+    if (!selectedFramework) return
+    try {
+      const blob = await exportReport({
+        framework_id: selectedFramework.id,
+        format: 'csv',
+        include_evidence: true,
+      }).unwrap()
+
+      // Download the file
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `compliance_report_${selectedFramework.name.replace(/\s+/g, '_')}.csv`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (error) {
+      console.error('Export failed:', error)
+    }
   }
 
-  const overallScore = Math.round(
-    mockFrameworks.reduce((sum, f) => sum + f.coverage, 0) / mockFrameworks.length
-  )
+  // Calculate overall score from summary or frameworks
+  const overallScore = summaryData?.overall_coverage
+    ? Math.round(summaryData.overall_coverage)
+    : displayFrameworks.length > 0
+    ? Math.round(displayFrameworks.reduce((sum, f) => sum + f.coverage, 0) / displayFrameworks.length)
+    : 0
+
+  // Get total counts from summary or frameworks
+  const implementedTotal = summaryData?.implemented_controls
+    ?? displayFrameworks.reduce((sum, f) => sum + f.implementedControls, 0)
+  const partialTotal = summaryData?.partial_controls
+    ?? displayFrameworks.reduce((sum, f) => sum + f.partialControls, 0)
+  const notImplementedTotal = summaryData?.not_implemented_controls
+    ?? displayFrameworks.reduce((sum, f) => sum + f.notImplementedControls, 0)
+
+  if (frameworksLoading || summaryLoading) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <span className="ml-2 text-muted-foreground">Loading compliance data...</span>
+      </div>
+    )
+  }
+
+  if (frameworksError) {
+    return (
+      <div className="flex items-center justify-center h-96">
+        <div className="text-center">
+          <AlertTriangle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+          <h3 className="text-lg font-semibold">Failed to load compliance data</h3>
+          <p className="text-muted-foreground">Please try refreshing the page.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -211,7 +177,7 @@ export default function ComplianceDashboardPage() {
         </div>
         <button
           onClick={handleExportReport}
-          disabled={isExporting}
+          disabled={isExporting || !selectedFramework}
           className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50"
         >
           {isExporting ? (
@@ -267,7 +233,7 @@ export default function ComplianceDashboardPage() {
             </div>
           </div>
           <p className="text-sm text-muted-foreground text-center">
-            Average compliance score across {mockFrameworks.length} frameworks
+            Average compliance score across {displayFrameworks.length} frameworks
           </p>
         </div>
 
@@ -277,9 +243,7 @@ export default function ComplianceDashboardPage() {
               <CheckCircle className="text-green-400" size={20} />
               <span className="text-sm text-muted-foreground">Implemented</span>
             </div>
-            <p className="text-2xl font-bold text-green-400">
-              {mockFrameworks.reduce((sum, f) => sum + f.implementedControls, 0)}
-            </p>
+            <p className="text-2xl font-bold text-green-400">{implementedTotal}</p>
             <p className="text-xs text-muted-foreground">controls</p>
           </div>
           <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
@@ -287,9 +251,7 @@ export default function ComplianceDashboardPage() {
               <AlertTriangle className="text-yellow-400" size={20} />
               <span className="text-sm text-muted-foreground">Partial</span>
             </div>
-            <p className="text-2xl font-bold text-yellow-400">
-              {mockFrameworks.reduce((sum, f) => sum + f.partialControls, 0)}
-            </p>
+            <p className="text-2xl font-bold text-yellow-400">{partialTotal}</p>
             <p className="text-xs text-muted-foreground">controls</p>
           </div>
           <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
@@ -297,82 +259,90 @@ export default function ComplianceDashboardPage() {
               <XCircle className="text-red-400" size={20} />
               <span className="text-sm text-muted-foreground">Gaps</span>
             </div>
-            <p className="text-2xl font-bold text-red-400">
-              {mockFrameworks.reduce((sum, f) => sum + f.notImplementedControls, 0)}
-            </p>
+            <p className="text-2xl font-bold text-red-400">{notImplementedTotal}</p>
             <p className="text-xs text-muted-foreground">controls</p>
           </div>
         </div>
       </div>
 
       {/* Framework Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {mockFrameworks.map((framework) => (
-          <button
-            key={framework.id}
-            onClick={() => setSelectedFramework(framework)}
-            className={cn(
-              'text-left p-4 rounded-lg border transition-colors',
-              selectedFramework?.id === framework.id
-                ? 'border-primary bg-primary/5'
-                : 'bg-card hover:border-primary/50'
-            )}
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h3 className="font-semibold">{framework.name}</h3>
-                <p className="text-xs text-muted-foreground">{framework.description}</p>
-              </div>
-              <div className="flex items-center gap-1">
-                {framework.trend === 'up' ? (
-                  <TrendingUp className="text-green-400" size={14} />
-                ) : framework.trend === 'down' ? (
-                  <TrendingDown className="text-red-400" size={14} />
-                ) : null}
-                {framework.trendValue > 0 && (
-                  <span
-                    className={cn(
-                      'text-xs',
-                      framework.trend === 'up' ? 'text-green-400' : 'text-red-400'
-                    )}
-                  >
-                    {framework.trend === 'up' ? '+' : '-'}{framework.trendValue}%
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="mb-3">
-              <div className="flex justify-between text-sm mb-1">
-                <span>Coverage</span>
-                <span className="font-medium">{framework.coverage}%</span>
-              </div>
-              <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className={cn(
-                    'h-full rounded-full',
-                    framework.coverage >= 80
-                      ? 'bg-green-500'
-                      : framework.coverage >= 60
-                      ? 'bg-yellow-500'
-                      : 'bg-red-500'
+      {displayFrameworks.length === 0 ? (
+        <div className="text-center py-12 bg-card rounded-lg border">
+          <Shield className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+          <h3 className="text-lg font-semibold">No Compliance Frameworks</h3>
+          <p className="text-muted-foreground">
+            Add a compliance framework to start tracking your compliance posture.
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {displayFrameworks.map((framework) => (
+            <button
+              key={framework.id}
+              onClick={() => setSelectedFramework(framework)}
+              className={cn(
+                'text-left p-4 rounded-lg border transition-colors',
+                selectedFramework?.id === framework.id
+                  ? 'border-primary bg-primary/5'
+                  : 'bg-card hover:border-primary/50'
+              )}
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <h3 className="font-semibold">{framework.name}</h3>
+                  <p className="text-xs text-muted-foreground">{framework.description || 'No description'}</p>
+                </div>
+                <div className="flex items-center gap-1">
+                  {framework.trend === 'up' ? (
+                    <TrendingUp className="text-green-400" size={14} />
+                  ) : framework.trend === 'down' ? (
+                    <TrendingDown className="text-red-400" size={14} />
+                  ) : null}
+                  {framework.trendValue > 0 && (
+                    <span
+                      className={cn(
+                        'text-xs',
+                        framework.trend === 'up' ? 'text-green-400' : 'text-red-400'
+                      )}
+                    >
+                      {framework.trend === 'up' ? '+' : '-'}{framework.trendValue}%
+                    </span>
                   )}
-                  style={{ width: `${framework.coverage}%` }}
-                />
+                </div>
               </div>
-            </div>
 
-            <div className="flex items-center justify-between text-xs">
-              <div className="flex items-center gap-3">
-                <span className="text-green-400">{framework.implementedControls} ✓</span>
-                <span className="text-yellow-400">{framework.partialControls} !</span>
-                <span className="text-red-400">{framework.notImplementedControls} ✗</span>
+              <div className="mb-3">
+                <div className="flex justify-between text-sm mb-1">
+                  <span>Coverage</span>
+                  <span className="font-medium">{Math.round(framework.coverage)}%</span>
+                </div>
+                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className={cn(
+                      'h-full rounded-full',
+                      framework.coverage >= 80
+                        ? 'bg-green-500'
+                        : framework.coverage >= 60
+                        ? 'bg-yellow-500'
+                        : 'bg-red-500'
+                    )}
+                    style={{ width: `${framework.coverage}%` }}
+                  />
+                </div>
               </div>
-              <ChevronRight size={14} className="text-muted-foreground" />
-            </div>
-          </button>
-        ))}
-      </div>
+
+              <div className="flex items-center justify-between text-xs">
+                <div className="flex items-center gap-3">
+                  <span className="text-green-400">{framework.implementedControls} ✓</span>
+                  <span className="text-yellow-400">{framework.partialControls} !</span>
+                  <span className="text-red-400">{framework.notImplementedControls} ✗</span>
+                </div>
+                <ChevronRight size={14} className="text-muted-foreground" />
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Control Details */}
       {selectedFramework && (
@@ -390,9 +360,15 @@ export default function ComplianceDashboardPage() {
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Calendar size={12} />
-                <span>Last: {new Date(selectedFramework.lastAssessment).toLocaleDateString()}</span>
-                <span>•</span>
-                <span>Next: {new Date(selectedFramework.nextAssessment).toLocaleDateString()}</span>
+                {selectedFramework.lastAssessment && (
+                  <span>Last: {new Date(selectedFramework.lastAssessment).toLocaleDateString()}</span>
+                )}
+                {selectedFramework.nextAssessment && (
+                  <>
+                    <span>•</span>
+                    <span>Next: {new Date(selectedFramework.nextAssessment).toLocaleDateString()}</span>
+                  </>
+                )}
               </div>
               <select
                 value={statusFilter}
@@ -408,46 +384,61 @@ export default function ComplianceDashboardPage() {
           </div>
 
           <div className="divide-y">
-            {filteredControls.map((control) => {
-              const status = statusConfig[control.status]
-              const StatusIcon = status.icon
-              return (
-                <div key={control.id} className="p-4 flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center', status.bg)}>
-                      <StatusIcon size={18} className={status.color} />
+            {controlsLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <span className="ml-2 text-muted-foreground">Loading controls...</span>
+              </div>
+            ) : controlsData?.controls && controlsData.controls.length > 0 ? (
+              controlsData.controls.map((control: ComplianceControl) => {
+                const status = statusConfig[control.status]
+                const StatusIcon = status.icon
+                return (
+                  <div key={control.id} className="p-4 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center', status.bg)}>
+                        <StatusIcon size={18} className={status.color} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-sm text-muted-foreground">
+                            {control.control_id}
+                          </span>
+                          <span className="font-medium">{control.title}</span>
+                        </div>
+                        <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
+                          {control.owner && <span>Owner: {control.owner}</span>}
+                          {control.last_reviewed_at && (
+                            <>
+                              <span>•</span>
+                              <span>Last reviewed: {new Date(control.last_reviewed_at).toLocaleDateString()}</span>
+                            </>
+                          )}
+                          {control.evidence_links && control.evidence_links.length > 0 && (
+                            <>
+                              <span>•</span>
+                              <span>{control.evidence_links.length} evidence items</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-mono text-sm text-muted-foreground">
-                          {control.controlId}
-                        </span>
-                        <span className="font-medium">{control.title}</span>
-                      </div>
-                      <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-                        <span>Owner: {control.owner}</span>
-                        <span>•</span>
-                        <span>Last reviewed: {new Date(control.lastReviewed).toLocaleDateString()}</span>
-                        {control.evidence.length > 0 && (
-                          <>
-                            <span>•</span>
-                            <span>{control.evidence.length} evidence items</span>
-                          </>
-                        )}
-                      </div>
+                    <div className="flex items-center gap-2">
+                      <span className={cn('px-3 py-1 rounded-full text-xs', status.bg, status.color)}>
+                        {status.label}
+                      </span>
+                      <button className="p-2 hover:bg-accent rounded-md">
+                        <FileText size={14} />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className={cn('px-3 py-1 rounded-full text-xs', status.bg, status.color)}>
-                      {status.label}
-                    </span>
-                    <button className="p-2 hover:bg-accent rounded-md">
-                      <FileText size={14} />
-                    </button>
-                  </div>
-                </div>
-              )
-            })}
+                )
+              })
+            ) : (
+              <div className="text-center py-8 text-muted-foreground">
+                No controls found for this framework.
+              </div>
+            )}
           </div>
         </div>
       )}

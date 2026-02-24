@@ -121,6 +121,86 @@
       "mitre_tactic": "persistence",
       "confidence_score": 0.8,
       "rule_code": "def rule(event):\n    message = event.get('message', '').lower()\n    return (\n        'crontab' in message and\n        any(cmd in message for cmd in ['wget', 'curl', 'bash -c', '/dev/tcp', 'nc -e'])\n    )\n\ndef title(event):\n    host = event.get('hostname', 'unknown')\n    return f\"Suspicious cron job created on {host}\""
+    },
+    {
+      "id": "unifi-admin-login-failure",
+      "name": "UniFi Admin Login Failure",
+      "log_sources": ["UniFi"],
+      "description": "Detects failed administrator login attempts to UniFi devices",
+      "mitre_techniques": ["T1110", "T1078"],
+      "mitre_tactic": "credential-access",
+      "confidence_score": 0.9,
+      "rule_code": "def rule(event):\n    raw = event.get('raw_data', {})\n    event_type = raw.get('event_type', '')\n    action = str(raw.get('action', '')).lower()\n    return event_type == 'admin_login' and 'failed' in action\n\ndef title(event):\n    raw = event.get('raw_data', {})\n    syslog = raw.get('syslog', {})\n    src_ip = raw.get('src_ip', syslog.get('source_ip', 'unknown'))\n    hostname = syslog.get('hostname', 'unknown')\n    return f\"Failed admin login to {hostname} from {src_ip}\""
+    },
+    {
+      "id": "unifi-ids-alert",
+      "name": "UniFi IDS/IPS Alert",
+      "log_sources": ["UniFi"],
+      "description": "Detects intrusion detection alerts from UniFi Dream Machine or Security Gateway",
+      "mitre_techniques": ["T1190", "T1059"],
+      "mitre_tactic": "initial-access",
+      "confidence_score": 0.85,
+      "rule_code": "def rule(event):\n    raw = event.get('raw_data', {})\n    return raw.get('event_type') == 'ids_alert'\n\ndef title(event):\n    raw = event.get('raw_data', {})\n    signature = raw.get('signature', 'Unknown threat')\n    src_ip = raw.get('src_ip', 'unknown')\n    dst_ip = raw.get('dst_ip', 'unknown')\n    return f\"UniFi IDS Alert: {signature} ({src_ip} -> {dst_ip})\""
+    },
+    {
+      "id": "unifi-threat-detected",
+      "name": "UniFi Threat Detection",
+      "log_sources": ["UniFi"],
+      "description": "Detects threat management alerts including malware and botnet activity",
+      "mitre_techniques": ["T1071", "T1573"],
+      "mitre_tactic": "command-and-control",
+      "confidence_score": 0.95,
+      "rule_code": "def rule(event):\n    raw = event.get('raw_data', {})\n    return raw.get('event_type') == 'threat_detection'\n\ndef title(event):\n    raw = event.get('raw_data', {})\n    threat_type = raw.get('threat_type', 'Unknown')\n    src_ip = raw.get('src_ip', 'unknown')\n    return f\"UniFi Threat Detected: {threat_type} from {src_ip}\""
+    },
+    {
+      "id": "unifi-honeypot-hit",
+      "name": "UniFi Honeypot Activity",
+      "log_sources": ["UniFi"],
+      "description": "Detects connections to UniFi honeypot services indicating reconnaissance or attack attempts",
+      "mitre_techniques": ["T1046", "T1595"],
+      "mitre_tactic": "reconnaissance",
+      "confidence_score": 0.9,
+      "rule_code": "def rule(event):\n    raw = event.get('raw_data', {})\n    return raw.get('event_type') == 'honeypot'\n\ndef title(event):\n    raw = event.get('raw_data', {})\n    src_ip = raw.get('src_ip', 'unknown')\n    port = raw.get('port', 'unknown')\n    return f\"Honeypot hit from {src_ip} on port {port}\""
+    },
+    {
+      "id": "unifi-config-change",
+      "name": "UniFi Configuration Change",
+      "log_sources": ["UniFi"],
+      "description": "Detects configuration changes on UniFi network devices",
+      "mitre_techniques": ["T1562", "T1098"],
+      "mitre_tactic": "defense-evasion",
+      "confidence_score": 0.75,
+      "rule_code": "def rule(event):\n    raw = event.get('raw_data', {})\n    return raw.get('event_type') == 'config_change'\n\ndef title(event):\n    raw = event.get('raw_data', {})\n    syslog = raw.get('syslog', {})\n    action = raw.get('action', 'changed')\n    user = raw.get('user', 'unknown')\n    hostname = syslog.get('hostname', 'unknown')\n    return f\"UniFi config {action} on {hostname} by {user}\""
+    },
+    {
+      "id": "unifi-rogue-ap-detected",
+      "name": "UniFi Rogue Access Point",
+      "log_sources": ["UniFi"],
+      "description": "Detects rogue or unauthorized wireless access points on the network",
+      "mitre_techniques": ["T1557", "T1200"],
+      "mitre_tactic": "collection",
+      "confidence_score": 0.85,
+      "rule_code": "def rule(event):\n    raw = event.get('raw_data', {})\n    message = str(raw.get('message', '')).lower()\n    return 'rogue' in message and ('ap' in message or 'access point' in message)\n\ndef title(event):\n    raw = event.get('raw_data', {})\n    syslog = raw.get('syslog', {})\n    return f\"Rogue AP detected by {syslog.get('hostname', 'unknown')}\""
+    },
+    {
+      "id": "unifi-vpn-connection",
+      "name": "UniFi VPN Connection",
+      "log_sources": ["UniFi"],
+      "description": "Tracks VPN connections through UniFi devices for monitoring remote access",
+      "mitre_techniques": ["T1133", "T1573"],
+      "mitre_tactic": "command-and-control",
+      "confidence_score": 0.7,
+      "rule_code": "def rule(event):\n    raw = event.get('raw_data', {})\n    event_type = raw.get('event_type', '')\n    action = str(raw.get('action', '')).lower()\n    return event_type == 'vpn_event' and action in ['established', 'connected']\n\ndef title(event):\n    raw = event.get('raw_data', {})\n    syslog = raw.get('syslog', {})\n    peer = raw.get('peer', 'unknown')\n    hostname = syslog.get('hostname', 'unknown')\n    return f\"VPN connection established to {hostname} from {peer}\""
+    },
+    {
+      "id": "unifi-firewall-block-high-volume",
+      "name": "UniFi High Volume Firewall Blocks",
+      "log_sources": ["UniFi"],
+      "description": "Detects when a single source IP is blocked multiple times indicating potential scanning or attack",
+      "mitre_techniques": ["T1046", "T1595"],
+      "mitre_tactic": "reconnaissance",
+      "confidence_score": 0.8,
+      "rule_code": "def rule(event):\n    raw = event.get('raw_data', {})\n    return raw.get('event_type') == 'firewall_block'\n\ndef title(event):\n    raw = event.get('raw_data', {})\n    src_ip = raw.get('src_ip', 'unknown')\n    dst_port = raw.get('dst_port', 'unknown')\n    rule_name = raw.get('rule_name', 'unknown')\n    return f\"Firewall block: {src_ip} -> port {dst_port} ({rule_name})\""
     }
   ]
 }

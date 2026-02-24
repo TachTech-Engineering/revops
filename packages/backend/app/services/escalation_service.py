@@ -3,11 +3,15 @@ Escalation Service
 
 Handles automatic triggering and processing of escalation policies for alerts.
 """
+import hashlib
+import hmac
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -26,6 +30,15 @@ from app.services.fonoster import (
 from app.services.email_service import email_service
 
 logger = logging.getLogger(__name__)
+
+# Severity color mapping for Slack Block Kit
+SEVERITY_COLORS = {
+    "critical": "#dc2626",  # Red
+    "high": "#ea580c",      # Orange
+    "medium": "#ca8a04",    # Yellow
+    "low": "#16a34a",       # Green
+    "info": "#2563eb",      # Blue
+}
 
 
 class EscalationService:
@@ -178,6 +191,7 @@ class EscalationService:
                     escalation_id=str(escalation.id),
                     call_template=policy.call_message_template,
                     sms_template=policy.sms_message_template,
+                    policy=policy,
                 )
                 if result.get("success"):
                     success = True
@@ -220,6 +234,7 @@ class EscalationService:
         escalation_id: str = "",
         call_template: Optional[str] = None,
         sms_template: Optional[str] = None,
+        policy: Optional[EscalationPolicy] = None,
     ) -> Dict[str, Any]:
         """Send a notification based on type."""
         if notification_type == EscalationNotificationType.PHONE_CALL:
@@ -263,14 +278,31 @@ class EscalationService:
             )
 
         elif notification_type == EscalationNotificationType.SLACK:
-            # TODO: Implement Slack notification
-            logger.info(f"Would send Slack message to {target} for alert {alert_id}")
-            return {"success": True, "type": "slack", "target": target}
+            return await self._send_slack_notification(
+                webhook_url=target,
+                alert_id=alert_id,
+                alert_title=alert_title,
+                alert_severity=alert_severity,
+                alert_description=alert_description,
+                rule_name=rule_name,
+                alert_time=alert_time,
+                log_source=log_source,
+                escalation_id=escalation_id,
+            )
 
         elif notification_type == EscalationNotificationType.WEBHOOK:
-            # TODO: Implement webhook notification
-            logger.info(f"Would send webhook to {target} for alert {alert_id}")
-            return {"success": True, "type": "webhook", "target": target}
+            return await self._send_webhook_notification(
+                webhook_url=target,
+                alert_id=alert_id,
+                alert_title=alert_title,
+                alert_severity=alert_severity,
+                alert_description=alert_description,
+                rule_name=rule_name,
+                alert_time=alert_time,
+                log_source=log_source,
+                escalation_id=escalation_id,
+                policy=policy,
+            )
 
         else:
             logger.warning(f"Unknown notification type: {notification_type}")
@@ -382,6 +414,283 @@ Escalation ID: {escalation_id}
                 return {"success": False, "error": "Failed to send email"}
         except Exception as e:
             logger.error(f"Failed to send escalation email to {email_address}: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _send_slack_notification(
+        self,
+        webhook_url: str,
+        alert_id: str,
+        alert_title: str,
+        alert_severity: str,
+        alert_description: str = "",
+        rule_name: str = "",
+        alert_time: str = "",
+        log_source: str = "",
+        escalation_id: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Send Slack notification using Block Kit format.
+
+        Args:
+            webhook_url: Slack incoming webhook URL
+            alert_id: Alert identifier
+            alert_title: Alert title
+            alert_severity: Alert severity (critical, high, medium, low)
+            alert_description: Alert description
+            rule_name: Name of the detection rule
+            alert_time: When the alert occurred
+            log_source: Source of the alert
+            escalation_id: Escalation identifier
+
+        Returns:
+            Dict with success status and details
+        """
+        severity_color = SEVERITY_COLORS.get(alert_severity.lower(), "#6b7280")
+        severity_emoji = {
+            "critical": "🔴",
+            "high": "🟠",
+            "medium": "🟡",
+            "low": "🟢",
+            "info": "🔵",
+        }.get(alert_severity.lower(), "⚪")
+
+        # Build Slack Block Kit message
+        blocks = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": f"{severity_emoji} Alert Escalation",
+                    "emoji": True
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*{alert_title}*"
+                }
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Severity:*\n`{alert_severity.upper()}`"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Alert ID:*\n`{alert_id}`"
+                    }
+                ]
+            }
+        ]
+
+        # Add optional fields
+        optional_fields = []
+        if log_source:
+            optional_fields.append({
+                "type": "mrkdwn",
+                "text": f"*Source:*\n{log_source}"
+            })
+        if rule_name:
+            optional_fields.append({
+                "type": "mrkdwn",
+                "text": f"*Rule:*\n{rule_name}"
+            })
+        if alert_time:
+            optional_fields.append({
+                "type": "mrkdwn",
+                "text": f"*Time:*\n{alert_time}"
+            })
+
+        if optional_fields:
+            blocks.append({
+                "type": "section",
+                "fields": optional_fields[:2]  # Slack limits to 2 fields per section
+            })
+            if len(optional_fields) > 2:
+                blocks.append({
+                    "type": "section",
+                    "fields": optional_fields[2:]
+                })
+
+        # Add description if present
+        if alert_description:
+            blocks.append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Description:*\n{alert_description[:500]}{'...' if len(alert_description) > 500 else ''}"
+                }
+            })
+
+        # Add action buttons
+        blocks.append({
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "View Alert",
+                        "emoji": True
+                    },
+                    "style": "primary",
+                    "url": f"/alerts/{alert_id}"
+                },
+                {
+                    "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Acknowledge",
+                        "emoji": True
+                    },
+                    "value": f"ack_{escalation_id}"
+                }
+            ]
+        })
+
+        # Add footer with escalation ID
+        blocks.append({
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"Escalation ID: `{escalation_id}`"
+                }
+            ]
+        })
+
+        payload = {
+            "attachments": [
+                {
+                    "color": severity_color,
+                    "blocks": blocks
+                }
+            ]
+        }
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    webhook_url,
+                    json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=30.0,
+                )
+
+                if response.status_code == 200:
+                    logger.info(f"Sent Slack notification for alert {alert_id}")
+                    return {"success": True, "type": "slack", "target": webhook_url}
+                else:
+                    error_msg = f"Slack API returned status {response.status_code}: {response.text}"
+                    logger.error(error_msg)
+                    return {"success": False, "error": error_msg}
+
+        except Exception as e:
+            logger.error(f"Failed to send Slack notification: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _send_webhook_notification(
+        self,
+        webhook_url: str,
+        alert_id: str,
+        alert_title: str,
+        alert_severity: str,
+        alert_description: str = "",
+        rule_name: str = "",
+        alert_time: str = "",
+        log_source: str = "",
+        escalation_id: str = "",
+        policy: Optional[EscalationPolicy] = None,
+    ) -> Dict[str, Any]:
+        """
+        Send webhook notification with HMAC-SHA256 signing.
+
+        Args:
+            webhook_url: Target webhook URL
+            alert_id: Alert identifier
+            alert_title: Alert title
+            alert_severity: Alert severity
+            alert_description: Alert description
+            rule_name: Name of the detection rule
+            alert_time: When the alert occurred
+            log_source: Source of the alert
+            escalation_id: Escalation identifier
+            policy: EscalationPolicy for webhook configuration
+
+        Returns:
+            Dict with success status and details
+        """
+        # Build payload
+        payload = {
+            "event_type": "alert.escalation",
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "escalation_id": escalation_id,
+            "alert": {
+                "id": alert_id,
+                "title": alert_title,
+                "severity": alert_severity,
+                "description": alert_description,
+                "rule_name": rule_name,
+                "alert_time": alert_time,
+                "log_source": log_source,
+            }
+        }
+
+        payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+        # Build headers
+        headers = {
+            "Content-Type": "application/json",
+            "X-Event-Type": "alert.escalation",
+            "X-Timestamp": datetime.utcnow().isoformat() + "Z",
+        }
+
+        # Add custom headers from policy if available
+        if policy and policy.webhook_headers:
+            for key, value in policy.webhook_headers.items():
+                # Prevent overwriting security headers
+                if key.lower() not in ["x-signature-256", "content-type"]:
+                    headers[key] = value
+
+        # Generate HMAC-SHA256 signature if secret is configured
+        if policy and policy.webhook_secret:
+            signature = hmac.new(
+                policy.webhook_secret.encode("utf-8"),
+                payload_json.encode("utf-8"),
+                hashlib.sha256
+            ).hexdigest()
+            headers["X-Signature-256"] = f"sha256={signature}"
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    webhook_url,
+                    content=payload_json,
+                    headers=headers,
+                    timeout=30.0,
+                )
+
+                if response.status_code in (200, 201, 202, 204):
+                    logger.info(f"Sent webhook notification for alert {alert_id} to {webhook_url}")
+                    return {
+                        "success": True,
+                        "type": "webhook",
+                        "target": webhook_url,
+                        "status_code": response.status_code
+                    }
+                else:
+                    error_msg = f"Webhook returned status {response.status_code}: {response.text[:500]}"
+                    logger.error(error_msg)
+                    return {"success": False, "error": error_msg}
+
+        except httpx.TimeoutException:
+            logger.error(f"Webhook request timed out for {webhook_url}")
+            return {"success": False, "error": "Request timed out"}
+        except Exception as e:
+            logger.error(f"Failed to send webhook notification: {e}")
             return {"success": False, "error": str(e)}
 
     async def process_pending_escalations(self) -> int:
