@@ -11,4 +11,3 @@ resources:
   - redis-deployment.yaml
   - syslog-service.yaml
   - ingress.yaml
-  - syslog-service.yaml

@@ -7,18 +7,12 @@ resources:
   - ../../base
   - hpa.yaml
 
-patchesStrategicMerge:
-  - deployment-patch.yaml
-
-configMapGenerator:
-  - name: backend-config
-    behavior: merge
-    literals:
-      - LOG_LEVEL=INFO
-      - CORS_ORIGINS=https://panther-dashboard.example.com
+patches:
+  - path: frontend-patch.yaml
+  - path: backend-patch.yaml
 
 images:
   - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend
-    newTag: v1.0.0
+    newTag: latest
   - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend
-    newTag: v1.0.0
+    newTag: latest
