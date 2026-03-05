@@ -9,5 +9,6 @@ resources:
   - frontend-deployment.yaml
   - backend-deployment.yaml
   - redis-deployment.yaml
+  - syslog-service.yaml
   - ingress.yaml
   - syslog-service.yaml

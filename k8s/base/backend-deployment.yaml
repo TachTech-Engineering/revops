@@ -20,10 +20,13 @@ spec:
           image: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend:latest
           ports:
             - containerPort: 8000
+              name: http
             - containerPort: 5514
               protocol: UDP
+              name: syslog-udp
             - containerPort: 5514
               protocol: TCP
+              name: syslog-tcp
           envFrom:
             - configMapRef:
                 name: backend-config

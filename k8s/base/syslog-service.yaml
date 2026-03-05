@@ -1,16 +1,25 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: syslog-receiver
+  name: syslog-ingress
   namespace: revops
   labels:
     app: backend
+    component: syslog
+  annotations:
+    # GCP-specific annotations for UDP load balancer
+    cloud.google.com/l4-rbs: "enabled"
 spec:
+  type: LoadBalancer
   selector:
     app: backend
   ports:
-    - name: syslog-udp
-      port: 5514
+    - port: 5514
       targetPort: 5514
       protocol: UDP
-  type: LoadBalancer
+      name: syslog
+  # Session affinity to route logs from same source to same pod
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600
