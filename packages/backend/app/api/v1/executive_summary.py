@@ -25,6 +25,7 @@ from app.db.models import (
     ComplianceFramework,
     ComplianceControl,
     ComplianceStatus,
+    User,
 )
 from app.api.v1.deps import OrgUserDep, OrgIdDep
 
@@ -218,8 +219,8 @@ async def get_executive_metrics(
         select(func.count(NormalizedAlert.id)).where(
             and_(
                 NormalizedAlert.organization_id == org_id,
-                NormalizedAlert.created_at >= current_start,
-                NormalizedAlert.created_at <= current_end,
+                NormalizedAlert.created_at_source >= current_start,
+                NormalizedAlert.created_at_source <= current_end,
             )
         )
     )
@@ -230,8 +231,8 @@ async def get_executive_metrics(
         select(func.count(NormalizedAlert.id)).where(
             and_(
                 NormalizedAlert.organization_id == org_id,
-                NormalizedAlert.created_at >= prev_start,
-                NormalizedAlert.created_at <= prev_end,
+                NormalizedAlert.created_at_source >= prev_start,
+                NormalizedAlert.created_at_source <= prev_end,
             )
         )
     )
@@ -485,8 +486,8 @@ async def get_risk_areas(
         ).where(
             and_(
                 NormalizedAlert.organization_id == org_id,
-                NormalizedAlert.created_at >= current_start,
-                NormalizedAlert.created_at <= current_end,
+                NormalizedAlert.created_at_source >= current_start,
+                NormalizedAlert.created_at_source <= current_end,
             )
         ).group_by(NormalizedAlert.source_type)
         .order_by(func.count(NormalizedAlert.id).desc())
@@ -502,8 +503,8 @@ async def get_risk_areas(
         ).where(
             and_(
                 NormalizedAlert.organization_id == org_id,
-                NormalizedAlert.created_at >= prev_start,
-                NormalizedAlert.created_at <= prev_end,
+                NormalizedAlert.created_at_source >= prev_start,
+                NormalizedAlert.created_at_source <= prev_end,
             )
         ).group_by(NormalizedAlert.source_type)
     )
@@ -613,8 +614,8 @@ async def get_team_performance(
                 and_(
                     NormalizedAlert.organization_id == org_id,
                     NormalizedAlert.assigned_to == str(user.id),
-                    NormalizedAlert.created_at >= current_start,
-                    NormalizedAlert.created_at <= current_end,
+                    NormalizedAlert.created_at_source >= current_start,
+                    NormalizedAlert.created_at_source <= current_end,
                 )
             )
         )
