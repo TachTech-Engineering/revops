@@ -8,7 +8,7 @@ generating AI-powered hypotheses, and managing hunt results.
 import logging
 import os
 from datetime import datetime
-from typing import Optional, List
+from typing import Annotated, Optional, List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,16 +16,15 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db_session
+from app.db import get_db
 from app.db.models import (
     ThreatHunt,
     HuntQuery,
     HuntResult,
     HuntStatus,
     HuntResultStatus,
-    User,
 )
-from app.api.deps import get_current_user, get_current_organization_id
+from app.api.v1.deps import OrgUserDep, OrgIdDep
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/threat-hunting", tags=["threat-hunting"])
@@ -415,7 +414,7 @@ LIMIT 1000"""
 @router.post("/generate-hypothesis", response_model=GeneratedHypothesis)
 async def generate_hypothesis(
     request: HypothesisGenerationRequest,
-    current_user: User = Depends(get_current_user),
+    user: OrgUserDep,
 ):
     """
     Generate a threat hunting hypothesis from natural language description.
@@ -440,9 +439,9 @@ async def generate_hypothesis(
 @router.post("/hunts", response_model=HuntResponse)
 async def create_hunt(
     request: HuntCreate,
-    db: AsyncSession = Depends(get_db_session),
-    organization_id: UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: OrgIdDep,
+    user: OrgUserDep,
 ):
     """
     Create a new threat hunt.
@@ -451,7 +450,7 @@ async def create_hunt(
     """
     # Create the hunt
     hunt = ThreatHunt(
-        organization_id=organization_id,
+        organization_id=org_id,
         title=request.title,
         hypothesis=request.hypothesis,
         description=request.description,
@@ -459,7 +458,7 @@ async def create_hunt(
         data_sources=request.data_sources,
         status=HuntStatus.DRAFT,
         priority=request.priority,
-        created_by=current_user.username,
+        created_by=user.username,
         assigned_to=request.assigned_to,
         tags=request.tags,
     )
@@ -529,16 +528,16 @@ async def list_hunts(
     search: Optional[str] = Query(None, description="Search in title/hypothesis"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db_session),
-    organization_id: UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: OrgIdDep,
+    user: OrgUserDep,
 ):
     """
     List threat hunts with optional filtering.
     """
     # Build query
     query = select(ThreatHunt).where(
-        ThreatHunt.organization_id == organization_id
+        ThreatHunt.organization_id == org_id
     )
 
     if status:
@@ -627,9 +626,9 @@ async def list_hunts(
 @router.get("/hunts/{hunt_id}", response_model=HuntResponse)
 async def get_hunt(
     hunt_id: UUID,
-    db: AsyncSession = Depends(get_db_session),
-    organization_id: UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: OrgIdDep,
+    user: OrgUserDep,
 ):
     """
     Get a specific threat hunt by ID.
@@ -638,7 +637,7 @@ async def get_hunt(
         select(ThreatHunt).where(
             and_(
                 ThreatHunt.id == hunt_id,
-                ThreatHunt.organization_id == organization_id,
+                ThreatHunt.organization_id == org_id,
             )
         )
     )
@@ -694,9 +693,9 @@ async def get_hunt(
 async def update_hunt(
     hunt_id: UUID,
     request: HuntUpdate,
-    db: AsyncSession = Depends(get_db_session),
-    organization_id: UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: OrgIdDep,
+    user: OrgUserDep,
 ):
     """
     Update a threat hunt.
@@ -705,7 +704,7 @@ async def update_hunt(
         select(ThreatHunt).where(
             and_(
                 ThreatHunt.id == hunt_id,
-                ThreatHunt.organization_id == organization_id,
+                ThreatHunt.organization_id == org_id,
             )
         )
     )
@@ -797,9 +796,9 @@ async def update_hunt(
 async def add_query_to_hunt(
     hunt_id: UUID,
     request: HuntQueryCreate,
-    db: AsyncSession = Depends(get_db_session),
-    organization_id: UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: OrgIdDep,
+    user: OrgUserDep,
 ):
     """
     Add a query to an existing hunt.
@@ -809,7 +808,7 @@ async def add_query_to_hunt(
         select(ThreatHunt).where(
             and_(
                 ThreatHunt.id == hunt_id,
-                ThreatHunt.organization_id == organization_id,
+                ThreatHunt.organization_id == org_id,
             )
         )
     )
@@ -850,9 +849,9 @@ async def execute_hunt_query(
     hunt_id: UUID,
     query_id: UUID,
     request: QueryExecuteRequest,
-    db: AsyncSession = Depends(get_db_session),
-    organization_id: UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: OrgIdDep,
+    user: OrgUserDep,
 ):
     """
     Execute a hunt query and store the results.
@@ -865,7 +864,7 @@ async def execute_hunt_query(
         select(ThreatHunt).where(
             and_(
                 ThreatHunt.id == hunt_id,
-                ThreatHunt.organization_id == organization_id,
+                ThreatHunt.organization_id == org_id,
             )
         )
     )
@@ -889,11 +888,11 @@ async def execute_hunt_query(
 
     # Create result record
     result = HuntResult(
-        organization_id=organization_id,
+        organization_id=org_id,
         hunt_id=hunt_id,
         query_id=query_id,
         status=HuntResultStatus.RUNNING,
-        executed_by=current_user.username,
+        executed_by=user.username,
     )
     db.add(result)
     await db.flush()
@@ -914,18 +913,18 @@ async def execute_hunt_query(
         sql = query.sql_query
         if "WHERE" in sql.upper():
             # Inject org filter
-            sql = sql.replace("WHERE", f"WHERE organization_id = '{organization_id}' AND", 1)
+            sql = sql.replace("WHERE", f"WHERE organization_id = '{org_id}' AND", 1)
         else:
             # Add WHERE clause
             parts = sql.rsplit("ORDER BY", 1)
             if len(parts) == 2:
-                sql = f"{parts[0]} WHERE organization_id = '{organization_id}' ORDER BY {parts[1]}"
+                sql = f"{parts[0]} WHERE organization_id = '{org_id}' ORDER BY {parts[1]}"
             else:
                 parts = sql.rsplit("LIMIT", 1)
                 if len(parts) == 2:
-                    sql = f"{parts[0]} WHERE organization_id = '{organization_id}' LIMIT {parts[1]}"
+                    sql = f"{parts[0]} WHERE organization_id = '{org_id}' LIMIT {parts[1]}"
                 else:
-                    sql = f"{sql} WHERE organization_id = '{organization_id}'"
+                    sql = f"{sql} WHERE organization_id = '{org_id}'"
 
         # Add limit
         if "LIMIT" not in sql.upper():
@@ -986,9 +985,9 @@ async def execute_hunt_query(
 async def get_hunt_results(
     hunt_id: UUID,
     status: Optional[str] = Query(None, description="Filter by status"),
-    db: AsyncSession = Depends(get_db_session),
-    organization_id: UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: OrgIdDep,
+    user: OrgUserDep,
 ):
     """
     Get all results for a threat hunt.
@@ -998,7 +997,7 @@ async def get_hunt_results(
         select(ThreatHunt).where(
             and_(
                 ThreatHunt.id == hunt_id,
-                ThreatHunt.organization_id == organization_id,
+                ThreatHunt.organization_id == org_id,
             )
         )
     )
@@ -1053,9 +1052,9 @@ async def get_hunt_results(
 @router.delete("/hunts/{hunt_id}")
 async def delete_hunt(
     hunt_id: UUID,
-    db: AsyncSession = Depends(get_db_session),
-    organization_id: UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: OrgIdDep,
+    user: OrgUserDep,
 ):
     """
     Delete a threat hunt and all associated data.
@@ -1064,7 +1063,7 @@ async def delete_hunt(
         select(ThreatHunt).where(
             and_(
                 ThreatHunt.id == hunt_id,
-                ThreatHunt.organization_id == organization_id,
+                ThreatHunt.organization_id == org_id,
             )
         )
     )
