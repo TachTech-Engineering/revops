@@ -522,15 +522,15 @@ async def create_hunt(
 
 @router.get("/hunts", response_model=HuntListResponse)
 async def list_hunts(
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
     status: Optional[str] = Query(None, description="Filter by status"),
     priority: Optional[str] = Query(None, description="Filter by priority"),
     assigned_to: Optional[str] = Query(None, description="Filter by assignee"),
     search: Optional[str] = Query(None, description="Search in title/hypothesis"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    db: Annotated[AsyncSession, Depends(get_db)],
-    org_id: OrgIdDep,
-    user: OrgUserDep,
 ):
     """
     List threat hunts with optional filtering.
@@ -984,10 +984,10 @@ async def execute_hunt_query(
 @router.get("/hunts/{hunt_id}/results", response_model=List[HuntResultResponse])
 async def get_hunt_results(
     hunt_id: UUID,
-    status: Optional[str] = Query(None, description="Filter by status"),
-    db: Annotated[AsyncSession, Depends(get_db)],
-    org_id: OrgIdDep,
     user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    status: Optional[str] = Query(None, description="Filter by status"),
 ):
     """
     Get all results for a threat hunt.
