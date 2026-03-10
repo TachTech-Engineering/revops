@@ -56,6 +56,11 @@ from app.api.v1 import (
     presence,
     # Threat Hunting
     threat_hunting,
+    # Executive & Other
+    executive_summary,
+    feeds,
+    compliance,
+    iocs,
 )
 
 api_router = APIRouter()
@@ -120,3 +125,9 @@ api_router.include_router(presence.router, prefix="/presence", tags=["presence"]
 
 # Threat Hunting
 api_router.include_router(threat_hunting.router, tags=["threat-hunting"])
+
+# Executive & Other
+api_router.include_router(executive_summary.router, tags=["executive"])
+api_router.include_router(feeds.router, prefix="/feeds", tags=["feeds"])
+api_router.include_router(compliance.router, prefix="/compliance", tags=["compliance"])
+api_router.include_router(iocs.router, prefix="/iocs", tags=["iocs"])
