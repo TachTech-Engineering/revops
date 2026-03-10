@@ -8,7 +8,7 @@ for executive dashboards and reporting.
 import io
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Annotated, Optional, List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, func, and_, case, extract
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db_session
+from app.db import get_db
 from app.db.models import (
     NormalizedAlert,
     Incident,
@@ -25,9 +25,8 @@ from app.db.models import (
     ComplianceFramework,
     ComplianceControl,
     ComplianceStatus,
-    User,
 )
-from app.api.deps import get_current_user, get_current_organization_id
+from app.api.v1.deps import OrgUserDep, OrgIdDep
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/executive", tags=["executive"])
@@ -199,11 +198,11 @@ async def get_period_bounds(
 
 @router.get("/metrics", response_model=ExecutiveMetrics)
 async def get_executive_metrics(
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
     days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
     end_date: Optional[datetime] = Query(None, description="End date for analysis"),
-    db: AsyncSession = Depends(get_db_session),
-    organization_id: UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
 ):
     """
     Get high-level executive metrics including alerts, incidents, MTTR, and compliance.
@@ -218,7 +217,7 @@ async def get_executive_metrics(
     current_alerts = await db.execute(
         select(func.count(NormalizedAlert.id)).where(
             and_(
-                NormalizedAlert.organization_id == organization_id,
+                NormalizedAlert.organization_id == org_id,
                 NormalizedAlert.created_at >= current_start,
                 NormalizedAlert.created_at <= current_end,
             )
@@ -230,7 +229,7 @@ async def get_executive_metrics(
     prev_alerts = await db.execute(
         select(func.count(NormalizedAlert.id)).where(
             and_(
-                NormalizedAlert.organization_id == organization_id,
+                NormalizedAlert.organization_id == org_id,
                 NormalizedAlert.created_at >= prev_start,
                 NormalizedAlert.created_at <= prev_end,
             )
@@ -242,7 +241,7 @@ async def get_executive_metrics(
     current_critical = await db.execute(
         select(func.count(Incident.id)).where(
             and_(
-                Incident.organization_id == organization_id,
+                Incident.organization_id == org_id,
                 Incident.severity == IncidentSeverity.CRITICAL,
                 Incident.created_at >= current_start,
                 Incident.created_at <= current_end,
@@ -255,7 +254,7 @@ async def get_executive_metrics(
     prev_critical = await db.execute(
         select(func.count(Incident.id)).where(
             and_(
-                Incident.organization_id == organization_id,
+                Incident.organization_id == org_id,
                 Incident.severity == IncidentSeverity.CRITICAL,
                 Incident.created_at >= prev_start,
                 Incident.created_at <= prev_end,
@@ -274,7 +273,7 @@ async def get_executive_metrics(
             ) / 3600  # Convert to hours
         ).where(
             and_(
-                Incident.organization_id == organization_id,
+                Incident.organization_id == org_id,
                 Incident.status == IncidentStatus.RESOLVED,
                 Incident.resolved_at.isnot(None),
                 Incident.resolved_at >= current_start,
@@ -293,7 +292,7 @@ async def get_executive_metrics(
             ) / 3600
         ).where(
             and_(
-                Incident.organization_id == organization_id,
+                Incident.organization_id == org_id,
                 Incident.status == IncidentStatus.RESOLVED,
                 Incident.resolved_at.isnot(None),
                 Incident.resolved_at >= prev_start,
@@ -313,7 +312,7 @@ async def get_executive_metrics(
             ) / 3600
         ).where(
             and_(
-                Incident.organization_id == organization_id,
+                Incident.organization_id == org_id,
                 Incident.status != IncidentStatus.OPEN,
                 Incident.created_at >= current_start,
                 Incident.created_at <= current_end,
@@ -330,7 +329,7 @@ async def get_executive_metrics(
             ) / 3600
         ).where(
             and_(
-                Incident.organization_id == organization_id,
+                Incident.organization_id == org_id,
                 Incident.status != IncidentStatus.OPEN,
                 Incident.created_at >= prev_start,
                 Incident.created_at <= prev_end,
@@ -343,7 +342,7 @@ async def get_executive_metrics(
     open_incidents = await db.execute(
         select(func.count(Incident.id)).where(
             and_(
-                Incident.organization_id == organization_id,
+                Incident.organization_id == org_id,
                 Incident.status == IncidentStatus.OPEN,
             )
         )
@@ -354,7 +353,7 @@ async def get_executive_metrics(
     resolved_current = await db.execute(
         select(func.count(Incident.id)).where(
             and_(
-                Incident.organization_id == organization_id,
+                Incident.organization_id == org_id,
                 Incident.status == IncidentStatus.RESOLVED,
                 Incident.resolved_at >= current_start,
                 Incident.resolved_at <= current_end,
@@ -366,7 +365,7 @@ async def get_executive_metrics(
     resolved_prev = await db.execute(
         select(func.count(Incident.id)).where(
             and_(
-                Incident.organization_id == organization_id,
+                Incident.organization_id == org_id,
                 Incident.status == IncidentStatus.RESOLVED,
                 Incident.resolved_at >= prev_start,
                 Incident.resolved_at <= prev_end,
@@ -379,7 +378,7 @@ async def get_executive_metrics(
     false_positives = await db.execute(
         select(func.count(Incident.id)).where(
             and_(
-                Incident.organization_id == organization_id,
+                Incident.organization_id == org_id,
                 Incident.status == IncidentStatus.CLOSED,
                 Incident.resolution_reason == "false_positive",
                 Incident.updated_at >= current_start,
@@ -392,7 +391,7 @@ async def get_executive_metrics(
     total_closed = await db.execute(
         select(func.count(Incident.id)).where(
             and_(
-                Incident.organization_id == organization_id,
+                Incident.organization_id == org_id,
                 Incident.status.in_([IncidentStatus.CLOSED, IncidentStatus.RESOLVED]),
                 Incident.updated_at >= current_start,
                 Incident.updated_at <= current_end,
@@ -406,7 +405,7 @@ async def get_executive_metrics(
     prev_fp = await db.execute(
         select(func.count(Incident.id)).where(
             and_(
-                Incident.organization_id == organization_id,
+                Incident.organization_id == org_id,
                 Incident.status == IncidentStatus.CLOSED,
                 Incident.resolution_reason == "false_positive",
                 Incident.updated_at >= prev_start,
@@ -419,7 +418,7 @@ async def get_executive_metrics(
     prev_total_closed = await db.execute(
         select(func.count(Incident.id)).where(
             and_(
-                Incident.organization_id == organization_id,
+                Incident.organization_id == org_id,
                 Incident.status.in_([IncidentStatus.CLOSED, IncidentStatus.RESOLVED]),
                 Incident.updated_at >= prev_start,
                 Incident.updated_at <= prev_end,
@@ -433,7 +432,7 @@ async def get_executive_metrics(
     compliance_query = await db.execute(
         select(func.avg(ComplianceFramework.coverage_percentage)).where(
             and_(
-                ComplianceFramework.organization_id == organization_id,
+                ComplianceFramework.organization_id == org_id,
                 ComplianceFramework.is_active == True,
             )
         )
@@ -456,11 +455,11 @@ async def get_executive_metrics(
 
 @router.get("/risk-areas", response_model=RiskAreasResponse)
 async def get_risk_areas(
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
     days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
     limit: int = Query(10, ge=1, le=50, description="Number of risk areas to return"),
-    db: AsyncSession = Depends(get_db_session),
-    organization_id: UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
 ):
     """
     Get top risk areas based on alert/incident patterns.
@@ -485,7 +484,7 @@ async def get_risk_areas(
             ).label("severity_sum"),
         ).where(
             and_(
-                NormalizedAlert.organization_id == organization_id,
+                NormalizedAlert.organization_id == org_id,
                 NormalizedAlert.created_at >= current_start,
                 NormalizedAlert.created_at <= current_end,
             )
@@ -502,7 +501,7 @@ async def get_risk_areas(
             func.count(NormalizedAlert.id).label("alert_count"),
         ).where(
             and_(
-                NormalizedAlert.organization_id == organization_id,
+                NormalizedAlert.organization_id == org_id,
                 NormalizedAlert.created_at >= prev_start,
                 NormalizedAlert.created_at <= prev_end,
             )
@@ -532,7 +531,7 @@ async def get_risk_areas(
         incident_query = await db.execute(
             select(func.count(Incident.id)).where(
                 and_(
-                    Incident.organization_id == organization_id,
+                    Incident.organization_id == org_id,
                     Incident.tags.contains([f"source:{source_type}"]),
                     Incident.created_at >= current_start,
                     Incident.created_at <= current_end,
@@ -582,10 +581,10 @@ async def get_risk_areas(
 
 @router.get("/team-performance", response_model=TeamPerformanceResponse)
 async def get_team_performance(
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
     days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
-    db: AsyncSession = Depends(get_db_session),
-    organization_id: UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
 ):
     """
     Get team performance metrics for SOC analysts.
@@ -597,7 +596,7 @@ async def get_team_performance(
     # Get all users in the organization who have handled incidents
     users_query = await db.execute(
         select(User).where(
-            User.organization_id == organization_id
+            User.organization_id == org_id
         )
     )
     users = users_query.scalars().all()
@@ -612,7 +611,7 @@ async def get_team_performance(
         alerts_handled = await db.execute(
             select(func.count(NormalizedAlert.id)).where(
                 and_(
-                    NormalizedAlert.organization_id == organization_id,
+                    NormalizedAlert.organization_id == org_id,
                     NormalizedAlert.assigned_to == str(user.id),
                     NormalizedAlert.created_at >= current_start,
                     NormalizedAlert.created_at <= current_end,
@@ -628,7 +627,7 @@ async def get_team_performance(
         resolved_query = await db.execute(
             select(func.count(Incident.id)).where(
                 and_(
-                    Incident.organization_id == organization_id,
+                    Incident.organization_id == org_id,
                     Incident.resolved_by == str(user.id),
                     Incident.resolved_at >= current_start,
                     Incident.resolved_at <= current_end,
@@ -646,7 +645,7 @@ async def get_team_performance(
                 ) / 3600
             ).where(
                 and_(
-                    Incident.organization_id == organization_id,
+                    Incident.organization_id == org_id,
                     Incident.resolved_by == str(user.id),
                     Incident.resolved_at.isnot(None),
                     Incident.resolved_at >= current_start,
@@ -660,7 +659,7 @@ async def get_team_performance(
         escalated = await db.execute(
             select(func.count(Incident.id)).where(
                 and_(
-                    Incident.organization_id == organization_id,
+                    Incident.organization_id == org_id,
                     Incident.assigned_to == str(user.id),
                     Incident.tags.contains(["escalated"]),
                     Incident.created_at >= current_start,
@@ -673,7 +672,7 @@ async def get_team_performance(
         total_user_incidents = await db.execute(
             select(func.count(Incident.id)).where(
                 and_(
-                    Incident.organization_id == organization_id,
+                    Incident.organization_id == org_id,
                     Incident.assigned_to == str(user.id),
                     Incident.created_at >= current_start,
                     Incident.created_at <= current_end,
@@ -687,7 +686,7 @@ async def get_team_performance(
         fp_identified = await db.execute(
             select(func.count(Incident.id)).where(
                 and_(
-                    Incident.organization_id == organization_id,
+                    Incident.organization_id == org_id,
                     Incident.resolved_by == str(user.id),
                     Incident.resolution_reason == "false_positive",
                     Incident.resolved_at >= current_start,
@@ -733,10 +732,10 @@ async def get_team_performance(
 
 @router.get("/sla-compliance", response_model=SLAComplianceResponse)
 async def get_sla_compliance(
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
     days: int = Query(30, ge=1, le=365, description="Number of days to analyze"),
-    db: AsyncSession = Depends(get_db_session),
-    organization_id: UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
 ):
     """
     Get SLA compliance metrics.
@@ -794,7 +793,7 @@ async def get_sla_compliance(
                     ).label("breaches"),
                 ).where(
                     and_(
-                        Incident.organization_id == organization_id,
+                        Incident.organization_id == org_id,
                         Incident.severity == severity_enum,
                         Incident.status != IncidentStatus.OPEN,
                         Incident.created_at >= current_start,
@@ -823,7 +822,7 @@ async def get_sla_compliance(
                     ).label("breaches"),
                 ).where(
                     and_(
-                        Incident.organization_id == organization_id,
+                        Incident.organization_id == org_id,
                         Incident.severity == severity_enum,
                         Incident.status == IncidentStatus.RESOLVED,
                         Incident.resolved_at.isnot(None),
@@ -858,7 +857,7 @@ async def get_sla_compliance(
                     ).label("breaches"),
                 ).where(
                     and_(
-                        Incident.organization_id == organization_id,
+                        Incident.organization_id == org_id,
                         Incident.severity == severity_enum,
                         Incident.status != IncidentStatus.OPEN,
                         Incident.created_at >= prev_start,
@@ -882,7 +881,7 @@ async def get_sla_compliance(
                     ).label("breaches"),
                 ).where(
                     and_(
-                        Incident.organization_id == organization_id,
+                        Incident.organization_id == org_id,
                         Incident.severity == severity_enum,
                         Incident.status == IncidentStatus.RESOLVED,
                         Incident.resolved_at.isnot(None),
@@ -928,9 +927,9 @@ async def get_sla_compliance(
 @router.post("/export")
 async def export_executive_report(
     request: ExportRequest,
-    db: AsyncSession = Depends(get_db_session),
-    organization_id: UUID = Depends(get_current_organization_id),
-    current_user: User = Depends(get_current_user),
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: OrgIdDep,
+    user: OrgUserDep,
 ):
     """
     Export executive report as PDF or CSV.
@@ -944,7 +943,7 @@ async def export_executive_report(
         "generated_at": datetime.utcnow().isoformat(),
         "period_start": request.start_date.isoformat(),
         "period_end": request.end_date.isoformat(),
-        "generated_by": current_user.username,
+        "generated_by": user.username,
     }
 
     if request.include_metrics:
