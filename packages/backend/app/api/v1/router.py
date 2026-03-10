@@ -54,6 +54,8 @@ from app.api.v1 import (
     # SOC Collaboration Features
     shift_handoff,
     presence,
+    # Threat Hunting
+    threat_hunting,
 )
 
 api_router = APIRouter()
@@ -115,3 +117,6 @@ api_router.include_router(twilio_webhook.router, prefix="/twilio", tags=["twilio
 # SOC Collaboration Features
 api_router.include_router(shift_handoff.router, prefix="/shift-handoffs", tags=["shift-handoff"])
 api_router.include_router(presence.router, prefix="/presence", tags=["presence"])
+
+# Threat Hunting
+api_router.include_router(threat_hunting.router, tags=["threat-hunting"])
