@@ -48,7 +48,7 @@ export default function Dashboard() {
             <div>
               <p className="text-sm text-muted-foreground">Data Connectors</p>
               <p className="text-2xl font-bold">
-                {connectorsLoading ? '...' : connectorsData?.items?.filter(c => c.is_enabled).length || 0}
+                {connectorsLoading ? '...' : connectorsData?.total ?? 0}
               </p>
             </div>
           </div>
