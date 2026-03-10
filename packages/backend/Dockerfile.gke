@@ -2,13 +2,16 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Install git for cloning SDK
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
 # Copy and install requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy panther_sdk
-COPY panther_sdk /app/panther_sdk
-RUN pip install --no-cache-dir -e /app/panther_sdk
+# Clone and install panther_sdk from GitHub
+RUN git clone https://github.com/TachTech-Engineering/panther_sdk.git /app/panther_sdk && \
+    pip install --no-cache-dir -e /app/panther_sdk
 
 # Copy application
 COPY app ./app
