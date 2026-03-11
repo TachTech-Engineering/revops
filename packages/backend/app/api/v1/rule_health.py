@@ -3,17 +3,16 @@ Stale Rule Detection API - Feature 2
 Find rules that haven't triggered alerts and monitor rule health.
 """
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Annotated, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAdminDep
 from app.db import get_db, RuleHealth
-from fastapi import Depends
 
 router = APIRouter()
 
@@ -82,7 +81,7 @@ def serialize_rule_health(rh: RuleHealth) -> RuleHealthResponse:
 async def list_rule_health(
     user: OrgUserDep,
     org_id: OrgIdDep,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
     is_stale: Optional[bool] = Query(None, description="Filter by stale status"),
     severity: Optional[str] = Query(None, description="Filter by severity"),
     min_health_score: Optional[float] = Query(None, description="Minimum health score"),
@@ -132,7 +131,7 @@ async def list_rule_health(
 async def list_stale_rules(
     user: OrgUserDep,
     org_id: OrgIdDep,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
 ):
@@ -167,7 +166,7 @@ async def list_stale_rules(
 async def get_rule_health_stats(
     user: OrgUserDep,
     org_id: OrgIdDep,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get aggregated rule health statistics."""
     # Total rules
@@ -212,7 +211,7 @@ async def get_rule_health(
     rule_id: str,
     user: OrgUserDep,
     org_id: OrgIdDep,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get health status for a specific rule."""
     result = await db.execute(
@@ -232,7 +231,7 @@ async def get_rule_health(
 async def refresh_rule_health(
     user: OrgAdminDep,
     org_id: OrgIdDep,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Trigger a refresh of rule health data. In production, this would query alert data."""
     # This is a placeholder - in production, this would:
@@ -277,7 +276,7 @@ async def update_rule_health(
     request: UpdateRuleHealthRequest,
     user: OrgAdminDep,
     org_id: OrgIdDep,
-    db: AsyncSession = Depends(get_db),
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Update rule health metadata (owner, etc.)."""
     result = await db.execute(
