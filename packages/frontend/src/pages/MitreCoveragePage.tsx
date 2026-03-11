@@ -34,7 +34,8 @@ export default function MitreCoveragePage() {
   const { data: mappings, isLoading: mappingsLoading } = useGetMitreMappingsQuery({
     tactic: selectedTactic || undefined,
   })
-  const { data: rules } = useListRulesQuery({ pageSize: 1000 })
+  // Only fetch rules when the modal is open (requires Panther API credentials)
+  const { data: rules } = useListRulesQuery({ pageSize: 1000 }, { skip: !showCreateModal && !editingMapping })
   const [createMapping] = useCreateMitreMappingMutation()
   const [updateMapping] = useUpdateMitreMappingMutation()
   const [deleteMapping] = useDeleteMitreMappingMutation()
