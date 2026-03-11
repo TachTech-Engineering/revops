@@ -21,6 +21,40 @@ logging.getLogger("httpx").setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 
+async def register_syslog_handlers(syslog_receiver) -> None:
+    """Register syslog handlers for all syslog-type connectors in the database."""
+    from app.db.session import AsyncSessionLocal
+    from sqlalchemy import select
+    from app.db.models import Connector
+
+    SYSLOG_CONNECTOR_TYPES = ["unifi_syslog"]
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Connector).where(
+                    Connector.connector_type.in_(SYSLOG_CONNECTOR_TYPES),
+                    Connector.sync_enabled == True
+                )
+            )
+            connectors = result.scalars().all()
+
+            for connector in connectors:
+                source_ips = connector.config.get("source_ips", []) if connector.config else []
+                syslog_receiver.register_handler(
+                    connector_id=connector.id,
+                    callback=None,  # Use buffering
+                    source_ips=source_ips if source_ips else None,
+                    hostname_patterns=None,
+                    app_name_patterns=None,
+                )
+                logger.info(f"Registered syslog handler for connector {connector.name} ({connector.id})")
+
+            logger.info(f"Registered {len(connectors)} syslog handlers")
+    except Exception as e:
+        logger.error(f"Failed to register syslog handlers: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -38,6 +72,9 @@ async def lifespan(app: FastAPI):
     try:
         await syslog_receiver.start(udp_port=syslog_port, tcp_port=syslog_port)
         logger.info(f"Syslog receiver started on port {syslog_port}")
+
+        # Register handlers for all syslog-type connectors
+        await register_syslog_handlers(syslog_receiver)
     except Exception as e:
         logger.warning(f"Could not start syslog receiver: {e} (may require elevated privileges)")
 

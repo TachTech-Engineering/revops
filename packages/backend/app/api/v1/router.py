@@ -70,6 +70,8 @@ api_router.include_router(sso_config.router, prefix="/organizations/{organizatio
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
+# Note: rule_health must be registered BEFORE rules to avoid /{rule_id} catching /health
+api_router.include_router(rule_health.router, prefix="/rules/health", tags=["rule-health"])
 api_router.include_router(rules.router, prefix="/rules", tags=["rules"])
 api_router.include_router(converter.router, prefix="/converter", tags=["converter"])
 api_router.include_router(migrate.router, prefix="/migrate", tags=["migration"])
@@ -108,7 +110,6 @@ api_router.include_router(workflows.router, prefix="/workflows", tags=["workflow
 
 # New Features
 api_router.include_router(rule_versions.router, prefix="/rules", tags=["rule-versions"])
-api_router.include_router(rule_health.router, prefix="/rules/health", tags=["rule-health"])
 api_router.include_router(triage.router, prefix="/triage", tags=["triage"])
 api_router.include_router(nl_queries.router, prefix="/queries", tags=["nl-queries"])
 api_router.include_router(alert_clusters.router, prefix="/alert-clusters", tags=["alert-clusters"])

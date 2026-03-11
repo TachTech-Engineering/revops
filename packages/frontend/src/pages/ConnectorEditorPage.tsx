@@ -49,6 +49,9 @@ const dataSourceCategories: Record<string, string> = {
   cloudflare: 'Network',
   darktrace: 'Network',
   vectra: 'Network',
+  unifi: 'Network',
+  unifi_api: 'Network',
+  unifi_syslog: 'Network',
 }
 
 const categoryOrder = ['SIEM', 'EDR', 'XDR', 'Cloud Security', 'Identity', 'Email Security', 'Network', 'Other']
@@ -174,6 +177,16 @@ export default function ConnectorEditorPage() {
       required.forEach((field) => {
         if (!formData.credentials[field]) {
           newErrors[`credential_${field}`] = `${field} is required`
+        }
+      })
+    }
+
+    // Validate required config fields
+    if (selectedTypeInfo?.config_schema) {
+      const required = (selectedTypeInfo.config_schema as Record<string, unknown>).required as string[] || []
+      required.forEach((field) => {
+        if (!formData.config[field]) {
+          newErrors[`config_${field}`] = `${field} is required`
         }
       })
     }
@@ -474,6 +487,9 @@ export default function ConnectorEditorPage() {
             <div key={key}>
               <label className="block text-sm font-medium mb-1">
                 {(schema.title as string) || key}
+                {((selectedTypeInfo.config_schema as Record<string, unknown>).required as string[] || []).includes(key) && (
+                  <span className="text-destructive ml-1">*</span>
+                )}
               </label>
               {schema.type === 'boolean' ? (
                 <label className="flex items-center gap-2">
@@ -490,9 +506,15 @@ export default function ConnectorEditorPage() {
                   type="text"
                   value={String(formData.config[key] || '')}
                   onChange={(e) => handleConfigChange(key, e.target.value)}
-                  className="w-full px-3 py-2 rounded-md border bg-background"
+                  className={cn(
+                    'w-full px-3 py-2 rounded-md border bg-background',
+                    errors[`config_${key}`] && 'border-destructive'
+                  )}
                   placeholder={(schema.description as string) || ''}
                 />
+              )}
+              {errors[`config_${key}`] && (
+                <p className="text-sm text-destructive mt-1">{errors[`config_${key}`]}</p>
               )}
             </div>
           ))}

@@ -92,8 +92,8 @@ class UniFiAPIConnector(DataSourceConnector):
         return ConnectorMetadata(
             connector_type="unifi_api",
             category=ConnectorCategory.DATA_SOURCE,
-            display_name="UniFi Network",
-            description="Fetch security events from UniFi Network Controllers via API",
+            display_name="UniFi Network (API)",
+            description="Fetch security events from UniFi Network Controllers via REST API",
             icon="unifi",
             config_schema={
                 "type": "object",

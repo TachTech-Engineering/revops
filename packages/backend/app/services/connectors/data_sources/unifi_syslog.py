@@ -174,10 +174,10 @@ class UniFiSyslogConnector(DataSourceConnector):
     @classmethod
     def get_metadata(cls) -> ConnectorMetadata:
         return ConnectorMetadata(
-            connector_type="unifi",
+            connector_type="unifi_syslog",
             category=ConnectorCategory.DATA_SOURCE,
-            display_name="UniFi Network",
-            description="Ubiquiti UniFi - UDM, USG, UAP, USW devices via Network API",
+            display_name="UniFi Network (Syslog)",
+            description="Receive security events from UniFi devices via Syslog push",
             icon="ubiquiti",
             config_schema={
                 "type": "object",
@@ -257,6 +257,33 @@ class UniFiSyslogConnector(DataSourceConnector):
     def __init__(self, connector_id: uuid.UUID, config: dict[str, Any], credentials: dict[str, Any]):
         super().__init__(connector_id, config, credentials)
         self._http_client: Optional[httpx.AsyncClient] = None
+        self._handler_registered = False
+
+    def _register_syslog_handler(self) -> None:
+        """Register this connector with the syslog receiver."""
+        if self._handler_registered:
+            return
+
+        from app.services.syslog_receiver import get_syslog_receiver
+        import logging
+        logger = logging.getLogger(__name__)
+
+        syslog_receiver = get_syslog_receiver()
+
+        # Get source IPs from config if specified
+        source_ips = self.config.get("source_ips", [])
+
+        # Register handler - match all messages if no filters specified
+        # UniFi devices send CEF format or standard syslog
+        syslog_receiver.register_handler(
+            connector_id=self.connector_id,
+            callback=None,  # We use buffering, not callbacks
+            source_ips=source_ips if source_ips else None,
+            hostname_patterns=None,  # Accept all hostnames
+            app_name_patterns=None,  # Accept all app names
+        )
+        self._handler_registered = True
+        logger.info(f"Registered syslog handler for UniFi connector {self.connector_id}")
 
     def _get_base_url(self) -> str:
         """Get the UniFi controller base URL."""
@@ -282,84 +309,33 @@ class UniFiSyslogConnector(DataSourceConnector):
         return self._http_client
 
     async def test_connection(self) -> ConnectionTestResult:
-        """Test connection to UniFi Network API."""
-        start_time = time.time()
+        """Test that syslog receiver is ready for UniFi logs."""
         try:
-            base_url = self._get_base_url()
-            if not base_url:
-                return ConnectionTestResult(
-                    success=False,
-                    message="Controller URL is required",
-                )
+            from app.services.syslog_receiver import get_syslog_receiver
 
-            if not self.credentials.get("api_key"):
-                return ConnectionTestResult(
-                    success=False,
-                    message="API Key is required",
-                )
+            # Register handler if not already registered
+            self._register_syslog_handler()
 
-            client = await self._get_client()
+            syslog_receiver = get_syslog_receiver()
+            buffer_size = syslog_receiver.get_buffer_size(self.connector_id)
 
-            # Test API connection by listing sites
-            response = await client.get(f"{base_url}/proxy/network/integration/v1/sites")
-            latency_ms = int((time.time() - start_time) * 1000)
-
-            if response.status_code == 200:
-                data = response.json()
-                sites = data if isinstance(data, list) else [data]
-
-                # Try to get device count
-                site = self.config.get("site", "default")
-                device_count = 0
-                try:
-                    devices_resp = await client.get(
-                        f"{base_url}/proxy/network/api/s/{site}/stat/device"
-                    )
-                    if devices_resp.status_code == 200:
-                        devices_data = devices_resp.json()
-                        device_count = len(devices_data.get("data", []))
-                except Exception:
-                    pass
-
-                return ConnectionTestResult(
-                    success=True,
-                    message="Successfully connected to UniFi Network API",
-                    details={
-                        "sites_count": len(sites),
-                        "site_names": [s.get("name", s.get("desc", "unknown")) for s in sites[:5]],
-                        "device_count": device_count,
-                        "controller_url": base_url,
-                    },
-                    latency_ms=latency_ms,
-                )
-            elif response.status_code == 401:
-                return ConnectionTestResult(
-                    success=False,
-                    message="Authentication failed - check your API key",
-                    latency_ms=latency_ms,
-                )
-            elif response.status_code == 403:
-                return ConnectionTestResult(
-                    success=False,
-                    message="Access forbidden - API key may lack permissions",
-                    latency_ms=latency_ms,
-                )
-            else:
-                return ConnectionTestResult(
-                    success=False,
-                    message=f"API returned status {response.status_code}: {response.text[:200]}",
-                    latency_ms=latency_ms,
-                )
-
-        except httpx.ConnectError as e:
             return ConnectionTestResult(
-                success=False,
-                message=f"Cannot connect to UniFi controller: {str(e)}",
+                success=True,
+                message="Syslog receiver is ready. Configure your UniFi to send logs to this server.",
+                details={
+                    "mode": "syslog",
+                    "port": 5514,
+                    "protocol": "UDP",
+                    "buffered_messages": buffer_size,
+                    "instructions": "In UniFi: Settings → System → Remote Logging → Enter syslog server IP and port 5514",
+                },
+                latency_ms=0,
             )
+
         except Exception as e:
             return ConnectionTestResult(
                 success=False,
-                message=f"Connection error: {str(e)}",
+                message=f"Syslog receiver error: {str(e)}",
             )
 
     async def fetch_alerts(
@@ -368,85 +344,99 @@ class UniFiSyslogConnector(DataSourceConnector):
         limit: int = 100,
         cursor: Optional[str] = None,
     ) -> tuple[list[NormalizedAlert], Optional[str]]:
-        """Fetch events and alarms from UniFi Network API."""
+        """Fetch alerts from the syslog buffer."""
         try:
-            base_url = self._get_base_url()
-            site = self.config.get("site", "default")
-            client = await self._get_client()
+            from app.services.syslog_receiver import get_syslog_receiver
+            import logging
+            logger = logging.getLogger(__name__)
+
+            # Register handler if not already registered
+            self._register_syslog_handler()
+
+            syslog_receiver = get_syslog_receiver()
+            messages = syslog_receiver.get_buffered_messages(self.connector_id, limit)
+
+            logger.info(f"UniFi syslog: fetching from buffer, got {len(messages)} messages")
 
             normalized_alerts = []
+            for msg in messages:
+                # Filter by timestamp
+                if msg.timestamp < since:
+                    continue
 
-            # Calculate time range
-            # UniFi API uses millisecond timestamps
-            since_ms = int(since.timestamp() * 1000)
-            now_ms = int(datetime.utcnow().timestamp() * 1000)
+                # Parse and normalize the syslog message
+                alert = self._normalize_syslog_message(msg)
+                if alert:
+                    normalized_alerts.append(alert)
 
-            # Fetch events
-            events_url = f"{base_url}/proxy/network/api/s/{site}/stat/event"
-            try:
-                events_resp = await client.get(
-                    events_url,
-                    params={
-                        "start": since_ms,
-                        "end": now_ms,
-                        "_limit": limit,
-                    }
-                )
-                if events_resp.status_code == 200:
-                    events_data = events_resp.json()
-                    events = events_data.get("data", [])
-
-                    # Filter by event types if configured
-                    event_types = self.config.get("event_types", [])
-                    for event in events:
-                        if event_types and event.get("key") not in event_types:
-                            continue
-                        normalized = self._normalize_api_event(event)
-                        if normalized:
-                            normalized_alerts.append(normalized)
-            except Exception as e:
-                # Log but continue - try to get alarms
-                pass
-
-            # Fetch alarms if enabled
-            if self.config.get("include_alarms", True):
-                alarms_url = f"{base_url}/proxy/network/api/s/{site}/stat/alarm"
-                try:
-                    alarms_resp = await client.get(alarms_url)
-                    if alarms_resp.status_code == 200:
-                        alarms_data = alarms_resp.json()
-                        alarms = alarms_data.get("data", [])
-
-                        for alarm in alarms:
-                            # Filter by time
-                            alarm_time = alarm.get("time", alarm.get("datetime", 0))
-                            if isinstance(alarm_time, str):
-                                try:
-                                    alarm_dt = datetime.fromisoformat(alarm_time.replace("Z", "+00:00"))
-                                    if alarm_dt < since:
-                                        continue
-                                except ValueError:
-                                    pass
-                            elif alarm_time < since_ms:
-                                continue
-
-                            normalized = self._normalize_api_alarm(alarm)
-                            if normalized:
-                                normalized_alerts.append(normalized)
-                except Exception:
-                    pass
-
-            # Sort by timestamp
-            normalized_alerts.sort(key=lambda a: a.created_at_source or datetime.min)
-
-            # Apply limit
-            if len(normalized_alerts) > limit:
-                normalized_alerts = normalized_alerts[:limit]
+            logger.info(f"UniFi syslog: processed {len(normalized_alerts)} alerts from {len(messages)} messages")
 
             return normalized_alerts, None
 
         except Exception as e:
-            raise Exception(f"Failed to fetch UniFi alerts: {str(e)}")
+            import logging
+            logging.getLogger(__name__).exception(f"Failed to fetch UniFi syslog alerts: {e}")
+            raise Exception(f"Failed to fetch UniFi syslog alerts: {str(e)}")
+
+    def _normalize_syslog_message(self, msg) -> Optional[NormalizedAlert]:
+        """Normalize a syslog message to the unified alert schema."""
+        # Parse CEF format: CEF:0|Vendor|Product|Version|EventID|Name|Severity|Extensions
+        cef_pattern = re.compile(
+            r"CEF:(\d+)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)"
+        )
+
+        message = msg.message if hasattr(msg, 'message') else str(msg)
+        match = cef_pattern.search(message)
+
+        if match:
+            cef_version, vendor, product, version, event_id, name, severity, extensions = match.groups()
+            title = f"[{product}] {name}"
+            description = f"Event ID: {event_id}\nExtensions: {extensions}"
+        else:
+            # Non-CEF message
+            title = f"UniFi Event: {message[:100]}"
+            description = message
+            severity = "1"
+            event_id = "unknown"
+
+        # Map CEF severity (0-10) to our severity
+        try:
+            sev_num = int(severity)
+            if sev_num >= 7:
+                norm_severity = "critical"
+            elif sev_num >= 5:
+                norm_severity = "high"
+            elif sev_num >= 3:
+                norm_severity = "medium"
+            elif sev_num >= 1:
+                norm_severity = "low"
+            else:
+                norm_severity = "info"
+        except ValueError:
+            norm_severity = "info"
+
+        source_ip = msg.source_ip if hasattr(msg, 'source_ip') else "unknown"
+        timestamp = msg.timestamp if hasattr(msg, 'timestamp') else datetime.utcnow()
+
+        return NormalizedAlert(
+            id=uuid.uuid4(),
+            connector_id=self.connector_id,
+            source_type="unifi_syslog",
+            external_id=f"unifi-syslog-{timestamp.timestamp()}-{uuid.uuid4().hex[:8]}",
+            title=title[:500],
+            description=description[:2000] if description else None,
+            severity=norm_severity,
+            status="open",
+            created_at_source=timestamp,
+            updated_at_source=None,
+            rule_id=event_id,
+            rule_name=f"UniFi Syslog Event",
+            tags=[f"source:{source_ip}", "connector:unifi_syslog"],
+            mitre_tactics=[],
+            mitre_techniques=[],
+            raw_data={"raw_message": message, "source_ip": source_ip},
+            ingested_at=datetime.utcnow(),
+        )
 
     def _normalize_api_event(self, event: dict[str, Any]) -> Optional[NormalizedAlert]:
         """Normalize a UniFi API event to the unified schema."""
