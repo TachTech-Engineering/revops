@@ -365,7 +365,7 @@ export default function AISettingsPage() {
                 </div>
                 <div>
                   <h3 className="font-semibold">Anthropic</h3>
-                  <p className="text-sm text-muted-foreground">Claude 3 models</p>
+                  <p className="text-sm text-muted-foreground">Sonnet &amp; Opus models</p>
                 </div>
               </div>
               {orgAnthropic?.configured ? (
@@ -390,7 +390,7 @@ export default function AISettingsPage() {
             <div className="space-y-3 mb-4">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Model:</span>
-                <span>{orgAnthropic?.model || settings?.anthropic.model || 'claude-sonnet-4'}</span>
+                <span>{orgAnthropic?.model || settings?.anthropic.model || 'sonnet-4'}</span>
               </div>
               {orgAnthropic && (
                 <div className="flex justify-between text-sm">
@@ -431,12 +431,12 @@ export default function AISettingsPage() {
                   onChange={(e) => setAnthropicModel(e.target.value)}
                   className="w-full rounded-md border bg-background px-3 py-2 text-sm"
                 >
-                  <option value="">Use default (claude-sonnet-4)</option>
-                  <option value="claude-opus-4-5-20251101">Claude Opus 4.5 (Latest)</option>
-                  <option value="claude-sonnet-4-20250514">Claude Sonnet 4</option>
-                  <option value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</option>
-                  <option value="claude-3-opus-20240229">Claude 3 Opus</option>
-                  <option value="claude-3-haiku-20240307">Claude 3 Haiku</option>
+                  <option value="">Use default (Sonnet 4)</option>
+                  <option value="claude-opus-4-5-20251101">Opus 4.5 (Latest)</option>
+                  <option value="claude-sonnet-4-20250514">Sonnet 4</option>
+                  <option value="claude-3-5-sonnet-20241022">Sonnet 3.5</option>
+                  <option value="claude-3-opus-20240229">Opus 3</option>
+                  <option value="claude-3-haiku-20240307">Haiku 3</option>
                 </select>
               </div>
               <div className="flex gap-2">

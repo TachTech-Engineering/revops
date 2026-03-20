@@ -286,7 +286,7 @@ export default function MigrationPage() {
   const [useAI, setUseAI] = useState(false)
   const [aiAvailable, setAiAvailable] = useState(false)
   const [aiProviders, setAiProviders] = useState<Array<{ id: string; name: string; model: string; description: string }>>([])
-  const [selectedProvider, setSelectedProvider] = useState<string>('claude')
+  const [selectedProvider, setSelectedProvider] = useState<string>('anthropic')
   const [aiContext, setAiContext] = useState('')
   const [explanation, setExplanation] = useState('')
   const [suggestions, setSuggestions] = useState('')

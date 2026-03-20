@@ -1,6 +1,6 @@
 """AI-Assisted Detection Rule Converter using LLM APIs.
 
-Uses Claude or OpenAI to intelligently convert detection rules between SIEM formats,
+Uses Anthropic or OpenAI to intelligently convert detection rules between SIEM formats,
 understanding context, handling edge cases, and generating accurate code.
 """
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class LLMProvider(str, Enum):
     """Supported LLM providers."""
-    CLAUDE = "claude"
+    ANTHROPIC = "anthropic"
     OPENAI = "openai"
 
 
@@ -73,12 +73,12 @@ Field mapping hints:
 
 
 # Model configurations
-CLAUDE_MODEL = "claude-sonnet-4-20250514"
+ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
 OPENAI_MODEL = "gpt-4o"
 
 
 class AIConverterService:
-    """AI-powered detection rule converter using Claude or OpenAI."""
+    """AI-powered detection rule converter using Anthropic or OpenAI."""
 
     def __init__(self):
         self._anthropic_client = None
@@ -114,10 +114,10 @@ class AIConverterService:
         providers = []
         if getattr(settings, 'anthropic_api_key', None) or org_has_anthropic:
             providers.append({
-                "id": LLMProvider.CLAUDE.value,
-                "name": "Claude",
-                "model": CLAUDE_MODEL,
-                "description": "Claude Sonnet 4 - excellent at code generation",
+                "id": LLMProvider.ANTHROPIC.value,
+                "name": "Anthropic",
+                "model": ANTHROPIC_MODEL,
+                "description": "Anthropic Sonnet 4 - excellent at code generation",
             })
         if getattr(settings, 'openai_api_key', None) or org_has_openai:
             providers.append({
@@ -154,7 +154,7 @@ class AIConverterService:
             dict with 'content' and 'model' keys if messages provided,
             otherwise returns just the content string for backward compatibility
         """
-        if provider == LLMProvider.CLAUDE:
+        if provider == LLMProvider.ANTHROPIC:
             import anthropic
             try:
                 # Use provided API key or fall back to cached client
@@ -163,7 +163,7 @@ class AIConverterService:
                 else:
                     client = self._get_anthropic_client()
 
-                model = model_override or CLAUDE_MODEL
+                model = model_override or ANTHROPIC_MODEL
 
                 # Build messages list
                 if messages:
@@ -233,7 +233,7 @@ class AIConverterService:
         source_format: ConversionFormat,
         target_format: ConversionFormat,
         context: Optional[str] = None,
-        provider: LLMProvider = LLMProvider.CLAUDE,
+        provider: LLMProvider = LLMProvider.ANTHROPIC,
         api_key: Optional[str] = None,
         model_override: Optional[str] = None,
     ) -> dict:
@@ -245,7 +245,7 @@ class AIConverterService:
             source_format: Source SIEM format
             target_format: Target SIEM format
             context: Optional additional context about the rule
-            provider: LLM provider to use (claude or openai)
+            provider: LLM provider to use (anthropic or openai)
             api_key: Optional API key (uses org key if provided)
             model_override: Optional model to use instead of default
 
@@ -259,7 +259,7 @@ class AIConverterService:
             source_code, source_format, target_format, source_desc, target_desc, context
         )
 
-        model = model_override or (CLAUDE_MODEL if provider == LLMProvider.CLAUDE else OPENAI_MODEL)
+        model = model_override or (ANTHROPIC_MODEL if provider == LLMProvider.ANTHROPIC else OPENAI_MODEL)
 
         try:
             converted_code = self._call_llm(
@@ -388,7 +388,7 @@ class AIConverterService:
         self,
         source_code: str,
         source_format: ConversionFormat,
-        provider: LLMProvider = LLMProvider.CLAUDE,
+        provider: LLMProvider = LLMProvider.ANTHROPIC,
         api_key: Optional[str] = None,
         model_override: Optional[str] = None,
     ) -> dict:
@@ -410,7 +410,7 @@ Include:
 
 Provide a concise but complete explanation."""
 
-        model = model_override or (CLAUDE_MODEL if provider == LLMProvider.CLAUDE else OPENAI_MODEL)
+        model = model_override or (ANTHROPIC_MODEL if provider == LLMProvider.ANTHROPIC else OPENAI_MODEL)
 
         try:
             explanation = self._call_llm(
@@ -441,7 +441,7 @@ Provide a concise but complete explanation."""
         self,
         source_code: str,
         source_format: ConversionFormat,
-        provider: LLMProvider = LLMProvider.CLAUDE,
+        provider: LLMProvider = LLMProvider.ANTHROPIC,
         api_key: Optional[str] = None,
         model_override: Optional[str] = None,
     ) -> dict:
@@ -464,7 +464,7 @@ Provide suggestions for:
 
 Be specific and actionable."""
 
-        model = model_override or (CLAUDE_MODEL if provider == LLMProvider.CLAUDE else OPENAI_MODEL)
+        model = model_override or (ANTHROPIC_MODEL if provider == LLMProvider.ANTHROPIC else OPENAI_MODEL)
 
         try:
             suggestions = self._call_llm(

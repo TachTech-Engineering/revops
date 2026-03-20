@@ -108,7 +108,7 @@ flowchart TB
     NotificationSvc -->|"Email"| SMTP
     NotificationSvc -->|"Messages"| Slack
     NotificationSvc -->|"Messages"| Teams
-    AIService -->|"GPT/Claude"| LLM
+    AIService -->|"LLM API"| LLM
     ThreatIntelSvc --> ThreatFeeds
 
     WorkflowEngine -->|"Actions"| Ticketing

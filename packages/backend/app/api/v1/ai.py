@@ -84,7 +84,7 @@ class AIConvertRequest(BaseModel):
     source_format: str  # spl, yaral, sigma, kql, etc.
     target_format: str = "panther"  # Default to Panther
     context: Optional[str] = None
-    provider: Optional[str] = None  # claude, openai
+    provider: Optional[str] = None  # anthropic, openai
 
 
 class AIConvertResponse(BaseModel):
@@ -694,7 +694,7 @@ async def ai_convert_rule(
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid provider: {request.provider}. Use 'claude' or 'openai'."
+                detail=f"Invalid provider: {request.provider}. Use 'anthropic' or 'openai'."
             )
 
     # Get organization's API key for this provider
@@ -760,7 +760,7 @@ async def ai_explain_rule(
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid provider: {request.provider}. Use 'claude' or 'openai'."
+                detail=f"Invalid provider: {request.provider}. Use 'anthropic' or 'openai'."
             )
 
     # Get organization's API key for this provider
@@ -824,7 +824,7 @@ async def ai_enhance_rule(
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid provider: {request.provider}. Use 'claude' or 'openai'."
+                detail=f"Invalid provider: {request.provider}. Use 'anthropic' or 'openai'."
             )
 
     # Get organization's API key for this provider
@@ -1231,7 +1231,7 @@ async def ai_chat(
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid provider: {request.provider}. Use 'claude' or 'openai'."
+                detail=f"Invalid provider: {request.provider}. Use 'anthropic' or 'openai'."
             )
 
     # Get organization's API key for this provider

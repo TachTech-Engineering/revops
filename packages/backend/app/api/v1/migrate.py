@@ -80,7 +80,7 @@ class AIConvertRequest(BaseModel):
     target_format: str
     source_code: str
     context: Optional[str] = None
-    provider: Optional[str] = "claude"  # claude or openai
+    provider: Optional[str] = "anthropic"  # anthropic or openai
 
 
 class AIConvertResponse(BaseModel):
@@ -96,13 +96,13 @@ class AIConvertResponse(BaseModel):
 class ExplainRequest(BaseModel):
     source_format: str
     source_code: str
-    provider: Optional[str] = "claude"
+    provider: Optional[str] = "anthropic"
 
 
 class SuggestRequest(BaseModel):
     source_format: str
     source_code: str
-    provider: Optional[str] = "claude"
+    provider: Optional[str] = "anthropic"
 
 
 class AIBulkConvertRequest(BaseModel):
@@ -110,7 +110,7 @@ class AIBulkConvertRequest(BaseModel):
     target_format: str
     rules: list[str]
     context: Optional[str] = None
-    provider: Optional[str] = "claude"
+    provider: Optional[str] = "anthropic"
 
 
 class AIBulkConvertResponse(BaseModel):
@@ -406,7 +406,7 @@ async def ai_convert_rule(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Convert a detection rule using AI (Claude or OpenAI).
+    Convert a detection rule using AI (Anthropic or OpenAI).
 
     Uses LLM to intelligently convert detection rules, handling
     edge cases, aggregations, and complex logic that rule-based
@@ -420,7 +420,7 @@ async def ai_convert_rule(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid provider: {request.provider}. Supported: claude, openai"
+            detail=f"Invalid provider: {request.provider}. Supported: anthropic, openai"
         )
 
     # Try to get organization API key
@@ -430,7 +430,7 @@ async def ai_convert_rule(
     if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Claude not available - no API key configured"
+            detail="Anthropic not available - no API key configured"
         )
     if provider == LLMProvider.OPENAI and not settings.openai_api_key and not org_api_key:
         raise HTTPException(
@@ -476,7 +476,7 @@ async def ai_convert_rule(
 @router.post("/convert/ai/bulk", response_model=AIBulkConvertResponse)
 async def ai_bulk_convert_rules(request: AIBulkConvertRequest):
     """
-    Convert multiple detection rules using AI (Claude or OpenAI).
+    Convert multiple detection rules using AI (Anthropic or OpenAI).
 
     Processes each rule through the AI converter for intelligent handling
     of edge cases, aggregations, and complex logic.
@@ -489,14 +489,14 @@ async def ai_bulk_convert_rules(request: AIBulkConvertRequest):
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid provider: {request.provider}. Supported: claude, openai"
+            detail=f"Invalid provider: {request.provider}. Supported: anthropic, openai"
         )
 
     # Check if selected provider is available
     if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Claude not available - ANTHROPIC_API_KEY not configured"
+            detail="Anthropic not available - ANTHROPIC_API_KEY not configured"
         )
     if provider == LLMProvider.OPENAI and not settings.openai_api_key:
         raise HTTPException(
@@ -584,7 +584,7 @@ async def explain_rule(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid provider: {request.provider}. Supported: claude, openai"
+            detail=f"Invalid provider: {request.provider}. Supported: anthropic, openai"
         )
 
     # Get org API key
@@ -594,7 +594,7 @@ async def explain_rule(
     if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Claude not available - no API key configured"
+            detail="Anthropic not available - no API key configured"
         )
     if provider == LLMProvider.OPENAI and not settings.openai_api_key and not org_api_key:
         raise HTTPException(
@@ -655,7 +655,7 @@ async def suggest_improvements(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid provider: {request.provider}. Supported: claude, openai"
+            detail=f"Invalid provider: {request.provider}. Supported: anthropic, openai"
         )
 
     # Get org API key
@@ -665,7 +665,7 @@ async def suggest_improvements(
     if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Claude not available - no API key configured"
+            detail="Anthropic not available - no API key configured"
         )
     if provider == LLMProvider.OPENAI and not settings.openai_api_key and not org_api_key:
         raise HTTPException(

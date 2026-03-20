@@ -108,7 +108,7 @@ def validate_sql_safety(sql: str, org_id: UUID) -> Tuple[bool, str]:
 
 async def translate_nl_to_sql_llm(natural_query: str, org_id: UUID) -> Tuple[str, str]:
     """
-    Translate natural language to SQL using Anthropic Claude.
+    Translate natural language to SQL using Anthropic API.
 
     Args:
         natural_query: Natural language query from user

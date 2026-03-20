@@ -1,18 +1,84 @@
-# Panther Dashboard
+# RevOps - Security Operations Platform
 
-A full-stack web dashboard for the Panther SDK, featuring alert management, SPL-to-Panther rule conversion, and a rule editor with Monaco.
+A comprehensive Security Operations Center (SOC) platform that unifies alert management, detection engineering, threat intelligence, and incident response across multiple security tools. Built on top of the Panther SDK with support for multi-vendor data source integrations.
 
-## Features
+## Overview
 
-- **Alert Dashboard** - View, filter, triage, and respond to security alerts
-- **Rule Editor** - Create and edit detection rules with Monaco code editor
-- **SPL Converter** - Convert Splunk SPL queries to Panther Python rules
+RevOps provides a unified interface for SOC teams to manage security operations across their entire security stack. It aggregates alerts from SIEM, EDR, XDR, cloud security, and identity platforms into a single pane of glass with AI-powered alert clustering, natural language querying, and automated response capabilities.
+
+## Key Features
+
+### Alert Management & Triage
+- **Unified Alerts View** - Aggregate alerts from multiple security tools (Panther, CrowdStrike, SentinelOne, Microsoft Defender, AWS Security Hub, etc.)
+- **AI-Powered Alert Clustering** - Automatically group related alerts to reduce noise and identify attack patterns
+- **Smart Triage** - Bulk actions, severity adjustment, and assignment workflows
+- **Natural Language Queries** - Search alerts and investigate using plain English
+
+### Detection Engineering
+- **Rule Editor** - Create and edit Panther detection rules with Monaco code editor
+- **SPL-to-Panther Converter** - Migrate Splunk SPL queries to Panther Python rules
+- **Rule Health Dashboard** - Monitor detection performance, false positive rates, and coverage gaps
+- **Rule Versioning** - Track changes and rollback to previous versions
+- **Correlation Rules** - Define multi-event detection logic
+- **Suppression Rules** - Reduce noise from known benign activity
+
+### Incident Response
+- **Case Management** - Create, assign, and track security investigations
+- **Incident Tracking** - Link related alerts and evidence to incidents
+- **Playbooks** - Automated and guided response workflows
+- **Workflow Automation** - Visual workflow builder for automated actions
+
+### Threat Intelligence
+- **Threat Intel Feeds** - Ingest and correlate IOCs from multiple sources
+- **IOC Search** - Query indicators across your environment
+- **Threat Hunting** - Proactive search interface with saved queries
+- **MITRE ATT&CK Coverage** - Visualize detection coverage against the ATT&CK framework
+- **Attack Simulation** - Test detection coverage with simulated attacks
+
+### Data Source Connectors
+Supported integrations organized by category:
+
+| Category | Connectors |
+|----------|------------|
+| **SIEM** | Panther, Google SecOps, Splunk, Microsoft Sentinel, Elastic, Sumo Logic |
+| **EDR/XDR** | CrowdStrike Falcon, SentinelOne, Microsoft Defender XDR, Carbon Black |
+| **Cloud Security** | AWS Security Hub, AWS GuardDuty, GCP Security Command Center, Azure Defender, Wiz |
+| **Identity** | Okta, Microsoft Entra ID, CrowdStrike Identity Protection |
+| **Network** | Cloudflare, UniFi Network |
+
+### Analytics & Reporting
+- **Executive Summary** - High-level security posture overview for leadership
+- **Analytics Dashboard** - Trend analysis and operational metrics
+- **Compliance Dashboard** - Track compliance status across frameworks
+- **SLA Dashboard** - Monitor response time SLAs and policy compliance
+- **Custom Dashboards** - Build personalized views with drag-and-drop widgets
+- **Report Builder** - Generate scheduled or on-demand reports
+- **Query Explorer** - Ad-hoc data exploration with SQL and natural language
+
+### Operations Management
+- **On-Call Schedules** - Manage analyst rotation schedules
+- **Escalation Policies** - Define escalation paths and timeouts
+- **Shift Handoff** - Document and transfer context between shifts
+- **Real-time Presence** - See who's online and working
+
+### Integrations
+- **Ticketing** - Jira, ServiceNow
+- **Alerting** - PagerDuty, OpsGenie, Slack, Microsoft Teams, Email
+- **Telephony** - Twilio/Fonoster for voice escalations
+- **Webhooks** - Custom integrations via webhooks
+- **SSO/SAML** - Enterprise single sign-on support
+
+### Data Pipeline
+- **Enrichment Pipelines** - Automatically enrich alerts with context
+- **Data Pipelines** - Transform and route data between systems
+- **Asset Criticality** - Define business criticality for assets
 
 ## Tech Stack
 
-- **Frontend**: React + TypeScript, Vite, Redux Toolkit, Tailwind CSS, Monaco Editor
-- **Backend**: Python FastAPI, Panther SDK
-- **Deployment**: Google Kubernetes Engine (GKE)
+- **Frontend**: React 18, TypeScript, Vite, Redux Toolkit, Tailwind CSS, Monaco Editor, ReactFlow
+- **Backend**: Python 3.11+, FastAPI, SQLAlchemy, PostgreSQL, Redis
+- **Infrastructure**: Docker, Kubernetes, GCP (Cloud Run/GKE, Cloud SQL, Memorystore)
+- **CI/CD**: Google Cloud Build
 
 ## Prerequisites
 
@@ -26,27 +92,34 @@ A full-stack web dashboard for the Panther SDK, featuring alert management, SPL-
 ### 1. Clone and Setup
 
 ```bash
-cd C:/Source/panther-dashboard
+git clone https://github.com/TachTech-Engineering/revops.git
+cd revops
 cp .env.example .env
 ```
 
-Edit `.env` with your Panther credentials:
-
-```
-PANTHER_API_HOST=your-instance.runpanther.net
-PANTHER_API_TOKEN=your-api-token
-SECRET_KEY=your-secret-key
-```
-
-### 2. Local Development with Docker
+Edit `.env` with your credentials:
 
 ```bash
-# Start all services
-docker-compose -f docker-compose.dev.yml up --build
+# Required
+PANTHER_API_HOST=your-instance.runpanther.net
+PANTHER_API_TOKEN=your-api-token
+SECRET_KEY=your-secret-key-for-jwt
 
-# Frontend: http://localhost:3000
+# Optional - for telephony integration
+TWILIO_ACCOUNT_SID=your-twilio-sid
+TWILIO_AUTH_TOKEN=your-twilio-token
+TWILIO_PHONE_NUMBER=+1234567890
+```
+
+### 2. Start with Docker Compose
+
+```bash
+# Start all services (frontend, backend, postgres, redis)
+docker-compose up --build
+
+# Frontend:    http://localhost:3000
 # Backend API: http://localhost:8000
-# API Docs: http://localhost:8000/api/v1/docs
+# API Docs:    http://localhost:8000/api/v1/docs
 ```
 
 ### 3. Manual Development Setup
@@ -62,103 +135,75 @@ pnpm dev
 ```bash
 cd packages/backend
 python -m venv venv
-venv\Scripts\activate  # Windows
+source venv/bin/activate  # Linux/Mac
+# venv\Scripts\activate   # Windows
 pip install -r requirements.txt
-pip install -e C:/Source/panther-sdk  # Install SDK locally
 uvicorn app.main:app --reload
 ```
 
 ## Project Structure
 
 ```
-panther-dashboard/
+revops/
 ├── packages/
-│   ├── frontend/          # React TypeScript app
+│   ├── frontend/              # React TypeScript application
 │   │   ├── src/
-│   │   │   ├── api/       # RTK Query API
-│   │   │   ├── components/
-│   │   │   ├── pages/
-│   │   │   ├── store/     # Redux store
-│   │   │   └── types/
+│   │   │   ├── api/           # RTK Query API definitions
+│   │   │   ├── components/    # Reusable UI components
+│   │   │   ├── pages/         # Page components
+│   │   │   ├── store/         # Redux store configuration
+│   │   │   ├── hooks/         # Custom React hooks
+│   │   │   └── types/         # TypeScript type definitions
 │   │   └── Dockerfile
-│   └── backend/           # FastAPI app
+│   └── backend/               # FastAPI Python application
 │       ├── app/
-│       │   ├── api/v1/    # REST endpoints
-│       │   ├── services/  # SDK wrappers
-│       │   └── config.py
+│       │   ├── api/v1/        # REST API endpoints
+│       │   ├── services/      # Business logic & external integrations
+│       │   ├── db/            # Database models & migrations
+│       │   ├── jobs/          # Background tasks (APScheduler)
+│       │   └── lib/           # Shared utilities
+│       ├── panther_sdk/       # Panther SDK integration
 │       └── Dockerfile
-├── k8s/                   # Kubernetes manifests
-│   ├── base/
-│   └── overlays/
+├── k8s/                       # Kubernetes manifests
+│   ├── base/                  # Base configurations
+│   └── overlays/              # Environment-specific patches
+│       ├── staging/
+│       └── production/
+├── scripts/                   # Utility scripts
 └── docker-compose.yml
 ```
 
-## API Endpoints
+## Deployment
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/alerts` | List alerts |
-| GET | `/api/v1/alerts/{id}` | Get alert |
-| PATCH | `/api/v1/alerts/{id}` | Update alert |
-| GET | `/api/v1/rules` | List rules |
-| POST | `/api/v1/rules` | Create rule |
-| PATCH | `/api/v1/rules/{id}` | Update rule |
-| DELETE | `/api/v1/rules/{id}` | Delete rule |
-| POST | `/api/v1/converter/convert` | Convert SPL |
-
-## GKE Deployment
-
-### 1. Setup GCP
+### GKE Deployment
 
 ```bash
-# Create GKE cluster
-gcloud container clusters create panther-dashboard-cluster \
-  --zone us-central1-a \
-  --num-nodes 3
+# Build and push images
+gcloud builds submit --config=cloudbuild-frontend.yaml
+gcloud builds submit --config=cloudbuild-backend.yaml
 
-# Reserve static IP
-gcloud compute addresses create panther-dashboard-ip --global
-
-# Create secrets in Secret Manager
-gcloud secrets create panther-api-token --data-file=- <<< "your-token"
-gcloud secrets create jwt-secret-key --data-file=- <<< "your-secret"
-```
-
-### 2. Build and Push Images
-
-```bash
-# Configure Docker for GCR
-gcloud auth configure-docker
-
-# Build and push
-docker build -t gcr.io/PROJECT_ID/panther-dashboard-frontend packages/frontend
-docker build -t gcr.io/PROJECT_ID/panther-dashboard-backend packages/backend
-docker push gcr.io/PROJECT_ID/panther-dashboard-frontend
-docker push gcr.io/PROJECT_ID/panther-dashboard-backend
-```
-
-### 3. Deploy
-
-```bash
-# Staging
+# Deploy to staging
 kubectl apply -k k8s/overlays/staging
 
-# Production
+# Deploy to production
 kubectl apply -k k8s/overlays/production
 ```
+
+See [ARCHITECTURE-GCP.md](./ARCHITECTURE-GCP.md) for detailed GCP deployment architecture.
 
 ## Development
 
 ### Running Tests
 
 ```bash
-# Frontend
-cd packages/frontend
+# All tests
 pnpm test
 
-# Backend
-cd packages/backend
-pytest
+# Frontend only
+pnpm --filter frontend test
+
+# Backend only
+cd packages/backend && pytest
 ```
 
 ### Linting
@@ -168,10 +213,25 @@ pytest
 pnpm lint
 
 # Backend
+cd packages/backend
 ruff check .
 mypy app
 ```
 
+## Security
+
+- Never commit `.env` files or credentials to the repository
+- Use environment variables or secret managers for sensitive configuration
+- See `.env.example` for required environment variables
+
 ## License
 
 MIT
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request

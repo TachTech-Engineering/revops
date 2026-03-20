@@ -99,7 +99,7 @@ export default function ConverterPage() {
   const [convertSPL, { data: result, isLoading, error }] = useConvertSPLMutation()
 
   // AI state
-  const [aiProvider, setAiProvider] = useState<string>('claude')
+  const [aiProvider, setAiProvider] = useState<string>('anthropic')
   const [showAIPanel, setShowAIPanel] = useState(false)
   const [aiExplanation, setAiExplanation] = useState<string | null>(null)
   const [aiSuggestions, setAiSuggestions] = useState<string | null>(null)

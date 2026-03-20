@@ -105,7 +105,7 @@ flowchart TB
 
     subgraph AI["AI / LLM"]
         OpenAI["OpenAI GPT-4"]
-        Anthropic["Anthropic Claude"]
+        Anthropic["Anthropic API"]
     end
 
     subgraph EDR["EDR / Security Tools"]
@@ -362,7 +362,7 @@ flowchart LR
     subgraph LLM["AI Services"]
         direction TB
         OpenAIAPI["OpenAI API<br/>─────────<br/>POST /chat/completions<br/>GPT-4"]
-        ClaudeAPI["Anthropic API<br/>─────────<br/>POST /messages<br/>Claude"]
+        AnthropicAPI["Anthropic API<br/>─────────<br/>POST /messages"]
     end
 
     subgraph Security["Security Tools"]
