@@ -93,6 +93,7 @@ class AlertPoller:
                 elif "okta" in title.lower():
                     source_type = "okta"
 
+                organization_id = str(self._organization_id) if self._organization_id else None
                 alert_data = {
                     "id": alert.get("id"),
                     "title": title,
@@ -103,10 +104,13 @@ class AlertPoller:
                     or alert.get("rule", {}).get("id"),
                     "description": description,
                     "sourceType": source_type,
+                    "organization_id": organization_id,
                 }
 
-                # Broadcast via WebSocket
-                await notification_service.publish_alert(alert_data)
+                # Broadcast via WebSocket (fanned out per-tenant by subscribers)
+                await notification_service.publish_alert(
+                    alert_data, organization_id=organization_id
+                )
 
                 # Trigger escalation if organization is configured
                 if self._organization_id:
@@ -145,9 +149,16 @@ class AlertPoller:
 alert_poller = AlertPoller()
 
 
-async def start_alert_poller(panther_host: str, panther_token: str, interval_seconds: int = 30):
+async def start_alert_poller(
+    panther_host: str,
+    panther_token: str,
+    interval_seconds: int = 30,
+    organization_id: str | None = None,
+):
     """Start the global alert poller."""
-    await alert_poller.start(panther_host, panther_token, interval_seconds)
+    await alert_poller.start(
+        panther_host, panther_token, interval_seconds, organization_id=organization_id
+    )
 
 
 def stop_alert_poller():

@@ -53,26 +53,55 @@ class NotificationService:
             logger.info("Disconnected from Redis")
         self._started = False
 
-    async def publish_alert(self, alert_data: dict) -> None:
-        """Publish a new alert notification."""
+    @staticmethod
+    def _resolve_organization_id(data: dict, organization_id: str | None) -> str | None:
+        """Resolve the tenant for a payload, preferring the explicit argument."""
+        org_id = organization_id if organization_id is not None else data.get("organization_id")
+        return str(org_id) if org_id else None
+
+    async def publish_alert(self, alert_data: dict, organization_id: str | None = None) -> None:
+        """Publish a new alert notification for a specific organization.
+
+        The organization_id is included in the published envelope so that
+        WebSocket subscribers can deliver the alert only to connections
+        belonging to that tenant. Payloads without an organization_id are
+        still published, but subscribers drop them rather than broadcasting
+        across tenants.
+        """
         await self.connect()
         if self._redis:
+            org_id = self._resolve_organization_id(alert_data, organization_id)
+            if org_id is None:
+                logger.warning(
+                    f"Publishing alert {alert_data.get('id', 'unknown')} without "
+                    "organization_id; subscribers will drop it (tenant isolation)"
+                )
             message = json.dumps(
                 {
                     "type": "new_alert",
+                    "organization_id": org_id,
                     "data": alert_data,
                 }
             )
             await self._redis.publish(self.CHANNEL_ALERTS, message)
             logger.debug(f"Published alert: {alert_data.get('id', 'unknown')}")
 
-    async def publish_notification(self, notification_data: dict) -> None:
-        """Publish a general notification."""
+    async def publish_notification(
+        self, notification_data: dict, organization_id: str | None = None
+    ) -> None:
+        """Publish a general notification for a specific organization."""
         await self.connect()
         if self._redis:
+            org_id = self._resolve_organization_id(notification_data, organization_id)
+            if org_id is None:
+                logger.warning(
+                    "Publishing notification without organization_id; "
+                    "subscribers will drop it (tenant isolation)"
+                )
             message = json.dumps(
                 {
                     "type": "notification",
+                    "organization_id": org_id,
                     "data": notification_data,
                 }
             )
