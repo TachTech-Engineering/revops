@@ -1,10 +1,9 @@
 import logging
-from typing import Optional
 
 import httpx
 
-from app.services.integrations.base import ActionConnector, ActionResult
 from app.config import settings
+from app.services.integrations.base import ActionConnector, ActionResult
 
 logger = logging.getLogger(__name__)
 
@@ -62,14 +61,16 @@ class ServiceNowConnector(ActionConnector):
             else:
                 return ActionResult(
                     success=False,
-                    message=f"Failed to create ServiceNow incident (status: {response.status_code})",
+                    message=(
+                        f"Failed to create ServiceNow incident (status: {response.status_code})"
+                    ),
                     error=response.text[:500],
                 )
         except Exception as e:
             logger.error(f"ServiceNow error: {e}")
             return ActionResult(success=False, message="ServiceNow request failed", error=str(e))
 
-    def validate_config(self, config: dict) -> tuple[bool, Optional[str]]:
+    def validate_config(self, config: dict) -> tuple[bool, str | None]:
         if not (config.get("url") or settings.servicenow_url):
             return False, "ServiceNow URL is required"
         if not (config.get("user") or settings.servicenow_user):
@@ -93,11 +94,13 @@ class ServiceNowConnector(ActionConnector):
 
         rule = alert_data.get("rule", {})
         if rule:
-            lines.extend([
-                "",
-                "=== Rule Information ===",
-                f"Rule Name: {rule.get('displayName', rule.get('id', 'N/A'))}",
-                f"Rule ID: {rule.get('id', 'N/A')}",
-            ])
+            lines.extend(
+                [
+                    "",
+                    "=== Rule Information ===",
+                    f"Rule Name: {rule.get('displayName', rule.get('id', 'N/A'))}",
+                    f"Rule ID: {rule.get('id', 'N/A')}",
+                ]
+            )
 
         return "\n".join(lines)

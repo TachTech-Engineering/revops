@@ -2,8 +2,8 @@
 Atomic Red Team integration for attack simulation.
 https://github.com/redcanaryco/atomic-red-team
 """
+
 import httpx
-from typing import Optional
 import yaml
 
 from app.config import settings
@@ -22,7 +22,10 @@ class AtomicRedTeamConnector:
             "technique_id": "T1003",
             "technique_name": "OS Credential Dumping",
             "tactic": "credential-access",
-            "description": "Adversaries may attempt to dump credentials to obtain account login information.",
+            "description": (
+                "Adversaries may attempt to dump credentials "
+                "to obtain account login information."
+            ),
             "platforms": ["windows", "linux", "macos"],
             "tests": [
                 {"name": "Gsecdump", "description": "Dump credentials using Gsecdump"},
@@ -37,7 +40,10 @@ class AtomicRedTeamConnector:
             "description": "Adversaries may abuse PowerShell commands and scripts for execution.",
             "platforms": ["windows"],
             "tests": [
-                {"name": "Mimikatz via PowerShell", "description": "Run Mimikatz through PowerShell"},
+                {
+                    "name": "Mimikatz via PowerShell",
+                    "description": "Run Mimikatz through PowerShell",
+                },
                 {"name": "Encoded Command", "description": "Execute base64 encoded PowerShell"},
                 {"name": "Download Cradle", "description": "PowerShell download and execute"},
             ],
@@ -49,7 +55,10 @@ class AtomicRedTeamConnector:
             "description": "Adversaries may abuse task scheduling to execute malicious code.",
             "platforms": ["windows"],
             "tests": [
-                {"name": "Create Scheduled Task", "description": "Create a scheduled task for persistence"},
+                {
+                    "name": "Create Scheduled Task",
+                    "description": "Create a scheduled task for persistence",
+                },
                 {"name": "schtasks.exe", "description": "Use schtasks to create task"},
             ],
         },
@@ -111,7 +120,7 @@ class AtomicRedTeamConnector:
         },
     ]
 
-    def __init__(self, base_path: Optional[str] = None):
+    def __init__(self, base_path: str | None = None):
         self.base_path = base_path or settings.atomic_red_team_path
 
     async def fetch_techniques(self) -> list[dict]:
@@ -122,7 +131,7 @@ class AtomicRedTeamConnector:
         """
         return self.COMMON_TECHNIQUES
 
-    async def get_test_by_mitre_id(self, technique_id: str) -> Optional[dict]:
+    async def get_test_by_mitre_id(self, technique_id: str) -> dict | None:
         """
         Get Atomic test details by MITRE technique ID.
 
@@ -160,13 +169,15 @@ class AtomicRedTeamConnector:
 
         tests = []
         for test in data.get("atomic_tests", []):
-            tests.append({
-                "name": test.get("name", ""),
-                "description": test.get("description", ""),
-                "supported_platforms": test.get("supported_platforms", []),
-                "executor": test.get("executor", {}),
-                "input_arguments": test.get("input_arguments", {}),
-            })
+            tests.append(
+                {
+                    "name": test.get("name", ""),
+                    "description": test.get("description", ""),
+                    "supported_platforms": test.get("supported_platforms", []),
+                    "executor": test.get("executor", {}),
+                    "input_arguments": test.get("input_arguments", {}),
+                }
+            )
 
         return {
             "technique_id": attack_technique,
@@ -178,7 +189,7 @@ class AtomicRedTeamConnector:
         self,
         test_id: str,
         target: str,
-        parameters: Optional[dict] = None,
+        parameters: dict | None = None,
     ) -> dict:
         """
         Execute an Atomic Red Team test.

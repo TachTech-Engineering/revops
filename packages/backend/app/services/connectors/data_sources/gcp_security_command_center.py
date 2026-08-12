@@ -7,13 +7,13 @@ Integrates with GCP Security Command Center to fetch and normalize security find
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
 
 
@@ -35,7 +35,9 @@ class GCPSecurityCommandCenterConnector(DataSourceConnector):
             connector_type="gcp_scc",
             category=ConnectorCategory.DATA_SOURCE,
             display_name="Google Cloud SCC",
-            description="Google Cloud Security Command Center - Centralized security findings for GCP",
+            description=(
+                "Google Cloud Security Command Center - Centralized security findings for GCP"
+            ),
             icon="gcp",
             config_schema={
                 "type": "object",
@@ -92,7 +94,10 @@ class GCPSecurityCommandCenterConnector(DataSourceConnector):
                     "service_account_json": {
                         "type": "string",
                         "title": "Service Account JSON",
-                        "description": "GCP service account key JSON (with securitycenter.findings.list permission)",
+                        "description": (
+                            "GCP service account key JSON "
+                            "(with securitycenter.findings.list permission)"
+                        ),
                         "format": "password",
                     },
                 },
@@ -103,12 +108,14 @@ class GCPSecurityCommandCenterConnector(DataSourceConnector):
     def _get_scc_client(self):
         """Get Google Cloud SCC client."""
         try:
+            import json
+
             from google.cloud import securitycenter_v1
             from google.oauth2 import service_account
-            import json
         except ImportError:
             raise Exception(
-                "google-cloud-securitycenter is required. Install with: pip install google-cloud-securitycenter"
+                "google-cloud-securitycenter is required. "
+                "Install with: pip install google-cloud-securitycenter"
             )
 
         # Parse service account JSON
@@ -151,7 +158,10 @@ class GCPSecurityCommandCenterConnector(DataSourceConnector):
         except Exception as e:
             error_msg = str(e)
             if "PERMISSION_DENIED" in error_msg:
-                error_msg = "Permission denied - ensure service account has securitycenter.findings.list permission"
+                error_msg = (
+                    "Permission denied - ensure service account has "
+                    "securitycenter.findings.list permission"
+                )
             elif "NOT_FOUND" in error_msg:
                 error_msg = "Organization not found - check organization ID"
             elif "INVALID_ARGUMENT" in error_msg:
@@ -166,8 +176,8 @@ class GCPSecurityCommandCenterConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch findings from GCP Security Command Center."""
         try:
             from google.cloud import securitycenter_v1
@@ -242,6 +252,7 @@ class GCPSecurityCommandCenterConnector(DataSourceConnector):
     def _finding_to_dict(self, finding) -> dict[str, Any]:
         """Convert a Finding protobuf to a dictionary."""
         from google.protobuf.json_format import MessageToDict
+
         return MessageToDict(finding._pb)
 
     def normalize_alert(self, raw_alert: dict[str, Any]) -> NormalizedAlert:
@@ -256,7 +267,11 @@ class GCPSecurityCommandCenterConnector(DataSourceConnector):
 
         # Build title
         category = raw_alert.get("category", "Unknown")
-        resource_name = raw_alert.get("resourceName", "").split("/")[-1] if raw_alert.get("resourceName") else "Unknown"
+        resource_name = (
+            raw_alert.get("resourceName", "").split("/")[-1]
+            if raw_alert.get("resourceName")
+            else "Unknown"
+        )
         title = f"{category}: {resource_name}"
 
         # Build description

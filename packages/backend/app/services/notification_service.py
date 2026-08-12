@@ -1,7 +1,8 @@
-import json
 import asyncio
-from typing import Optional, Callable, Any, Set
+import json
 import logging
+from collections.abc import Callable
+from typing import Any
 
 import redis.asyncio as redis
 
@@ -17,10 +18,10 @@ class NotificationService:
     CHANNEL_NOTIFICATIONS = "panther:notifications"
 
     def __init__(self):
-        self._redis: Optional[redis.Redis] = None
-        self._pubsub: Optional[redis.client.PubSub] = None
-        self._subscribers: dict[str, Set[Callable]] = {}
-        self._listen_task: Optional[asyncio.Task] = None
+        self._redis: redis.Redis | None = None
+        self._pubsub: redis.client.PubSub | None = None
+        self._subscribers: dict[str, set[Callable]] = {}
+        self._listen_task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
         self._started = False
 
@@ -56,10 +57,12 @@ class NotificationService:
         """Publish a new alert notification."""
         await self.connect()
         if self._redis:
-            message = json.dumps({
-                "type": "new_alert",
-                "data": alert_data,
-            })
+            message = json.dumps(
+                {
+                    "type": "new_alert",
+                    "data": alert_data,
+                }
+            )
             await self._redis.publish(self.CHANNEL_ALERTS, message)
             logger.debug(f"Published alert: {alert_data.get('id', 'unknown')}")
 
@@ -67,10 +70,12 @@ class NotificationService:
         """Publish a general notification."""
         await self.connect()
         if self._redis:
-            message = json.dumps({
-                "type": "notification",
-                "data": notification_data,
-            })
+            message = json.dumps(
+                {
+                    "type": "notification",
+                    "data": notification_data,
+                }
+            )
             await self._redis.publish(self.CHANNEL_NOTIFICATIONS, message)
 
     async def subscribe(self, channel: str, callback: Callable[[dict], Any]) -> None:

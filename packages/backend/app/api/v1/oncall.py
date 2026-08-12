@@ -2,34 +2,41 @@
 On-Call Scheduling API - Feature 8
 Native rotation management with auto-routing.
 """
-from datetime import datetime, timedelta
-from typing import Optional
-from uuid import UUID
-import pytz
 
-from fastapi import APIRouter, HTTPException, Query
+from datetime import datetime, timedelta
+from uuid import UUID
+
+import pytz
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep, OrgAdminDep
-from app.db import get_db, OnCallSchedule, OnCallRotationMember, OnCallOverride, RotationType, OnCallRole
-from fastapi import Depends
+from app.api.v1.deps import OrgAdminDep, OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import (
+    OnCallOverride,
+    OnCallRole,
+    OnCallRotationMember,
+    OnCallSchedule,
+    RotationType,
+    get_db,
+)
 
 router = APIRouter()
 
 
 # ==================== Response Models ====================
 
+
 class OnCallMemberResponse(BaseModel):
     id: str
     user_email: str
-    user_name: Optional[str]
+    user_name: str | None
     rotation_order: int
     role: str
-    phone_number: Optional[str]
-    slack_user_id: Optional[str]
+    phone_number: str | None
+    slack_user_id: str | None
 
     class Config:
         from_attributes = True
@@ -38,12 +45,12 @@ class OnCallMemberResponse(BaseModel):
 class OnCallScheduleResponse(BaseModel):
     id: str
     name: str
-    description: Optional[str]
+    description: str | None
     timezone: str
     rotation_type: str
     handoff_time: str
-    handoff_day: Optional[int]
-    rotation_length_days: Optional[int]
+    handoff_day: int | None
+    rotation_length_days: int | None
     is_active: bool
     members: list[OnCallMemberResponse]
     created_by: str
@@ -57,10 +64,10 @@ class OnCallOverrideResponse(BaseModel):
     id: str
     schedule_id: str
     override_user_email: str
-    original_user_email: Optional[str]
+    original_user_email: str | None
     start_time: str
     end_time: str
-    reason: Optional[str]
+    reason: str | None
     created_by: str
     created_at: str
 
@@ -71,51 +78,52 @@ class OnCallOverrideResponse(BaseModel):
 class CurrentOnCallResponse(BaseModel):
     schedule_id: str
     schedule_name: str
-    primary: Optional[OnCallMemberResponse]
-    backup: Optional[OnCallMemberResponse]
+    primary: OnCallMemberResponse | None
+    backup: OnCallMemberResponse | None
     is_override: bool
-    override_end: Optional[str]
+    override_end: str | None
 
 
 # ==================== Request Models ====================
 
+
 class OnCallMemberCreate(BaseModel):
     user_email: str
-    user_name: Optional[str] = None
+    user_name: str | None = None
     rotation_order: int
     role: str = "primary"  # primary or backup
-    phone_number: Optional[str] = None
-    slack_user_id: Optional[str] = None
+    phone_number: str | None = None
+    slack_user_id: str | None = None
 
 
 class OnCallScheduleCreate(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     timezone: str = "UTC"
     rotation_type: str = "weekly"  # daily, weekly, custom
     handoff_time: str = "09:00"
-    handoff_day: Optional[int] = None  # 0=Monday for weekly
-    rotation_length_days: Optional[int] = None  # for custom
+    handoff_day: int | None = None  # 0=Monday for weekly
+    rotation_length_days: int | None = None  # for custom
     is_active: bool = True
     members: list[OnCallMemberCreate] = []
 
 
 class OnCallScheduleUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    timezone: Optional[str] = None
-    handoff_time: Optional[str] = None
-    handoff_day: Optional[int] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    description: str | None = None
+    timezone: str | None = None
+    handoff_time: str | None = None
+    handoff_day: int | None = None
+    is_active: bool | None = None
 
 
 class OnCallOverrideCreate(BaseModel):
     schedule_id: str
     override_user_email: str
-    original_user_email: Optional[str] = None
+    original_user_email: str | None = None
     start_time: str  # ISO format
     end_time: str  # ISO format
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 def serialize_member(member: OnCallRotationMember) -> OnCallMemberResponse:
@@ -141,7 +149,9 @@ def serialize_schedule(schedule: OnCallSchedule) -> OnCallScheduleResponse:
         handoff_day=schedule.handoff_day,
         rotation_length_days=schedule.rotation_length_days,
         is_active=schedule.is_active,
-        members=[serialize_member(m) for m in sorted(schedule.members, key=lambda x: x.rotation_order)],
+        members=[
+            serialize_member(m) for m in sorted(schedule.members, key=lambda x: x.rotation_order)
+        ],
         created_by=schedule.created_by,
         created_at=schedule.created_at.isoformat(),
     )
@@ -149,12 +159,13 @@ def serialize_schedule(schedule: OnCallSchedule) -> OnCallScheduleResponse:
 
 # ==================== Schedules ====================
 
+
 @router.get("/schedules", response_model=list[OnCallScheduleResponse])
 async def list_schedules(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: AsyncSession = Depends(get_db),
-    is_active: Optional[bool] = Query(None),
+    is_active: bool | None = Query(None),
 ):
     """List all on-call schedules."""
     query = (
@@ -297,7 +308,10 @@ async def delete_schedule(
 
 # ==================== Current On-Call ====================
 
-def calculate_current_oncall(schedule: OnCallSchedule, now: datetime) -> tuple[Optional[OnCallRotationMember], Optional[OnCallRotationMember]]:
+
+def calculate_current_oncall(
+    schedule: OnCallSchedule, now: datetime
+) -> tuple[OnCallRotationMember | None, OnCallRotationMember | None]:
     """Calculate who is currently on-call based on rotation."""
     primary_members = [m for m in schedule.members if m.role == OnCallRole.PRIMARY]
     backup_members = [m for m in schedule.members if m.role == OnCallRole.BACKUP]
@@ -321,8 +335,9 @@ def calculate_current_oncall(schedule: OnCallSchedule, now: datetime) -> tuple[O
 
     elif schedule.rotation_type == RotationType.WEEKLY:
         # Weekly rotation - changes on handoff_day at handoff_time
-        handoff_day = schedule.handoff_day or 0  # Default to Monday
-        weeks_since_epoch = (local_now.date() - datetime(2020, 1, 6).date()).days // 7  # Monday Jan 6, 2020
+        weeks_since_epoch = (
+            local_now.date() - datetime(2020, 1, 6).date()
+        ).days // 7  # Monday Jan 6, 2020
         rotation_index = weeks_since_epoch % len(primary_members)
 
     else:  # Custom
@@ -349,7 +364,7 @@ async def get_current_oncall(
     result = await db.execute(
         select(OnCallSchedule)
         .where(OnCallSchedule.organization_id == org_id)
-        .where(OnCallSchedule.is_active == True)
+        .where(OnCallSchedule.is_active.is_(True))
         .options(selectinload(OnCallSchedule.members))
     )
     schedules = result.scalars().unique().all()
@@ -405,6 +420,7 @@ async def get_current_oncall(
 
 # ==================== Overrides ====================
 
+
 @router.post("/override", status_code=201, response_model=OnCallOverrideResponse)
 async def create_override(
     request: OnCallOverrideCreate,
@@ -456,7 +472,7 @@ async def get_oncall_calendar(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: AsyncSession = Depends(get_db),
-    schedule_id: Optional[str] = Query(None),
+    schedule_id: str | None = Query(None),
     start_date: str = Query(..., description="Start date (YYYY-MM-DD)"),
     end_date: str = Query(..., description="End date (YYYY-MM-DD)"),
 ):
@@ -467,7 +483,7 @@ async def get_oncall_calendar(
     query = (
         select(OnCallSchedule)
         .where(OnCallSchedule.organization_id == org_id)
-        .where(OnCallSchedule.is_active == True)
+        .where(OnCallSchedule.is_active.is_(True))
         .options(selectinload(OnCallSchedule.members))
     )
 
@@ -484,15 +500,17 @@ async def get_oncall_calendar(
         for schedule in schedules:
             primary, backup = calculate_current_oncall(schedule, current)
             if primary:
-                calendar_events.append({
-                    "date": current.strftime("%Y-%m-%d"),
-                    "schedule_id": str(schedule.id),
-                    "schedule_name": schedule.name,
-                    "primary_email": primary.user_email,
-                    "primary_name": primary.user_name,
-                    "backup_email": backup.user_email if backup else None,
-                    "backup_name": backup.user_name if backup else None,
-                })
+                calendar_events.append(
+                    {
+                        "date": current.strftime("%Y-%m-%d"),
+                        "schedule_id": str(schedule.id),
+                        "schedule_name": schedule.name,
+                        "primary_email": primary.user_email,
+                        "primary_name": primary.user_name,
+                        "backup_email": backup.user_email if backup else None,
+                        "backup_name": backup.user_name if backup else None,
+                    }
+                )
         current += timedelta(days=1)
 
     return calendar_events

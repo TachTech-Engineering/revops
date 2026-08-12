@@ -1,19 +1,19 @@
-from typing import Annotated, Optional
-from uuid import UUID
 from datetime import datetime
+from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, desc, func, and_
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, Case, CaseActivity, CaseStatus, CasePriority, CaseActivityType
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import Case, CaseActivity, CaseActivityType, CasePriority, CaseStatus, get_db
 from app.services.case_service import (
-    generate_case_number,
     add_case_activity,
-    track_field_change,
+    generate_case_number,
     get_case_timeline,
+    track_field_change,
 )
 
 router = APIRouter()
@@ -21,34 +21,34 @@ router = APIRouter()
 
 class CaseCreate(BaseModel):
     title: str
-    description: Optional[str] = None
+    description: str | None = None
     priority: CasePriority = CasePriority.MEDIUM
-    assignee: Optional[str] = None
+    assignee: str | None = None
     tags: list[str] = []
     incident_ids: list[str] = []
 
 
 class CaseUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[CaseStatus] = None
-    priority: Optional[CasePriority] = None
-    assignee: Optional[str] = None
-    tags: Optional[list[str]] = None
+    title: str | None = None
+    description: str | None = None
+    status: CaseStatus | None = None
+    priority: CasePriority | None = None
+    assignee: str | None = None
+    tags: list[str] | None = None
 
 
 class CaseResponse(BaseModel):
     id: UUID
     case_number: str
     title: str
-    description: Optional[str]
+    description: str | None
     status: CaseStatus
     priority: CasePriority
-    assignee: Optional[str]
+    assignee: str | None
     tags: list[str]
     incident_count: int
     created_by: str
-    closed_at: Optional[str]
+    closed_at: str | None
     created_at: str
     updated_at: str
 
@@ -64,8 +64,8 @@ class CaseActivityResponse(BaseModel):
     id: UUID
     activity_type: CaseActivityType
     description: str
-    old_value: Optional[str]
-    new_value: Optional[str]
+    old_value: str | None
+    new_value: str | None
     user_email: str
     created_at: str
 
@@ -86,9 +86,9 @@ async def list_cases(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    status: Optional[CaseStatus] = None,
-    priority: Optional[CasePriority] = None,
-    assignee: Optional[str] = None,
+    status: CaseStatus | None = None,
+    priority: CasePriority | None = None,
+    assignee: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> dict:
@@ -148,7 +148,9 @@ async def get_case(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CaseDetailResponse:
     """Get case details."""
-    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == org_id)))
+    result = await db.execute(
+        select(Case).where(and_(Case.id == case_id, Case.organization_id == org_id))
+    )
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -181,7 +183,9 @@ async def get_case_timeline_endpoint(
 ) -> list[CaseActivityResponse]:
     """Get case activity timeline."""
     # Verify case exists
-    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == org_id)))
+    result = await db.execute(
+        select(Case).where(and_(Case.id == case_id, Case.organization_id == org_id))
+    )
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Case not found")
 
@@ -273,7 +277,11 @@ async def update_case(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CaseResponse:
     """Update a case. Requires analyst role."""
-    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == analyst.organization_id)))
+    result = await db.execute(
+        select(Case).where(
+            and_(Case.id == case_id, Case.organization_id == analyst.organization_id)
+        )
+    )
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -288,8 +296,8 @@ async def update_case(
             new_value = update_data[field]
             if old_value != new_value:
                 # Convert enum values to strings for comparison
-                old_str = old_value.value if hasattr(old_value, 'value') else str(old_value)
-                new_str = new_value.value if hasattr(new_value, 'value') else str(new_value)
+                old_str = old_value.value if hasattr(old_value, "value") else str(old_value)
+                new_str = new_value.value if hasattr(new_value, "value") else str(new_value)
                 await track_field_change(
                     db=db,
                     case_id=case_id,
@@ -336,15 +344,17 @@ async def delete_case(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete a case. Requires analyst role."""
-    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == analyst.organization_id)))
+    result = await db.execute(
+        select(Case).where(
+            and_(Case.id == case_id, Case.organization_id == analyst.organization_id)
+        )
+    )
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
 
     # Delete associated activities
-    await db.execute(
-        CaseActivity.__table__.delete().where(CaseActivity.case_id == case_id)
-    )
+    await db.execute(CaseActivity.__table__.delete().where(CaseActivity.case_id == case_id))
 
     await db.delete(case)
     return {"status": "deleted"}
@@ -358,7 +368,11 @@ async def add_comment(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CaseActivityResponse:
     """Add a comment to a case. Requires analyst role."""
-    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == analyst.organization_id)))
+    result = await db.execute(
+        select(Case).where(
+            and_(Case.id == case_id, Case.organization_id == analyst.organization_id)
+        )
+    )
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Case not found")
 
@@ -391,7 +405,11 @@ async def link_incident(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Link an incident to a case. Requires analyst role."""
-    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == analyst.organization_id)))
+    result = await db.execute(
+        select(Case).where(
+            and_(Case.id == case_id, Case.organization_id == analyst.organization_id)
+        )
+    )
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -422,7 +440,11 @@ async def unlink_incident(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Unlink an incident from a case. Requires analyst role."""
-    result = await db.execute(select(Case).where(and_(Case.id == case_id, Case.organization_id == analyst.organization_id)))
+    result = await db.execute(
+        select(Case).where(
+            and_(Case.id == case_id, Case.organization_id == analyst.organization_id)
+        )
+    )
     case = result.scalar_one_or_none()
     if not case:
         raise HTTPException(status_code=404, detail="Case not found")

@@ -6,12 +6,11 @@ Makes HTTP API calls as part of workflow execution.
 
 import json
 import time
-from typing import Any
 
 import httpx
 
-from app.services.workflow_engine.nodes.base import NodeExecutor, NodeResult
 from app.services.workflow_engine.context import ExecutionContext
+from app.services.workflow_engine.nodes.base import NodeExecutor, NodeResult
 
 
 class HTTPRequestExecutor(NodeExecutor):

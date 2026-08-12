@@ -5,10 +5,11 @@ Provides secure encryption/decryption of connector credentials using Fernet symm
 Generates encryption keys and manages secure storage of sensitive configuration data.
 """
 
-import json
 import base64
+import json
 import secrets
 from typing import Any
+
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -18,6 +19,7 @@ from app.config import settings
 
 class EncryptionError(Exception):
     """Raised when encryption/decryption fails."""
+
     pass
 
 

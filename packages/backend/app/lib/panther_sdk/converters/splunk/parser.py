@@ -201,9 +201,7 @@ class SPLParser:
             if self._match(TokenType.AND):
                 right = self._parse_not_expr()
                 if right is None:
-                    raise SPLParserError(
-                        "Expected search term after AND", self._current()
-                    )
+                    raise SPLParserError("Expected search term after AND", self._current())
                 left = BooleanExpr(operator=BooleanOperator.AND, operands=[left, right])
             # Implicit AND (adjacent terms)
             elif self._is_search_term_start():
@@ -346,7 +344,7 @@ class SPLParser:
 
     def _parse_subsearch(self) -> SubsearchCommand:
         """Parse a subsearch [...] (unsupported but captured)."""
-        start_pos = self._current().position
+        self._current().position
         depth = 1
         subsearch_text = ""
 
@@ -686,9 +684,7 @@ class SPLParser:
             else_expr = self._parse_eval_expression()
             self._skip_newlines()
             self._expect(TokenType.RPAREN)
-            return EvalConditional(
-                condition=condition, then_expr=then_expr, else_expr=else_expr
-            )
+            return EvalConditional(condition=condition, then_expr=then_expr, else_expr=else_expr)
 
         # Special handling for case() function
         if func_name.lower() == "case":
@@ -838,17 +834,13 @@ class SPLParser:
         renames: dict[str, str] = {}
 
         while not self._is_command_end():
-            if not self._check(TokenType.IDENTIFIER) and not self._check(
-                TokenType.STRING
-            ):
+            if not self._check(TokenType.IDENTIFIER) and not self._check(TokenType.STRING):
                 break
 
             old_name = self._advance().value
             self._expect(TokenType.AS)
 
-            if not self._check(TokenType.IDENTIFIER) and not self._check(
-                TokenType.STRING
-            ):
+            if not self._check(TokenType.IDENTIFIER) and not self._check(TokenType.STRING):
                 raise SPLParserError("Expected alias name", self._current())
 
             new_name = self._advance().value

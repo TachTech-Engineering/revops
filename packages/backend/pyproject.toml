@@ -38,6 +38,21 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# N815: pydantic request/response models use camelCase field names because they ARE
+# the JSON wire contract consumed by the frontend (see pantherApi.ts). Renaming them
+# would break the API; aliasing every field adds noise for no behavioral gain.
+"app/api/v1/alerts.py" = ["N815", "N803"]
+"app/api/v1/analytics.py" = ["N815"]
+"app/api/v1/converter.py" = ["N815"]
+"app/api/v1/dashboards.py" = ["N815"]
+"app/api/v1/queries.py" = ["N815"]
+"app/api/v1/rules.py" = ["N815", "N803"]
+# N803: FastAPI derives query/form parameter names from the argument names, so
+# camelCase args (pageSize, detectionId, logTypes) are part of the HTTP contract.
+# twilio_webhook.py: Digits/From/Body are the exact form fields Twilio POSTs.
+"app/api/v1/twilio_webhook.py" = ["N803"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true

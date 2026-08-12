@@ -1,21 +1,21 @@
-from typing import Any, Annotated, Optional
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, desc, func, and_
+from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.deps import OrgIdDep, OrgUserDep
 from app.db import get_db
 from app.db.models import NormalizedAlert
-from app.api.v1.deps import PantherServiceDep, OrgUserDep, OrgIdDep
 
 router = APIRouter()
 
 
 class AlertUpdateRequest(BaseModel):
-    status: Optional[str] = None
-    assigneeId: Optional[str] = None
+    status: str | None = None
+    assigneeId: str | None = None
 
 
 class CommentRequest(BaseModel):
@@ -25,7 +25,7 @@ class CommentRequest(BaseModel):
 class BulkUpdateRequest(BaseModel):
     alert_ids: list[str]
     action: str  # acknowledge, resolve, close, set_severity, assign
-    value: Optional[str] = None  # for set_severity or assign
+    value: str | None = None  # for set_severity or assign
 
 
 class BulkUpdateResult(BaseModel):
@@ -35,7 +35,7 @@ class BulkUpdateResult(BaseModel):
 
 class PaginatedResponse(BaseModel):
     results: list[dict[str, Any]]
-    cursor: Optional[str] = None
+    cursor: str | None = None
     hasMore: bool = False
 
 
@@ -44,16 +44,20 @@ async def list_alerts(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    status: Optional[str] = Query(None, description="Filter by status"),
-    severity: Optional[str] = Query(None, description="Filter by severity"),
-    detectionId: Optional[str] = Query(None, description="Filter by detection ID"),
+    status: str | None = Query(None, description="Filter by status"),
+    severity: str | None = Query(None, description="Filter by severity"),
+    detectionId: str | None = Query(None, description="Filter by detection ID"),
     pageSize: int = Query(50, ge=1, le=100, description="Page size"),
     page: int = Query(1, ge=1, description="Page number"),
 ) -> PaginatedResponse:
     """List alerts from all connected data sources."""
     import logging
+
     logger = logging.getLogger(__name__)
-    logger.info(f"Fetching alerts from connectors: status={status}, severity={severity}, pageSize={pageSize}")
+    logger.info(
+        f"Fetching alerts from connectors: status={status}, "
+        f"severity={severity}, pageSize={pageSize}"
+    )
 
     # Build query for normalized alerts from connectors
     query = select(NormalizedAlert).where(NormalizedAlert.organization_id == org_id)
@@ -83,23 +87,29 @@ async def list_alerts(
     # Convert to response format matching the original Panther alert structure
     results = []
     for alert in alerts:
-        results.append({
-            "id": str(alert.id),
-            "externalId": alert.external_id,
-            "title": alert.title,
-            "description": alert.description,
-            "severity": alert.severity.upper() if alert.severity else "MEDIUM",
-            "status": alert.status.upper() if alert.status else "OPEN",
-            "detectionId": alert.rule_id,
-            "detectionName": alert.rule_name,
-            "createdAt": alert.created_at_source.isoformat() if alert.created_at_source else None,
-            "updatedAt": alert.updated_at_source.isoformat() if alert.updated_at_source else None,
-            "sourceType": alert.source_type,
-            "connectorId": str(alert.connector_id),
-            "tags": alert.tags or [],
-            "mitreTactics": alert.mitre_tactics or [],
-            "mitreTechniques": alert.mitre_techniques or [],
-        })
+        results.append(
+            {
+                "id": str(alert.id),
+                "externalId": alert.external_id,
+                "title": alert.title,
+                "description": alert.description,
+                "severity": alert.severity.upper() if alert.severity else "MEDIUM",
+                "status": alert.status.upper() if alert.status else "OPEN",
+                "detectionId": alert.rule_id,
+                "detectionName": alert.rule_name,
+                "createdAt": alert.created_at_source.isoformat()
+                if alert.created_at_source
+                else None,
+                "updatedAt": alert.updated_at_source.isoformat()
+                if alert.updated_at_source
+                else None,
+                "sourceType": alert.source_type,
+                "connectorId": str(alert.connector_id),
+                "tags": alert.tags or [],
+                "mitreTactics": alert.mitre_tactics or [],
+                "mitreTechniques": alert.mitre_techniques or [],
+            }
+        )
 
     logger.info(f"Got {len(results)} alerts from connectors")
     return PaginatedResponse(

@@ -6,23 +6,25 @@ Manages the state and data flow during workflow execution.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 
 @dataclass
 class StepOutput:
     """Output from a single workflow step."""
+
     node_key: str
     status: str  # completed, failed, skipped
     output: dict[str, Any]
-    error: Optional[str] = None
-    duration_ms: Optional[int] = None
+    error: str | None = None
+    duration_ms: int | None = None
 
 
 @dataclass
 class LoopState:
     """State for tracking loop iteration."""
+
     items: list[Any]
     current_index: int = 0
 
@@ -48,6 +50,7 @@ class ExecutionContext:
     - variables: Workflow-level variables
     - loop: Current loop state (if in a loop)
     """
+
     execution_id: UUID
     workflow_id: UUID
     trigger_data: dict[str, Any]
@@ -56,8 +59,14 @@ class ExecutionContext:
     loop_stack: list[LoopState] = field(default_factory=list)
     started_at: datetime = field(default_factory=datetime.utcnow)
 
-    def set_step_output(self, node_key: str, output: dict[str, Any], status: str = "completed",
-                        error: Optional[str] = None, duration_ms: Optional[int] = None) -> None:
+    def set_step_output(
+        self,
+        node_key: str,
+        output: dict[str, Any],
+        status: str = "completed",
+        error: str | None = None,
+        duration_ms: int | None = None,
+    ) -> None:
         """Record the output of a completed step."""
         self.steps[node_key] = StepOutput(
             node_key=node_key,
@@ -67,7 +76,7 @@ class ExecutionContext:
             duration_ms=duration_ms,
         )
 
-    def get_step_output(self, node_key: str) -> Optional[dict[str, Any]]:
+    def get_step_output(self, node_key: str) -> dict[str, Any] | None:
         """Get the output from a specific step."""
         step = self.steps.get(node_key)
         return step.output if step else None
@@ -84,7 +93,7 @@ class ExecutionContext:
         """Start a new loop iteration."""
         self.loop_stack.append(LoopState(items=items))
 
-    def pop_loop(self) -> Optional[LoopState]:
+    def pop_loop(self) -> LoopState | None:
         """End the current loop."""
         if self.loop_stack:
             return self.loop_stack.pop()
@@ -98,7 +107,7 @@ class ExecutionContext:
         return not self.loop_stack[-1].is_complete
 
     @property
-    def current_loop(self) -> Optional[LoopState]:
+    def current_loop(self) -> LoopState | None:
         """Get the current loop state."""
         return self.loop_stack[-1] if self.loop_stack else None
 

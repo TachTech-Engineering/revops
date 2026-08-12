@@ -5,33 +5,33 @@ Endpoints for managing visual workflows and their executions.
 All endpoints are organization-scoped for multi-tenancy.
 """
 
-from typing import Annotated, Optional
+from typing import Annotated
 from uuid import UUID
-from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, desc, func, and_
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, User
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import get_db
 from app.db.models import (
+    NodeType,
     Workflow,
-    WorkflowNode,
     WorkflowEdge,
     WorkflowExecution,
-    WorkflowStepExecution,
-    WorkflowStatus,
     WorkflowExecutionStatus,
-    NodeType,
+    WorkflowNode,
+    WorkflowStatus,
+    WorkflowStepExecution,
 )
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
 from app.services.workflow_engine import WorkflowEngine
 
 router = APIRouter()
 
 
 # ==================== Request/Response Models ====================
+
 
 class NodeCreate(BaseModel):
     node_key: str
@@ -41,7 +41,7 @@ class NodeCreate(BaseModel):
     position_y: float = 0.0
     config: dict = {}
     on_error: str = "fail"
-    error_handler_node: Optional[str] = None
+    error_handler_node: str | None = None
     timeout_seconds: int = 300
 
 
@@ -49,14 +49,14 @@ class EdgeCreate(BaseModel):
     source_node_key: str
     source_handle: str = "default"
     target_node_key: str
-    condition: Optional[str] = None
-    label: Optional[str] = None
+    condition: str | None = None
+    label: str | None = None
 
 
 class WorkflowCreate(BaseModel):
     name: str
-    description: Optional[str] = None
-    trigger_type: Optional[str] = None
+    description: str | None = None
+    trigger_type: str | None = None
     trigger_config: dict = {}
     viewport: dict = {"x": 0, "y": 0, "zoom": 1}
     tags: list[str] = []
@@ -65,15 +65,15 @@ class WorkflowCreate(BaseModel):
 
 
 class WorkflowUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[WorkflowStatus] = None
-    trigger_type: Optional[str] = None
-    trigger_config: Optional[dict] = None
-    viewport: Optional[dict] = None
-    tags: Optional[list[str]] = None
-    nodes: Optional[list[NodeCreate]] = None
-    edges: Optional[list[EdgeCreate]] = None
+    name: str | None = None
+    description: str | None = None
+    status: WorkflowStatus | None = None
+    trigger_type: str | None = None
+    trigger_config: dict | None = None
+    viewport: dict | None = None
+    tags: list[str] | None = None
+    nodes: list[NodeCreate] | None = None
+    edges: list[EdgeCreate] | None = None
 
 
 class NodeResponse(BaseModel):
@@ -85,7 +85,7 @@ class NodeResponse(BaseModel):
     position_y: float
     config: dict
     on_error: str
-    error_handler_node: Optional[str]
+    error_handler_node: str | None
     timeout_seconds: int
 
     class Config:
@@ -97,8 +97,8 @@ class EdgeResponse(BaseModel):
     source_node_key: str
     source_handle: str
     target_node_key: str
-    condition: Optional[str]
-    label: Optional[str]
+    condition: str | None
+    label: str | None
 
     class Config:
         from_attributes = True
@@ -107,9 +107,9 @@ class EdgeResponse(BaseModel):
 class WorkflowResponse(BaseModel):
     id: UUID
     name: str
-    description: Optional[str]
+    description: str | None
     status: WorkflowStatus
-    trigger_type: Optional[str]
+    trigger_type: str | None
     trigger_config: dict
     viewport: dict
     version: int
@@ -139,10 +139,10 @@ class ExecutionResponse(BaseModel):
     trigger_data: dict
     context: dict
     variables: dict
-    started_at: Optional[str]
-    completed_at: Optional[str]
-    error_message: Optional[str]
-    failed_node_key: Optional[str]
+    started_at: str | None
+    completed_at: str | None
+    error_message: str | None
+    failed_node_key: str | None
     triggered_by: str
     created_at: str
 
@@ -157,11 +157,11 @@ class StepExecutionResponse(BaseModel):
     status: str
     input_data: dict
     output_data: dict
-    error_message: Optional[str]
-    started_at: Optional[str]
-    completed_at: Optional[str]
-    duration_ms: Optional[int]
-    loop_index: Optional[int]
+    error_message: str | None
+    started_at: str | None
+    completed_at: str | None
+    duration_ms: int | None
+    loop_index: int | None
 
     class Config:
         from_attributes = True
@@ -176,20 +176,23 @@ class WorkflowListResponse(BaseModel):
 
 # ==================== Workflow Endpoints ====================
 
+
 @router.get("")
 async def list_workflows(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    status: Optional[WorkflowStatus] = None,
-    tag: Optional[str] = None,
+    status: WorkflowStatus | None = None,
+    tag: str | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
 ) -> WorkflowListResponse:
     """List all workflows for the current organization."""
-    query = select(Workflow).where(
-        Workflow.organization_id == org_id
-    ).order_by(desc(Workflow.updated_at))
+    query = (
+        select(Workflow)
+        .where(Workflow.organization_id == org_id)
+        .order_by(desc(Workflow.updated_at))
+    )
 
     if status:
         query = query.where(Workflow.status == status)
@@ -513,16 +516,12 @@ async def delete_workflow(
         raise HTTPException(status_code=404, detail="Workflow not found")
 
     # Delete nodes
-    nodes = await db.execute(
-        select(WorkflowNode).where(WorkflowNode.workflow_id == workflow_id)
-    )
+    nodes = await db.execute(select(WorkflowNode).where(WorkflowNode.workflow_id == workflow_id))
     for node in nodes.scalars().all():
         await db.delete(node)
 
     # Delete edges
-    edges = await db.execute(
-        select(WorkflowEdge).where(WorkflowEdge.workflow_id == workflow_id)
-    )
+    edges = await db.execute(select(WorkflowEdge).where(WorkflowEdge.workflow_id == workflow_id))
     for edge in edges.scalars().all():
         await db.delete(edge)
 
@@ -533,6 +532,7 @@ async def delete_workflow(
 
 
 # ==================== Execution Endpoints ====================
+
 
 @router.post("/{workflow_id}/execute")
 async def execute_workflow(
@@ -592,7 +592,7 @@ async def list_workflow_executions(
     db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
-    status: Optional[WorkflowExecutionStatus] = None,
+    status: WorkflowExecutionStatus | None = None,
 ) -> dict:
     """List executions for a workflow (must belong to user's organization)."""
     # Verify workflow belongs to user's org
@@ -752,6 +752,7 @@ async def list_recent_executions(
 
 
 # ==================== Node Type Info ====================
+
 
 @router.get("/node-types")
 async def list_node_types(

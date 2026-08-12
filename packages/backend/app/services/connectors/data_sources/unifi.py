@@ -13,15 +13,15 @@ import logging
 import re
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
-from app.services.syslog_receiver import get_syslog_receiver, SyslogMessage
+from app.services.syslog_receiver import SyslogMessage, get_syslog_receiver
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +35,7 @@ UNIFI_PATTERNS = {
         r"\[Priority:\s*(?P<priority>\d+)\].*?"
         r"(?P<src_ip>\d+\.\d+\.\d+\.\d+)(?::(?P<src_port>\d+))?\s*->\s*"
         r"(?P<dst_ip>\d+\.\d+\.\d+\.\d+)(?::(?P<dst_port>\d+))?",
-        re.IGNORECASE
+        re.IGNORECASE,
     ),
     # Firewall block events
     "firewall_block": re.compile(
@@ -46,21 +46,21 @@ UNIFI_PATTERNS = {
         r".*?PROTO=(?P<proto>\S+)"
         r"(?:.*?SPT=(?P<src_port>\d+))?"
         r"(?:.*?DPT=(?P<dst_port>\d+))?",
-        re.IGNORECASE
+        re.IGNORECASE,
     ),
     # Admin login events
     "admin_login": re.compile(
         r"(?:admin|ubnt-systemmgr).*?"
         r"(?P<action>login|logout|failed login)\s+"
         r"(?:from\s+)?(?P<src_ip>\d+\.\d+\.\d+\.\d+)?",
-        re.IGNORECASE
+        re.IGNORECASE,
     ),
     # VPN events
     "vpn_event": re.compile(
         r"(?:ipsec|openvpn|wireguard|l2tp).*?"
         r"(?P<action>established|terminated|failed|connected|disconnected)\s*"
         r"(?:.*?peer[=:\s]+(?P<peer>\S+))?",
-        re.IGNORECASE
+        re.IGNORECASE,
     ),
     # Threat detection
     "threat_detection": re.compile(
@@ -68,7 +68,7 @@ UNIFI_PATTERNS = {
         r"(?P<threat_type>\S+).*?"
         r"(?:from|src)[=:\s]+(?P<src_ip>\d+\.\d+\.\d+\.\d+)?.*?"
         r"(?:to|dst)[=:\s]+(?P<dst_ip>\d+\.\d+\.\d+\.\d+)?",
-        re.IGNORECASE
+        re.IGNORECASE,
     ),
 }
 
@@ -101,7 +101,9 @@ class UnifiConnector(DataSourceConnector):
 
     _registered_handlers: set[uuid.UUID] = set()
 
-    def __init__(self, connector_id: uuid.UUID, config: dict[str, Any], credentials: dict[str, Any]):
+    def __init__(
+        self, connector_id: uuid.UUID, config: dict[str, Any], credentials: dict[str, Any]
+    ):
         super().__init__(connector_id, config, credentials)
         self._register_syslog_handler()
 
@@ -117,7 +119,15 @@ class UnifiConnector(DataSourceConnector):
             connector_id=self.connector_id,
             callback=self._on_syslog_message,
             source_ips=[source_ip] if source_ip else [],
-            hostname_patterns=[r"UDM", r"USG", r"UAP", r"USW", r"UniFi", r"Dream Machine", r"Dream.Machine"],
+            hostname_patterns=[
+                r"UDM",
+                r"USG",
+                r"UAP",
+                r"USW",
+                r"UniFi",
+                r"Dream Machine",
+                r"Dream.Machine",
+            ],
         )
         self._registered_handlers.add(self.connector_id)
         logger.info(f"UniFi connector {self.connector_id} registered for syslog")
@@ -140,7 +150,8 @@ class UnifiConnector(DataSourceConnector):
                     "source_ip": {
                         "type": "string",
                         "title": "UniFi Source IP",
-                        "description": "IP address of your UniFi controller (for filtering syslog messages). Leave empty to accept from any IP.",
+                        "description": "IP address of your UniFi controller (for filtering "
+                        "syslog messages). Leave empty to accept from any IP.",
                         "default": "",
                     },
                     "syslog_info": {
@@ -158,7 +169,8 @@ class UnifiConnector(DataSourceConnector):
                     "syslog_token": {
                         "type": "string",
                         "title": "Verification Token (Optional)",
-                        "description": "Optional token to verify syslog messages are from your UniFi",
+                        "description": "Optional token to verify syslog messages "
+                        "are from your UniFi",
                         "format": "password",
                     },
                 },
@@ -177,13 +189,15 @@ class UnifiConnector(DataSourceConnector):
 
             return ConnectionTestResult(
                 success=True,
-                message="Syslog receiver is ready. Configure your UniFi to send logs to this server on port 5514.",
+                message="Syslog receiver is ready. Configure your UniFi to send logs "
+                "to this server on port 5514.",
                 details={
                     "mode": "syslog",
                     "port": 5514,
                     "buffered_messages": buffer_size,
                     "source_ip_filter": self.config.get("source_ip", "any"),
-                    "instructions": "In UniFi: Settings → Integrations → Activity Logging → SIEM Server",
+                    "instructions": "In UniFi: Settings → Integrations → "
+                    "Activity Logging → SIEM Server",
                 },
                 latency_ms=0,
             )
@@ -199,8 +213,8 @@ class UnifiConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch alerts from the syslog buffer."""
         try:
             syslog_receiver = get_syslog_receiver()
@@ -217,14 +231,17 @@ class UnifiConnector(DataSourceConnector):
                 if alert:
                     normalized_alerts.append(alert)
 
-            logger.info(f"UniFi syslog: processed {len(normalized_alerts)} alerts from {len(messages)} messages")
+            logger.info(
+                f"UniFi syslog: processed {len(normalized_alerts)} alerts "
+                f"from {len(messages)} messages"
+            )
 
             return normalized_alerts, None
 
         except Exception as e:
             raise Exception(f"Failed to fetch UniFi syslog alerts: {str(e)}")
 
-    def _normalize_syslog_message(self, msg: SyslogMessage) -> Optional[NormalizedAlert]:
+    def _normalize_syslog_message(self, msg: SyslogMessage) -> NormalizedAlert | None:
         """Normalize a syslog message to the unified alert schema."""
         # Try to match against known patterns
         event_type = None
@@ -300,9 +317,12 @@ class UnifiConnector(DataSourceConnector):
         if event_type == "ids_alert":
             return f"IDS Alert: {data.get('signature', 'Unknown threat')}"
         elif event_type == "firewall_block":
-            return f"Firewall Block: {data.get('src_ip', '?')} → {data.get('dst_ip', '?')}:{data.get('dst_port', '?')}"
+            return (
+                f"Firewall Block: {data.get('src_ip', '?')} → "
+                f"{data.get('dst_ip', '?')}:{data.get('dst_port', '?')}"
+            )
         elif event_type == "admin_login":
-            action = data.get('action', 'event').title()
+            action = data.get("action", "event").title()
             return f"Admin {action} from {data.get('src_ip', 'unknown')}"
         elif event_type == "vpn_event":
             return f"VPN {data.get('action', 'event').title()}: {data.get('peer', 'unknown')}"
@@ -320,21 +340,25 @@ class UnifiConnector(DataSourceConnector):
         ]
 
         if event_type == "ids_alert":
-            lines.extend([
-                f"Signature: {data.get('signature', 'Unknown')}",
-                f"Classification: {data.get('classification', 'Unknown')}",
-                f"Priority: {data.get('priority', '?')}",
-                f"Source: {data.get('src_ip', '?')}:{data.get('src_port', '?')}",
-                f"Destination: {data.get('dst_ip', '?')}:{data.get('dst_port', '?')}",
-            ])
+            lines.extend(
+                [
+                    f"Signature: {data.get('signature', 'Unknown')}",
+                    f"Classification: {data.get('classification', 'Unknown')}",
+                    f"Priority: {data.get('priority', '?')}",
+                    f"Source: {data.get('src_ip', '?')}:{data.get('src_port', '?')}",
+                    f"Destination: {data.get('dst_ip', '?')}:{data.get('dst_port', '?')}",
+                ]
+            )
         elif event_type == "firewall_block":
-            lines.extend([
-                f"Rule: {data.get('rule_name', 'Unknown')}",
-                f"Protocol: {data.get('proto', '?')}",
-                f"Source: {data.get('src_ip', '?')}:{data.get('src_port', '?')}",
-                f"Destination: {data.get('dst_ip', '?')}:{data.get('dst_port', '?')}",
-                f"Interface: {data.get('in_iface', '?')} → {data.get('out_iface', '?')}",
-            ])
+            lines.extend(
+                [
+                    f"Rule: {data.get('rule_name', 'Unknown')}",
+                    f"Protocol: {data.get('proto', '?')}",
+                    f"Source: {data.get('src_ip', '?')}:{data.get('src_port', '?')}",
+                    f"Destination: {data.get('dst_ip', '?')}:{data.get('dst_port', '?')}",
+                    f"Interface: {data.get('in_iface', '?')} → {data.get('out_iface', '?')}",
+                ]
+            )
         else:
             lines.append(f"Message: {msg.message}")
 

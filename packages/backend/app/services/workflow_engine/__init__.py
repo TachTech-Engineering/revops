@@ -8,8 +8,8 @@ Tines-like workflow automation engine with support for:
 - Execution tracking and debugging
 """
 
-from app.services.workflow_engine.engine import WorkflowEngine
 from app.services.workflow_engine.context import ExecutionContext
+from app.services.workflow_engine.engine import WorkflowEngine
 from app.services.workflow_engine.templating import TemplateResolver
 
 __all__ = [

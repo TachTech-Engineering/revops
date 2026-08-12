@@ -1,14 +1,14 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, UserRole, UserRoleType
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAdminDep
+from app.api.v1.deps import OrgAdminDep, OrgIdDep
 from app.config import settings
+from app.db import UserRole, UserRoleType, get_db
 
 router = APIRouter()
 
@@ -63,9 +63,7 @@ async def list_user_roles(
 ) -> list[UserRoleResponse]:
     """List all user roles. Admin only."""
     result = await db.execute(
-        select(UserRole)
-        .where(UserRole.organization_id == org_id)
-        .order_by(UserRole.email)
+        select(UserRole).where(UserRole.organization_id == org_id).order_by(UserRole.email)
     )
     roles = result.scalars().all()
     return [
@@ -93,9 +91,7 @@ async def create_user_role(
 
     # Check if user already has a role in this organization
     result = await db.execute(
-        select(UserRole).where(
-            and_(UserRole.email == email, UserRole.organization_id == org_id)
-        )
+        select(UserRole).where(and_(UserRole.email == email, UserRole.organization_id == org_id))
     )
     existing = result.scalar_one_or_none()
     if existing:
@@ -141,9 +137,7 @@ async def update_user_role(
 ) -> UserRoleResponse:
     """Update a user's role. Admin only."""
     result = await db.execute(
-        select(UserRole).where(
-            and_(UserRole.id == role_id, UserRole.organization_id == org_id)
-        )
+        select(UserRole).where(and_(UserRole.id == role_id, UserRole.organization_id == org_id))
     )
     role = result.scalar_one_or_none()
     if not role:
@@ -172,9 +166,7 @@ async def delete_user_role(
 ) -> dict[str, str]:
     """Delete a user role assignment. Admin only."""
     result = await db.execute(
-        select(UserRole).where(
-            and_(UserRole.id == role_id, UserRole.organization_id == org_id)
-        )
+        select(UserRole).where(and_(UserRole.id == role_id, UserRole.organization_id == org_id))
     )
     role = result.scalar_one_or_none()
     if not role:

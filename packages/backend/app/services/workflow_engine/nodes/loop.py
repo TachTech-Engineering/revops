@@ -4,10 +4,8 @@ Loop Node Executor
 Iterates over a list and executes child nodes for each item.
 """
 
-from typing import Any
-
-from app.services.workflow_engine.nodes.base import NodeExecutor, NodeResult
 from app.services.workflow_engine.context import ExecutionContext
+from app.services.workflow_engine.nodes.base import NodeExecutor, NodeResult
 from app.services.workflow_engine.templating import TemplateResolver
 
 

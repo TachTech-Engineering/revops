@@ -2,17 +2,16 @@
 User Management API endpoints.
 Allows admins to view and manage user accounts.
 """
-from typing import Optional
+
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import User, UserRoleType
 from app.api.v1.deps import OrgAdminDep, OrgIdDep, get_db
-from fastapi import Depends
+from app.db import User, UserRoleType
 
 router = APIRouter()
 
@@ -20,12 +19,12 @@ router = APIRouter()
 class UserResponse(BaseModel):
     id: str
     email: str
-    name: Optional[str]
+    name: str | None
     role: str
     is_active: bool
-    sso_provider: Optional[str]
+    sso_provider: str | None
     created_at: str
-    last_login_at: Optional[str]
+    last_login_at: str | None
 
     class Config:
         from_attributes = True
@@ -39,8 +38,8 @@ class UserListResponse(BaseModel):
 
 
 class UserUpdateRequest(BaseModel):
-    role: Optional[str] = None
-    is_active: Optional[bool] = None
+    role: str | None = None
+    is_active: bool | None = None
 
 
 @router.get("", response_model=UserListResponse)
@@ -50,9 +49,9 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
-    search: Optional[str] = None,
-    role: Optional[str] = None,
-    is_active: Optional[bool] = None,
+    search: str | None = None,
+    role: str | None = None,
+    is_active: bool | None = None,
 ):
     """
     List all users in the organization.
@@ -63,9 +62,7 @@ async def list_users(
 
     if search:
         search_filter = f"%{search.lower()}%"
-        query = query.where(
-            (User.email.ilike(search_filter)) | (User.name.ilike(search_filter))
-        )
+        query = query.where((User.email.ilike(search_filter)) | (User.name.ilike(search_filter)))
 
     if role:
         try:
@@ -161,17 +158,11 @@ async def update_user(
 
     # Prevent self-deactivation
     if user.id == user_id and update.is_active is False:
-        raise HTTPException(
-            status_code=400,
-            detail="You cannot deactivate your own account"
-        )
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
 
     # Prevent self-demotion from admin
     if user.id == user_id and update.role and update.role.upper() != "ADMIN":
-        raise HTTPException(
-            status_code=400,
-            detail="You cannot remove your own admin role"
-        )
+        raise HTTPException(status_code=400, detail="You cannot remove your own admin role")
 
     # Update fields
     if update.role is not None:
@@ -180,7 +171,7 @@ async def update_user(
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid role: {update.role}. Valid roles: admin, analyst, viewer"
+                detail=f"Invalid role: {update.role}. Valid roles: admin, analyst, viewer",
             )
 
     if update.is_active is not None:
@@ -214,10 +205,7 @@ async def delete_user(
     """
     # Prevent self-deletion
     if user.id == user_id:
-        raise HTTPException(
-            status_code=400,
-            detail="You cannot delete your own account"
-        )
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
 
     result = await db.execute(
         select(User).where(User.id == user_id, User.organization_id == org_id)

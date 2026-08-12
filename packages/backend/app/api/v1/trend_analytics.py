@@ -2,29 +2,35 @@
 Trend Analysis API - Feature 9
 Forecasting, anomaly detection, coverage visualization.
 """
+
 from datetime import datetime, timedelta
-from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAdminDep
-from app.db import get_db, AlertTrendCache, AnomalyDetection, AnomalyType, MitreMapping, NormalizedAlert
-from fastapi import Depends
+from app.api.v1.deps import OrgAdminDep, OrgIdDep, OrgUserDep
+from app.db import (
+    AlertTrendCache,
+    AnomalyDetection,
+    AnomalyType,
+    MitreMapping,
+    get_db,
+)
 
 router = APIRouter()
 
 
 # ==================== Response Models ====================
 
+
 class TrendDataPoint(BaseModel):
     timestamp: str
     total: int
     by_severity: dict
-    change_from_previous: Optional[float]
+    change_from_previous: float | None
 
 
 class TrendResponse(BaseModel):
@@ -72,6 +78,7 @@ class CoverageGapResponse(BaseModel):
 
 # ==================== Trends ====================
 
+
 @router.get("/trends", response_model=TrendResponse)
 async def get_trends(
     user: OrgUserDep,
@@ -113,6 +120,7 @@ async def get_trends(
 
         while current < end_date:
             import random
+
             daily_total = random.randint(50, 200)
             total += daily_total
 
@@ -187,6 +195,7 @@ async def get_forecast(
     else:
         # Demo data
         import random
+
         historical_totals = [random.randint(50, 200) for _ in range(30)]
         historical_average = sum(historical_totals) / len(historical_totals)
 
@@ -201,6 +210,7 @@ async def get_forecast(
 
     # Calculate confidence interval (simple standard deviation based)
     import statistics
+
     if len(historical_totals) >= 2:
         std_dev = statistics.stdev(historical_totals)
     else:
@@ -223,13 +233,14 @@ async def get_forecast(
 
 # ==================== Anomaly Detection ====================
 
+
 @router.get("/anomalies", response_model=list[AnomalyResponse])
 async def get_anomalies(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: AsyncSession = Depends(get_db),
-    acknowledged: Optional[bool] = Query(None),
-    severity: Optional[str] = Query(None),
+    acknowledged: bool | None = Query(None),
+    severity: str | None = Query(None),
     days: int = Query(7, ge=1, le=90),
 ):
     """Get detected anomalies."""
@@ -317,7 +328,10 @@ async def trigger_anomaly_detection(
         organization_id=org_id,
         anomaly_type=AnomalyType.VOLUME_SPIKE,
         severity="high",
-        description="Alert volume increased by 150% compared to baseline. Potentially indicates active attack or misconfigured rule.",
+        description=(
+            "Alert volume increased by 150% compared to baseline. "
+            "Potentially indicates active attack or misconfigured rule."
+        ),
         detected_value=450.0,
         expected_value=180.0,
         deviation_percentage=150.0,
@@ -368,7 +382,9 @@ async def get_coverage_gaps(
         .where(MitreMapping.organization_id == org_id)
         .group_by(MitreMapping.tactic)
     )
-    coverage_by_tactic = {row[0].value if hasattr(row[0], 'value') else row[0]: row[1] for row in result.all()}
+    coverage_by_tactic = {
+        row[0].value if hasattr(row[0], "value") else row[0]: row[1] for row in result.all()
+    }
 
     gaps = []
     for tactic_id, tactic_info in MITRE_TACTICS.items():
@@ -406,7 +422,7 @@ async def get_coverage_heatmap(
     days: int = Query(30, ge=1, le=365),
 ):
     """Get MITRE ATT&CK heatmap based on alert activity."""
-    start_date = datetime.utcnow() - timedelta(days=days)
+    datetime.utcnow() - timedelta(days=days)
 
     # Get alerts with MITRE mappings
     # In production, this would aggregate alert data
@@ -415,6 +431,7 @@ async def get_coverage_heatmap(
     heatmap = {}
     for tactic_id, tactic_info in MITRE_TACTICS.items():
         import random
+
         heatmap[tactic_id] = {
             "name": tactic_info["name"],
             "alert_count": random.randint(0, 100),

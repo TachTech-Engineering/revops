@@ -3,14 +3,16 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.api.v1.deps import PantherServiceDep, OrgUserDep, OrgIdDep, OrgAnalystDep
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep, PantherServiceDep
 
 router = APIRouter()
 
 
 class IOCSearchRequest(BaseModel):
     indicator: str
-    indicator_type: str | None = None  # ip, domain, hash, email, username - auto-detect if not provided
+    indicator_type: str | None = (
+        None  # ip, domain, hash, email, username - auto-detect if not provided
+    )
     time_range_days: int = 7
 
 
@@ -28,39 +30,39 @@ def detect_indicator_type(indicator: str) -> str:
     import re
 
     # IP address (v4)
-    if re.match(r'^(\d{1,3}\.){3}\d{1,3}$', indicator):
-        return 'ip'
+    if re.match(r"^(\d{1,3}\.){3}\d{1,3}$", indicator):
+        return "ip"
 
     # IP address (v6)
-    if re.match(r'^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$', indicator):
-        return 'ip'
+    if re.match(r"^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$", indicator):
+        return "ip"
 
     # MD5 hash
-    if re.match(r'^[a-fA-F0-9]{32}$', indicator):
-        return 'hash_md5'
+    if re.match(r"^[a-fA-F0-9]{32}$", indicator):
+        return "hash_md5"
 
     # SHA1 hash
-    if re.match(r'^[a-fA-F0-9]{40}$', indicator):
-        return 'hash_sha1'
+    if re.match(r"^[a-fA-F0-9]{40}$", indicator):
+        return "hash_sha1"
 
     # SHA256 hash
-    if re.match(r'^[a-fA-F0-9]{64}$', indicator):
-        return 'hash_sha256'
+    if re.match(r"^[a-fA-F0-9]{64}$", indicator):
+        return "hash_sha256"
 
     # Email
-    if re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', indicator):
-        return 'email'
+    if re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", indicator):
+        return "email"
 
     # Domain (simple check)
-    if re.match(r'^[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}', indicator) and '/' not in indicator:
-        return 'domain'
+    if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9-]*\.[a-zA-Z]{2,}", indicator) and "/" not in indicator:
+        return "domain"
 
     # URL
-    if indicator.startswith(('http://', 'https://')):
-        return 'url'
+    if indicator.startswith(("http://", "https://")):
+        return "url"
 
     # Default to username
-    return 'username'
+    return "username"
 
 
 def build_search_query(indicator: str, indicator_type: str, days: int) -> str:
@@ -79,27 +81,44 @@ FROM panther_logs.public.all_logs
 WHERE p_event_time > current_timestamp - interval '{days}' day
 """
 
-    if indicator_type == 'ip':
-        return base_query + f"  AND ARRAY_CONTAINS('{indicator}'::variant, p_any_ip_addresses)\nLIMIT 500"
-    elif indicator_type == 'domain':
-        return base_query + f"  AND ARRAY_CONTAINS('{indicator}'::variant, p_any_domain_names)\nLIMIT 500"
-    elif indicator_type in ('hash_md5', 'hash_sha1', 'hash_sha256'):
-        return base_query + f"  AND (ARRAY_CONTAINS('{indicator}'::variant, p_any_md5_hashes) OR ARRAY_CONTAINS('{indicator}'::variant, p_any_sha1_hashes) OR ARRAY_CONTAINS('{indicator}'::variant, p_any_sha256_hashes))\nLIMIT 500"
-    elif indicator_type == 'email':
+    if indicator_type == "ip":
+        return (
+            base_query
+            + f"  AND ARRAY_CONTAINS('{indicator}'::variant, p_any_ip_addresses)\nLIMIT 500"
+        )
+    elif indicator_type == "domain":
+        return (
+            base_query
+            + f"  AND ARRAY_CONTAINS('{indicator}'::variant, p_any_domain_names)\nLIMIT 500"
+        )
+    elif indicator_type in ("hash_md5", "hash_sha1", "hash_sha256"):
+        return (
+            base_query
+            + f"  AND (ARRAY_CONTAINS('{indicator}'::variant, p_any_md5_hashes)"
+            f" OR ARRAY_CONTAINS('{indicator}'::variant, p_any_sha1_hashes)"
+            f" OR ARRAY_CONTAINS('{indicator}'::variant, p_any_sha256_hashes))"
+            "\nLIMIT 500"
+        )
+    elif indicator_type == "email":
         return base_query + f"  AND ARRAY_CONTAINS('{indicator}'::variant, p_any_emails)\nLIMIT 500"
-    elif indicator_type == 'username':
-        return base_query + f"  AND ARRAY_CONTAINS('{indicator}'::variant, p_any_usernames)\nLIMIT 500"
-    elif indicator_type == 'url':
+    elif indicator_type == "username":
+        return (
+            base_query + f"  AND ARRAY_CONTAINS('{indicator}'::variant, p_any_usernames)\nLIMIT 500"
+        )
+    elif indicator_type == "url":
         return base_query + f"  AND ARRAY_CONTAINS('{indicator}'::variant, p_any_urls)\nLIMIT 500"
     else:
         # Generic search across all fields
-        return base_query + f"""  AND (
+        return (
+            base_query
+            + f"""  AND (
     ARRAY_CONTAINS('{indicator}'::variant, p_any_ip_addresses)
     OR ARRAY_CONTAINS('{indicator}'::variant, p_any_domain_names)
     OR ARRAY_CONTAINS('{indicator}'::variant, p_any_usernames)
     OR ARRAY_CONTAINS('{indicator}'::variant, p_any_emails)
   )
 LIMIT 500"""
+        )
 
 
 @router.post("/search")
@@ -138,9 +157,15 @@ async def search_ioc(
             sources_map[source]["count"] += 1
 
             if event_time:
-                if not sources_map[source]["first_seen"] or event_time < sources_map[source]["first_seen"]:
+                if (
+                    not sources_map[source]["first_seen"]
+                    or event_time < sources_map[source]["first_seen"]
+                ):
                     sources_map[source]["first_seen"] = event_time
-                if not sources_map[source]["last_seen"] or event_time > sources_map[source]["last_seen"]:
+                if (
+                    not sources_map[source]["last_seen"]
+                    or event_time > sources_map[source]["last_seen"]
+                ):
                     sources_map[source]["last_seen"] = event_time
 
                 if not first_seen or event_time < first_seen:

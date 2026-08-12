@@ -7,15 +7,15 @@ Integrates with Google SecOps/Chronicle to fetch and normalize alerts.
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
 
 
@@ -76,14 +76,14 @@ class GoogleSecOpsConnector(DataSourceConnector):
     async def _get_access_token(self) -> str:
         """Get OAuth2 access token from service account credentials."""
         import json
-        from google.oauth2 import service_account
+
         from google.auth.transport.requests import Request
+        from google.oauth2 import service_account
 
         try:
             creds_json = json.loads(self.credentials.get("service_account_json", "{}"))
             credentials = service_account.Credentials.from_service_account_info(
-                creds_json,
-                scopes=["https://www.googleapis.com/auth/chronicle-backstory"]
+                creds_json, scopes=["https://www.googleapis.com/auth/chronicle-backstory"]
             )
             credentials.refresh(Request())
             return credentials.token
@@ -145,8 +145,8 @@ class GoogleSecOpsConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch detections from Chronicle API."""
         try:
             token = await self._get_access_token()

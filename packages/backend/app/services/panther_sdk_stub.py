@@ -1,16 +1,18 @@
 """Stub module for panther_sdk - provides placeholder classes until real SDK is available."""
-from typing import Any, Optional, AsyncIterator
-from enum import Enum
+
+from collections.abc import AsyncIterator
+from enum import StrEnum
+from typing import Any
 
 
-class AlertStatus(str, Enum):
+class AlertStatus(StrEnum):
     OPEN = "OPEN"
     TRIAGED = "TRIAGED"
     CLOSED = "CLOSED"
     RESOLVED = "RESOLVED"
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     INFO = "INFO"
     LOW = "LOW"
     MEDIUM = "MEDIUM"
@@ -20,11 +22,13 @@ class Severity(str, Enum):
 
 class PantherError(Exception):
     """Base exception for Panther errors."""
+
     pass
 
 
 class NotFoundError(PantherError):
     """Resource not found error."""
+
     pass
 
 

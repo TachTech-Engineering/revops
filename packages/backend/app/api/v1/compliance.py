@@ -3,69 +3,69 @@ Compliance Dashboard API
 
 Provides endpoints for managing compliance frameworks, controls, and assessments.
 """
-from datetime import datetime
-from typing import Optional, List
-from uuid import UUID
-import io
-import csv
 
-from fastapi import APIRouter, HTTPException, Query, Response
+import csv
+import io
+from datetime import datetime
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAdminDep
+from app.api.v1.deps import OrgAdminDep, OrgIdDep, OrgUserDep
 from app.db import get_db
 from app.db.models import (
-    ComplianceFramework,
-    ComplianceControl,
     ComplianceAssessment,
+    ComplianceControl,
+    ComplianceFramework,
     ComplianceStatus,
 )
-from fastapi import Depends
 
 router = APIRouter()
 
 
 # ==================== Request/Response Models ====================
 
+
 class FrameworkCreate(BaseModel):
     name: str
-    description: Optional[str] = None
-    version: Optional[str] = None
+    description: str | None = None
+    version: str | None = None
 
 
 class FrameworkResponse(BaseModel):
     id: str
     name: str
-    description: Optional[str]
-    version: Optional[str]
+    description: str | None
+    version: str | None
     is_active: bool
     total_controls: int
     implemented_controls: int
     coverage_percentage: float
-    last_assessment_date: Optional[str]
-    next_assessment_date: Optional[str]
+    last_assessment_date: str | None
+    next_assessment_date: str | None
     created_at: str
 
 
 class ControlCreate(BaseModel):
     control_id: str
     title: str
-    description: Optional[str] = None
-    owner: Optional[str] = None
-    due_date: Optional[datetime] = None
+    description: str | None = None
+    owner: str | None = None
+    due_date: datetime | None = None
 
 
 class ControlUpdate(BaseModel):
-    status: Optional[str] = None
-    evidence: Optional[str] = None
-    evidence_links: Optional[List[str]] = None
-    owner: Optional[str] = None
-    due_date: Optional[datetime] = None
-    notes: Optional[str] = None
+    status: str | None = None
+    evidence: str | None = None
+    evidence_links: list[str] | None = None
+    owner: str | None = None
+    due_date: datetime | None = None
+    notes: str | None = None
 
 
 class ControlResponse(BaseModel):
@@ -73,21 +73,21 @@ class ControlResponse(BaseModel):
     framework_id: str
     control_id: str
     title: str
-    description: Optional[str]
+    description: str | None
     status: str
-    evidence: Optional[str]
-    evidence_links: List[str]
-    owner: Optional[str]
-    due_date: Optional[str]
-    last_reviewed_at: Optional[str]
-    reviewed_by: Optional[str]
-    notes: Optional[str]
+    evidence: str | None
+    evidence_links: list[str]
+    owner: str | None
+    due_date: str | None
+    last_reviewed_at: str | None
+    reviewed_by: str | None
+    notes: str | None
     created_at: str
     updated_at: str
 
 
 class AssessmentCreate(BaseModel):
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class AssessmentResponse(BaseModel):
@@ -99,8 +99,8 @@ class AssessmentResponse(BaseModel):
     implemented_count: int
     partial_count: int
     not_implemented_count: int
-    notes: Optional[str]
-    assessor: Optional[str]
+    notes: str | None
+    assessor: str | None
 
 
 class DashboardSummary(BaseModel):
@@ -111,22 +111,21 @@ class DashboardSummary(BaseModel):
     partial_controls: int
     not_implemented_controls: int
     overall_coverage: float
-    frameworks_summary: List[dict]
+    frameworks_summary: list[dict]
 
 
 # ==================== Framework Endpoints ====================
 
-@router.get("/frameworks", response_model=List[FrameworkResponse])
+
+@router.get("/frameworks", response_model=list[FrameworkResponse])
 async def list_frameworks(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: AsyncSession = Depends(get_db),
-    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    is_active: bool | None = Query(None, description="Filter by active status"),
 ):
     """List all compliance frameworks for the organization."""
-    query = select(ComplianceFramework).where(
-        ComplianceFramework.organization_id == org_id
-    )
+    query = select(ComplianceFramework).where(ComplianceFramework.organization_id == org_id)
 
     if is_active is not None:
         query = query.where(ComplianceFramework.is_active == is_active)
@@ -146,8 +145,12 @@ async def list_frameworks(
             total_controls=f.total_controls,
             implemented_controls=f.implemented_controls,
             coverage_percentage=f.coverage_percentage,
-            last_assessment_date=f.last_assessment_date.isoformat() if f.last_assessment_date else None,
-            next_assessment_date=f.next_assessment_date.isoformat() if f.next_assessment_date else None,
+            last_assessment_date=f.last_assessment_date.isoformat()
+            if f.last_assessment_date
+            else None,
+            next_assessment_date=f.next_assessment_date.isoformat()
+            if f.next_assessment_date
+            else None,
             created_at=f.created_at.isoformat(),
         )
         for f in frameworks
@@ -218,21 +221,26 @@ async def get_framework(
         total_controls=framework.total_controls,
         implemented_controls=framework.implemented_controls,
         coverage_percentage=framework.coverage_percentage,
-        last_assessment_date=framework.last_assessment_date.isoformat() if framework.last_assessment_date else None,
-        next_assessment_date=framework.next_assessment_date.isoformat() if framework.next_assessment_date else None,
+        last_assessment_date=framework.last_assessment_date.isoformat()
+        if framework.last_assessment_date
+        else None,
+        next_assessment_date=framework.next_assessment_date.isoformat()
+        if framework.next_assessment_date
+        else None,
         created_at=framework.created_at.isoformat(),
     )
 
 
 # ==================== Control Endpoints ====================
 
-@router.get("/frameworks/{framework_id}/controls", response_model=List[ControlResponse])
+
+@router.get("/frameworks/{framework_id}/controls", response_model=list[ControlResponse])
 async def list_controls(
     framework_id: UUID,
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: AsyncSession = Depends(get_db),
-    status: Optional[str] = Query(None, description="Filter by status"),
+    status: str | None = Query(None, description="Filter by status"),
 ):
     """List all controls for a framework."""
     # Verify framework belongs to org
@@ -247,9 +255,7 @@ async def list_controls(
     if not framework_result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Framework not found")
 
-    query = select(ComplianceControl).where(
-        ComplianceControl.framework_id == framework_id
-    )
+    query = select(ComplianceControl).where(ComplianceControl.framework_id == framework_id)
 
     if status:
         try:
@@ -322,7 +328,8 @@ async def create_control(
     framework.total_controls += 1
     framework.coverage_percentage = (
         framework.implemented_controls / framework.total_controls * 100
-        if framework.total_controls > 0 else 0
+        if framework.total_controls > 0
+        else 0
     )
 
     await db.commit()
@@ -411,7 +418,8 @@ async def update_control(
         framework.implemented_controls = impl_result.scalar() or 0
         framework.coverage_percentage = (
             framework.implemented_controls / framework.total_controls * 100
-            if framework.total_controls > 0 else 0
+            if framework.total_controls > 0
+            else 0
         )
 
     await db.commit()
@@ -438,6 +446,7 @@ async def update_control(
 
 # ==================== Dashboard Endpoints ====================
 
+
 @router.get("/dashboard/summary", response_model=DashboardSummary)
 async def get_dashboard_summary(
     user: OrgUserDep,
@@ -447,18 +456,13 @@ async def get_dashboard_summary(
     """Get compliance dashboard summary metrics."""
     # Get all frameworks
     frameworks_result = await db.execute(
-        select(ComplianceFramework).where(
-            ComplianceFramework.organization_id == org_id
-        )
+        select(ComplianceFramework).where(ComplianceFramework.organization_id == org_id)
     )
     frameworks = frameworks_result.scalars().all()
 
     # Get control counts by status
     control_counts_result = await db.execute(
-        select(
-            ComplianceControl.status,
-            func.count(ComplianceControl.id).label("count")
-        )
+        select(ComplianceControl.status, func.count(ComplianceControl.id).label("count"))
         .where(ComplianceControl.organization_id == org_id)
         .group_by(ComplianceControl.status)
     )
@@ -496,6 +500,7 @@ async def get_dashboard_summary(
 
 # ==================== Assessment Endpoints ====================
 
+
 @router.post("/frameworks/{framework_id}/assessments", response_model=AssessmentResponse)
 async def create_assessment(
     framework_id: UUID,
@@ -520,10 +525,7 @@ async def create_assessment(
 
     # Count controls by status
     counts_result = await db.execute(
-        select(
-            ComplianceControl.status,
-            func.count(ComplianceControl.id).label("count")
-        )
+        select(ComplianceControl.status, func.count(ComplianceControl.id).label("count"))
         .where(ComplianceControl.framework_id == framework_id)
         .group_by(ComplianceControl.status)
     )
@@ -570,7 +572,7 @@ async def create_assessment(
     )
 
 
-@router.get("/frameworks/{framework_id}/assessments", response_model=List[AssessmentResponse])
+@router.get("/frameworks/{framework_id}/assessments", response_model=list[AssessmentResponse])
 async def list_assessments(
     framework_id: UUID,
     user: OrgUserDep,
@@ -611,19 +613,18 @@ async def list_assessments(
 
 # ==================== Export Endpoints ====================
 
+
 @router.post("/reports/export")
 async def export_compliance_report(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: AsyncSession = Depends(get_db),
-    framework_id: Optional[UUID] = Query(None, description="Filter by framework"),
+    framework_id: UUID | None = Query(None, description="Filter by framework"),
     format: str = Query("csv", description="Export format: csv or pdf"),
 ):
     """Export compliance report as CSV or PDF."""
     # Build query
-    query = select(ComplianceControl).where(
-        ComplianceControl.organization_id == org_id
-    )
+    query = select(ComplianceControl).where(ComplianceControl.organization_id == org_id)
     if framework_id:
         query = query.where(ComplianceControl.framework_id == framework_id)
 
@@ -636,38 +637,50 @@ async def export_compliance_report(
         # Generate CSV
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow([
-            "Control ID", "Title", "Status", "Owner", "Due Date",
-            "Last Reviewed", "Evidence", "Notes"
-        ])
+        writer.writerow(
+            [
+                "Control ID",
+                "Title",
+                "Status",
+                "Owner",
+                "Due Date",
+                "Last Reviewed",
+                "Evidence",
+                "Notes",
+            ]
+        )
 
         for c in controls:
-            writer.writerow([
-                c.control_id,
-                c.title,
-                c.status.value,
-                c.owner or "",
-                c.due_date.isoformat() if c.due_date else "",
-                c.last_reviewed_at.isoformat() if c.last_reviewed_at else "",
-                c.evidence or "",
-                c.notes or "",
-            ])
+            writer.writerow(
+                [
+                    c.control_id,
+                    c.title,
+                    c.status.value,
+                    c.owner or "",
+                    c.due_date.isoformat() if c.due_date else "",
+                    c.last_reviewed_at.isoformat() if c.last_reviewed_at else "",
+                    c.evidence or "",
+                    c.notes or "",
+                ]
+            )
 
         output.seek(0)
         return StreamingResponse(
             iter([output.getvalue()]),
             media_type="text/csv",
             headers={
-                "Content-Disposition": f"attachment; filename=compliance_report_{datetime.utcnow().strftime('%Y%m%d')}.csv"
-            }
+                "Content-Disposition": (
+                    "attachment; filename=compliance_report_"
+                    f"{datetime.utcnow().strftime('%Y%m%d')}.csv"
+                )
+            },
         )
 
     elif format == "pdf":
         # For PDF, we'd typically use a library like reportlab or weasyprint
         # For now, return a message indicating PDF generation
         raise HTTPException(
-            status_code=501,
-            detail="PDF export not yet implemented. Please use CSV format."
+            status_code=501, detail="PDF export not yet implemented. Please use CSV format."
         )
 
     else:

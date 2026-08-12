@@ -1,8 +1,7 @@
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import Case, CaseActivity, CaseActivityType
@@ -40,8 +39,8 @@ async def add_case_activity(
     activity_type: CaseActivityType,
     description: str,
     user_email: str,
-    old_value: Optional[str] = None,
-    new_value: Optional[str] = None,
+    old_value: str | None = None,
+    new_value: str | None = None,
 ) -> CaseActivity:
     """Add an activity entry to a case's timeline."""
     activity = CaseActivity(
@@ -61,10 +60,10 @@ async def track_field_change(
     db: AsyncSession,
     case_id: UUID,
     field_name: str,
-    old_value: Optional[str],
-    new_value: Optional[str],
+    old_value: str | None,
+    new_value: str | None,
     user_email: str,
-) -> Optional[CaseActivity]:
+) -> CaseActivity | None:
     """Track a field change as an activity if the value actually changed."""
     if str(old_value) == str(new_value):
         return None

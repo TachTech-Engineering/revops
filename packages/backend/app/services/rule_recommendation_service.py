@@ -2,16 +2,15 @@
 Rule Recommendation Service.
 Analyzes log sources and recommends detection rules.
 """
+
 import json
 import os
 import uuid
-from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import select, and_, func
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import RuleRecommendation, RuleRecommendationDismissal, RecommendationStatus
+from app.db.models import RecommendationStatus, RuleRecommendation, RuleRecommendationDismissal
 
 
 class RuleRecommendationService:
@@ -20,16 +19,14 @@ class RuleRecommendationService:
     def __init__(self):
         self._catalog = None
         self._catalog_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
-            "data",
-            "rule_catalog.json"
+            os.path.dirname(os.path.dirname(__file__)), "data", "rule_catalog.json"
         )
 
     @property
     def catalog(self) -> dict:
         """Load and cache the rule catalog."""
         if self._catalog is None:
-            with open(self._catalog_path, "r") as f:
+            with open(self._catalog_path) as f:
                 self._catalog = json.load(f)
         return self._catalog
 
@@ -52,22 +49,25 @@ class RuleRecommendationService:
         for source in log_sources:
             # Find matching rules in catalog
             matching_rules = [
-                rule for rule in self.catalog.get("rules", [])
+                rule
+                for rule in self.catalog.get("rules", [])
                 if source in rule.get("log_sources", [])
             ]
 
-            analysis.append({
-                "log_source": source,
-                "available_rules": len(matching_rules),
-                "rules": [
-                    {
-                        "id": r["id"],
-                        "name": r["name"],
-                        "confidence": r["confidence_score"],
-                    }
-                    for r in matching_rules
-                ],
-            })
+            analysis.append(
+                {
+                    "log_source": source,
+                    "available_rules": len(matching_rules),
+                    "rules": [
+                        {
+                            "id": r["id"],
+                            "name": r["name"],
+                            "confidence": r["confidence_score"],
+                        }
+                        for r in matching_rules
+                    ],
+                }
+            )
 
         return analysis
 
@@ -90,8 +90,8 @@ class RuleRecommendationService:
     async def get_recommendations(
         self,
         db: AsyncSession,
-        log_sources: Optional[list[str]] = None,
-        status: Optional[RecommendationStatus] = None,
+        log_sources: list[str] | None = None,
+        status: RecommendationStatus | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[RuleRecommendation], int]:
@@ -129,9 +129,11 @@ class RuleRecommendationService:
             query = query.where(and_(*conditions))
 
         offset = (page - 1) * page_size
-        query = query.order_by(
-            RuleRecommendation.confidence_score.desc()
-        ).offset(offset).limit(page_size)
+        query = (
+            query.order_by(RuleRecommendation.confidence_score.desc())
+            .offset(offset)
+            .limit(page_size)
+        )
 
         result = await db.execute(query)
         recommendations = list(result.scalars().all())
@@ -236,37 +238,42 @@ class RuleRecommendationService:
         for source in log_sources:
             # Find rules that could apply to this source
             applicable_rules = [
-                rule for rule in self.catalog.get("rules", [])
+                rule
+                for rule in self.catalog.get("rules", [])
                 if source in rule.get("log_sources", [])
             ]
 
             # Determine which are missing
             missing_rules = [
-                rule for rule in applicable_rules
+                rule
+                for rule in applicable_rules
                 if rule["id"] not in existing_rules and rule["id"] not in accepted
             ]
 
             coverage_pct = (
                 (len(applicable_rules) - len(missing_rules)) / len(applicable_rules) * 100
-                if applicable_rules else 100
+                if applicable_rules
+                else 100
             )
 
-            gaps.append({
-                "log_source": source,
-                "total_available_rules": len(applicable_rules),
-                "implemented_rules": len(applicable_rules) - len(missing_rules),
-                "missing_rules": len(missing_rules),
-                "coverage_percentage": round(coverage_pct, 1),
-                "missing_rule_details": [
-                    {
-                        "id": r["id"],
-                        "name": r["name"],
-                        "mitre_tactic": r.get("mitre_tactic"),
-                        "confidence": r.get("confidence_score", 0.5),
-                    }
-                    for r in missing_rules
-                ],
-            })
+            gaps.append(
+                {
+                    "log_source": source,
+                    "total_available_rules": len(applicable_rules),
+                    "implemented_rules": len(applicable_rules) - len(missing_rules),
+                    "missing_rules": len(missing_rules),
+                    "coverage_percentage": round(coverage_pct, 1),
+                    "missing_rule_details": [
+                        {
+                            "id": r["id"],
+                            "name": r["name"],
+                            "mitre_tactic": r.get("mitre_tactic"),
+                            "confidence": r.get("confidence_score", 0.5),
+                        }
+                        for r in missing_rules
+                    ],
+                }
+            )
 
         # Sort by coverage percentage (lowest first)
         gaps.sort(key=lambda x: x["coverage_percentage"])
@@ -293,9 +300,7 @@ class RuleRecommendationService:
             Dictionary with acceptance results
         """
         result = await db.execute(
-            select(RuleRecommendation).where(
-                RuleRecommendation.id == recommendation_id
-            )
+            select(RuleRecommendation).where(RuleRecommendation.id == recommendation_id)
         )
         recommendation = result.scalar_one_or_none()
 
@@ -307,15 +312,17 @@ class RuleRecommendationService:
 
         # Create rule in Panther
         try:
-            rule_response = await panther_service.create_rule({
-                "id": recommendation.rule_id,
-                "displayName": recommendation.rule_name,
-                "body": recommendation.rule_code,
-                "severity": "Medium",
-                "logTypes": [recommendation.log_source],
-                "enabled": True,
-                "description": recommendation.description or "",
-            })
+            rule_response = await panther_service.create_rule(
+                {
+                    "id": recommendation.rule_id,
+                    "displayName": recommendation.rule_name,
+                    "body": recommendation.rule_code,
+                    "severity": "Medium",
+                    "logTypes": [recommendation.log_source],
+                    "enabled": True,
+                    "description": recommendation.description or "",
+                }
+            )
             panther_rule_id = rule_response.get("id", recommendation.rule_id)
         except Exception as e:
             raise ValueError(f"Failed to create rule in Panther: {str(e)}")
@@ -337,7 +344,7 @@ class RuleRecommendationService:
         db: AsyncSession,
         recommendation_id: uuid.UUID,
         user_email: str,
-        reason: Optional[str] = None,
+        reason: str | None = None,
     ) -> dict:
         """
         Dismiss a recommendation with an optional reason.
@@ -352,9 +359,7 @@ class RuleRecommendationService:
             Dictionary with dismissal results
         """
         result = await db.execute(
-            select(RuleRecommendation).where(
-                RuleRecommendation.id == recommendation_id
-            )
+            select(RuleRecommendation).where(RuleRecommendation.id == recommendation_id)
         )
         recommendation = result.scalar_one_or_none()
 
@@ -389,20 +394,17 @@ class RuleRecommendationService:
         status_counts = {}
         for status in RecommendationStatus:
             result = await db.execute(
-                select(func.count()).select_from(RuleRecommendation).where(
-                    RuleRecommendation.status == status
-                )
+                select(func.count())
+                .select_from(RuleRecommendation)
+                .where(RuleRecommendation.status == status)
             )
             status_counts[status.value] = result.scalar() or 0
 
         # By log source
         source_result = await db.execute(
-            select(
-                RuleRecommendation.log_source,
-                func.count()
-            ).where(
-                RuleRecommendation.status == RecommendationStatus.PENDING
-            ).group_by(RuleRecommendation.log_source)
+            select(RuleRecommendation.log_source, func.count())
+            .where(RuleRecommendation.status == RecommendationStatus.PENDING)
+            .group_by(RuleRecommendation.log_source)
         )
         by_source = {row[0]: row[1] for row in source_result.all()}
 

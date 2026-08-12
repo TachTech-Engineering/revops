@@ -2,18 +2,18 @@
 Threat Feed Management Service.
 Handles feed subscriptions, syncing, and IOC import.
 """
+
 import csv
 import io
 import time
 import uuid
 from datetime import datetime, timedelta
-from typing import Optional
 
 import httpx
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import ThreatFeed, FeedSyncLog, FeedType, FeedStatus, IOC, IOCType, IOCSeverity
+from app.db.models import IOC, FeedStatus, FeedSyncLog, FeedType, IOCSeverity, IOCType, ThreatFeed
 from app.services.ioc_service import ioc_service
 
 
@@ -34,14 +34,20 @@ class FeedParser:
             # Feodo format: first_seen_utc,dst_ip,dst_port,c2_status,last_online,malware
             if len(row) >= 6:
                 try:
-                    iocs.append({
-                        "ioc_type": IOCType.IP_ADDRESS,
-                        "value": row[1],
-                        "severity": IOCSeverity.CRITICAL,  # Botnet C2 is critical
-                        "description": f"Feodo Tracker - {row[5]} C2 server",
-                        "tags": ["botnet", "c2", row[5].lower()] if row[5] else ["botnet", "c2"],
-                        "first_seen": datetime.fromisoformat(row[0].replace(" ", "T")) if row[0] else None,
-                    })
+                    iocs.append(
+                        {
+                            "ioc_type": IOCType.IP_ADDRESS,
+                            "value": row[1],
+                            "severity": IOCSeverity.CRITICAL,  # Botnet C2 is critical
+                            "description": f"Feodo Tracker - {row[5]} C2 server",
+                            "tags": ["botnet", "c2", row[5].lower()]
+                            if row[5]
+                            else ["botnet", "c2"],
+                            "first_seen": datetime.fromisoformat(row[0].replace(" ", "T"))
+                            if row[0]
+                            else None,
+                        }
+                    )
                 except (ValueError, IndexError):
                     continue
 
@@ -58,7 +64,8 @@ class FeedParser:
             if not row or row[0].startswith("#"):
                 continue
 
-            # URLhaus format: id,dateadded,url,url_status,last_online,threat,tags,urlhaus_link,reporter
+            # URLhaus format:
+            # id,dateadded,url,url_status,last_online,threat,tags,urlhaus_link,reporter
             if len(row) >= 7:
                 try:
                     tags = row[6].split(",") if row[6] else []
@@ -66,14 +73,22 @@ class FeedParser:
                     if row[5]:
                         tags.append(row[5].lower())
 
-                    iocs.append({
-                        "ioc_type": IOCType.URL,
-                        "value": row[2],
-                        "severity": IOCSeverity.HIGH if row[3] == "online" else IOCSeverity.MEDIUM,
-                        "description": f"URLhaus - {row[5]}" if row[5] else "URLhaus malicious URL",
-                        "tags": list(set(tags)),
-                        "first_seen": datetime.fromisoformat(row[1].replace(" ", "T")) if row[1] else None,
-                    })
+                    iocs.append(
+                        {
+                            "ioc_type": IOCType.URL,
+                            "value": row[2],
+                            "severity": IOCSeverity.HIGH
+                            if row[3] == "online"
+                            else IOCSeverity.MEDIUM,
+                            "description": f"URLhaus - {row[5]}"
+                            if row[5]
+                            else "URLhaus malicious URL",
+                            "tags": list(set(tags)),
+                            "first_seen": datetime.fromisoformat(row[1].replace(" ", "T"))
+                            if row[1]
+                            else None,
+                        }
+                    )
                 except (ValueError, IndexError):
                     continue
 
@@ -107,14 +122,20 @@ class FeedParser:
                 ioc_type = IOCType.EMAIL
 
             if ioc_type and value:
-                iocs.append({
-                    "ioc_type": ioc_type,
-                    "value": value,
-                    "severity": IOCSeverity.MEDIUM,
-                    "description": ind.get("description") or data.get("name"),
-                    "tags": data.get("tags", [])[:5],
-                    "first_seen": datetime.fromisoformat(ind.get("created").replace("Z", "+00:00")).replace(tzinfo=None) if ind.get("created") else None,
-                })
+                iocs.append(
+                    {
+                        "ioc_type": ioc_type,
+                        "value": value,
+                        "severity": IOCSeverity.MEDIUM,
+                        "description": ind.get("description") or data.get("name"),
+                        "tags": data.get("tags", [])[:5],
+                        "first_seen": datetime.fromisoformat(
+                            ind.get("created").replace("Z", "+00:00")
+                        ).replace(tzinfo=None)
+                        if ind.get("created")
+                        else None,
+                    }
+                )
 
         return iocs
 
@@ -147,13 +168,15 @@ class FeedParser:
 
             try:
                 if len(row) > value_col:
-                    iocs.append({
-                        "ioc_type": ioc_type,
-                        "value": row[value_col].strip(),
-                        "severity": severity,
-                        "description": mapping.get("description", "Imported from CSV feed"),
-                        "tags": mapping.get("tags", []),
-                    })
+                    iocs.append(
+                        {
+                            "ioc_type": ioc_type,
+                            "value": row[value_col].strip(),
+                            "severity": severity,
+                            "description": mapping.get("description", "Imported from CSV feed"),
+                            "tags": mapping.get("tags", []),
+                        }
+                    )
             except (ValueError, IndexError):
                 continue
 
@@ -189,12 +212,14 @@ class FeedService:
         await db.refresh(feed)
         return feed
 
-    async def get_feed(self, db: AsyncSession, feed_id: uuid.UUID) -> Optional[ThreatFeed]:
+    async def get_feed(self, db: AsyncSession, feed_id: uuid.UUID) -> ThreatFeed | None:
         """Get a feed by ID."""
         result = await db.execute(select(ThreatFeed).where(ThreatFeed.id == feed_id))
         return result.scalar_one_or_none()
 
-    async def list_feeds(self, db: AsyncSession, status: Optional[FeedStatus] = None) -> list[ThreatFeed]:
+    async def list_feeds(
+        self, db: AsyncSession, status: FeedStatus | None = None
+    ) -> list[ThreatFeed]:
         """List all feeds, optionally filtered by status."""
         query = select(ThreatFeed)
         if status:
@@ -205,11 +230,8 @@ class FeedService:
         return list(result.scalars().all())
 
     async def update_feed(
-        self,
-        db: AsyncSession,
-        feed_id: uuid.UUID,
-        **updates
-    ) -> Optional[ThreatFeed]:
+        self, db: AsyncSession, feed_id: uuid.UUID, **updates
+    ) -> ThreatFeed | None:
         """Update a feed."""
         feed = await self.get_feed(db, feed_id)
         if not feed:
@@ -230,9 +252,7 @@ class FeedService:
             return False
 
         # Delete associated IOCs
-        await db.execute(
-            IOC.__table__.delete().where(IOC.feed_id == feed_id)
-        )
+        await db.execute(IOC.__table__.delete().where(IOC.feed_id == feed_id))
 
         await db.delete(feed)
         await db.commit()
@@ -346,12 +366,14 @@ class FeedService:
                 sync_result = await self.sync_feed(db, feed.id)
                 results.append(sync_result)
             except Exception as e:
-                results.append({
-                    "feed_id": str(feed.id),
-                    "feed_name": feed.name,
-                    "status": "failed",
-                    "error": str(e),
-                })
+                results.append(
+                    {
+                        "feed_id": str(feed.id),
+                        "feed_name": feed.name,
+                        "status": "failed",
+                        "error": str(e),
+                    }
+                )
 
         return results
 

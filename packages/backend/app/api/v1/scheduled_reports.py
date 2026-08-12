@@ -1,59 +1,58 @@
-from typing import Annotated, Optional
-from uuid import UUID
 from datetime import datetime
+from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, ScheduledReport, ReportFrequency
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep, OrgAdminDep
-from app.services.report_service import ReportService
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import ReportFrequency, ScheduledReport, get_db
 from app.services.email_service import email_service
-from app.services.report_delivery_service import report_delivery_service
+from app.services.report_service import ReportService
 
 router = APIRouter()
 
 
 class DeliveryConfig(BaseModel):
     type: str  # email, slack, teams, webhook
-    recipients: Optional[list[str]] = None  # For email
-    webhook_url: Optional[str] = None  # For webhooks
+    recipients: list[str] | None = None  # For email
+    webhook_url: str | None = None  # For webhooks
 
 
 class ScheduledReportCreate(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     report_type: str  # alert_summary, rule_summary, sla_metrics
     frequency: ReportFrequency
     recipients: list[str] = []
     filters: dict = {}
-    delivery: Optional[list[DeliveryConfig]] = None
+    delivery: list[DeliveryConfig] | None = None
     is_active: bool = True
 
 
 class ScheduledReportUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    report_type: Optional[str] = None
-    frequency: Optional[ReportFrequency] = None
-    recipients: Optional[list[str]] = None
-    filters: Optional[dict] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    description: str | None = None
+    report_type: str | None = None
+    frequency: ReportFrequency | None = None
+    recipients: list[str] | None = None
+    filters: dict | None = None
+    is_active: bool | None = None
 
 
 class ScheduledReportResponse(BaseModel):
     id: UUID
     name: str
-    description: Optional[str]
+    description: str | None
     report_type: str
     frequency: ReportFrequency
     recipients: list[str]
     filters: dict
     is_active: bool
-    last_run_at: Optional[str]
-    next_run_at: Optional[str]
+    last_run_at: str | None
+    next_run_at: str | None
     created_at: str
     updated_at: str
 
@@ -69,11 +68,13 @@ async def list_scheduled_reports(
     active_only: bool = False,
 ) -> list[ScheduledReportResponse]:
     """List all scheduled reports."""
-    query = select(ScheduledReport).where(
-        ScheduledReport.organization_id == org_id
-    ).order_by(ScheduledReport.created_at.desc())
+    query = (
+        select(ScheduledReport)
+        .where(ScheduledReport.organization_id == org_id)
+        .order_by(ScheduledReport.created_at.desc())
+    )
     if active_only:
-        query = query.where(ScheduledReport.is_active == True)
+        query = query.where(ScheduledReport.is_active.is_(True))
 
     result = await db.execute(query)
     reports = result.scalars().all()
@@ -107,10 +108,7 @@ async def get_scheduled_report(
     """Get a scheduled report by ID."""
     result = await db.execute(
         select(ScheduledReport).where(
-            and_(
-                ScheduledReport.id == report_id,
-                ScheduledReport.organization_id == org_id
-            )
+            and_(ScheduledReport.id == report_id, ScheduledReport.organization_id == org_id)
         )
     )
     report = result.scalar_one_or_none()
@@ -182,7 +180,7 @@ async def update_scheduled_report(
         select(ScheduledReport).where(
             and_(
                 ScheduledReport.id == report_id,
-                ScheduledReport.organization_id == analyst.organization_id
+                ScheduledReport.organization_id == analyst.organization_id,
             )
         )
     )
@@ -223,7 +221,7 @@ async def delete_scheduled_report(
         select(ScheduledReport).where(
             and_(
                 ScheduledReport.id == report_id,
-                ScheduledReport.organization_id == analyst.organization_id
+                ScheduledReport.organization_id == analyst.organization_id,
             )
         )
     )
@@ -246,7 +244,7 @@ async def run_report_now(
         select(ScheduledReport).where(
             and_(
                 ScheduledReport.id == report_id,
-                ScheduledReport.organization_id == analyst.organization_id
+                ScheduledReport.organization_id == analyst.organization_id,
             )
         )
     )
@@ -260,9 +258,9 @@ async def run_report_now(
 
     # Mock summary for delivery
     summary = {
-        'total_alerts': 150,
-        'by_severity': {'CRITICAL': 5, 'HIGH': 25, 'MEDIUM': 50, 'LOW': 50, 'INFO': 20},
-        'by_status': {'OPEN': 30, 'TRIAGED': 40, 'RESOLVED': 60, 'CLOSED': 20},
+        "total_alerts": 150,
+        "by_severity": {"CRITICAL": 5, "HIGH": 25, "MEDIUM": 50, "LOW": 50, "INFO": 20},
+        "by_status": {"OPEN": 30, "TRIAGED": 40, "RESOLVED": 60, "CLOSED": 20},
     }
     period = "Last 7 days"
 
@@ -293,7 +291,11 @@ async def run_report_now(
 async def list_report_types() -> list[dict]:
     """List available report types."""
     return [
-        {"id": "alert_summary", "name": "Alert Summary", "description": "Summary of alerts by severity and status"},
+        {
+            "id": "alert_summary",
+            "name": "Alert Summary",
+            "description": "Summary of alerts by severity and status",
+        },
         {"id": "rule_summary", "name": "Rule Summary", "description": "Summary of rule triggers"},
         {"id": "sla_metrics", "name": "SLA Metrics", "description": "SLA compliance metrics"},
     ]

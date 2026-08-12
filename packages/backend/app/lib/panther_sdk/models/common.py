@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class Severity(str, Enum):
+class Severity(StrEnum):
     """Alert/Rule severity levels."""
 
     INFO = "INFO"
@@ -19,7 +19,7 @@ class Severity(str, Enum):
     CRITICAL = "CRITICAL"
 
 
-class AlertStatus(str, Enum):
+class AlertStatus(StrEnum):
     """Alert status values."""
 
     OPEN = "OPEN"
@@ -28,7 +28,7 @@ class AlertStatus(str, Enum):
     RESOLVED = "RESOLVED"
 
 
-class LogType(str, Enum):
+class LogType(StrEnum):
     """Common log types supported by Panther."""
 
     # AWS
@@ -62,7 +62,7 @@ class LogType(str, Enum):
     CUSTOM_LOGS = "Custom.Logs"
 
 
-class DetectionType(str, Enum):
+class DetectionType(StrEnum):
     """Detection type values."""
 
     RULE = "RULE"

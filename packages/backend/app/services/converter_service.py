@@ -8,29 +8,33 @@ Converts detection rules from various formats into Panther Python detection rule
 Supports both streaming rules (real-time detection) and scheduled rules
 (periodic aggregation queries).
 """
+
 import logging
-from typing import Any, Optional
-from enum import Enum
+from enum import StrEnum
+from typing import Any
 
+from app.services.aql_converter import AQLTargetFormat, aql_converter
 from app.services.spl_enhanced_converter import EnhancedSPLConverter, RuleType
-from app.services.yaral_converter import YARALConverter, yaral_converter
-from app.services.aql_converter import AQLConverter, AQLTargetFormat, aql_converter
+from app.services.yaral_converter import yaral_converter
 
 
-class SourceFormat(str, Enum):
+class SourceFormat(StrEnum):
     """Supported source formats for conversion."""
+
     SPL = "spl"
     YARAL = "yaral"
     AQL = "aql"
+
 
 logger = logging.getLogger(__name__)
 
 # Import the Panther SDK converter from local lib
 try:
     from app.lib.panther_sdk.converters.splunk import (
-        SPLToPantherConverter,
         SPLConversionError,
+        SPLToPantherConverter,
     )
+
     HAS_PANTHER_SDK = True
 except ImportError:
     HAS_PANTHER_SDK = False
@@ -60,10 +64,10 @@ class ConverterService:
         self,
         spl: str,
         rule_id: str,
-        class_name: Optional[str] = None,
-        severity: Optional[str] = None,
+        class_name: str | None = None,
+        severity: str | None = None,
         source_format: SourceFormat = SourceFormat.SPL,
-        target_format: Optional[str] = None,
+        target_format: str | None = None,
     ) -> dict[str, Any]:
         """
         Convert a detection rule to a Panther rule.
@@ -117,7 +121,10 @@ class ConverterService:
                 if len(sdk_result.get("todos", [])) <= 2:
                     return sdk_result
 
-                logger.info(f"SDK produced {len(sdk_result.get('todos', []))} TODOs, trying enhanced converter")
+                logger.info(
+                    f"SDK produced {len(sdk_result.get('todos', []))} TODOs, "
+                    "trying enhanced converter"
+                )
 
             except SPLConversionError as e:
                 sdk_error = str(e)
@@ -156,10 +163,14 @@ class ConverterService:
 
                 # Use SDK result if it has fewer TODOs
                 if sdk_todo_count < enhanced_todo_count:
-                    logger.info(f"Using SDK result ({sdk_todo_count} TODOs vs {enhanced_todo_count})")
+                    logger.info(
+                        f"Using SDK result ({sdk_todo_count} TODOs vs {enhanced_todo_count})"
+                    )
                     return sdk_result
                 else:
-                    logger.info(f"Using enhanced result ({enhanced_todo_count} TODOs vs {sdk_todo_count})")
+                    logger.info(
+                        f"Using enhanced result ({enhanced_todo_count} TODOs vs {sdk_todo_count})"
+                    )
 
             return result_dict
 
@@ -235,24 +246,28 @@ class ConverterService:
                     severity=severity,
                 )
 
-                converted_rules.append({
-                    "sourceCode": result.source_code,
-                    "ruleId": result.rule_id,
-                    "className": result.class_name,
-                    "logTypes": result.log_types,
-                    "severity": result.severity,
-                    "todos": result.todos,
-                    "recommendedType": result.recommended_type.value,
-                })
+                converted_rules.append(
+                    {
+                        "sourceCode": result.source_code,
+                        "ruleId": result.rule_id,
+                        "className": result.class_name,
+                        "logTypes": result.log_types,
+                        "severity": result.severity,
+                        "todos": result.todos,
+                        "recommendedType": result.recommended_type.value,
+                    }
+                )
 
                 if result.recommended_type == RuleType.STREAMING:
                     streaming_count += 1
                 else:
-                    scheduled_recommendations.append({
-                        "ruleId": result.rule_id,
-                        "className": result.class_name,
-                        "reasons": result.recommendation_reasons,
-                    })
+                    scheduled_recommendations.append(
+                        {
+                            "ruleId": result.rule_id,
+                            "className": result.class_name,
+                            "reasons": result.recommendation_reasons,
+                        }
+                    )
 
             except Exception as e:
                 if fail_fast:
@@ -276,9 +291,9 @@ class ConverterService:
         # Try SDK validation first if available
         if HAS_PANTHER_SDK:
             try:
+                from app.lib.panther_sdk.converters.splunk.analyzer import SPLAnalyzer
                 from app.lib.panther_sdk.converters.splunk.lexer import SPLLexer
                 from app.lib.panther_sdk.converters.splunk.parser import SPLParser
-                from app.lib.panther_sdk.converters.splunk.analyzer import SPLAnalyzer
 
                 lexer = SPLLexer(spl)
                 tokens = lexer.tokenize()
@@ -311,7 +326,9 @@ class ConverterService:
                 "isThresholdRule": parsed.is_threshold_rule,
                 "recommendedType": parsed.recommended_type.value,
                 "recommendationReasons": [
-                    "Contains stats/aggregation commands" if parsed.is_threshold_rule else "No aggregation commands found"
+                    "Contains stats/aggregation commands"
+                    if parsed.is_threshold_rule
+                    else "No aggregation commands found"
                 ],
                 "parseDetails": {
                     "index": parsed.index,
@@ -331,8 +348,8 @@ class ConverterService:
         self,
         yaral: str,
         rule_id: str,
-        class_name: Optional[str] = None,
-        severity: Optional[str] = None,
+        class_name: str | None = None,
+        severity: str | None = None,
     ) -> dict[str, Any]:
         """Convert a YARA-L rule to a Panther rule."""
         try:
@@ -390,9 +407,9 @@ class ConverterService:
         self,
         aql: str,
         rule_id: str,
-        class_name: Optional[str] = None,
-        severity: Optional[str] = None,
-        target_format: Optional[str] = None,
+        class_name: str | None = None,
+        severity: str | None = None,
+        target_format: str | None = None,
     ) -> dict[str, Any]:
         """Convert an IBM QRadar AQL query to Python/Panther or SQL."""
         try:
@@ -419,7 +436,9 @@ class ConverterService:
                 "testCode": "",
                 "recommendedType": "SCHEDULED" if result.is_aggregation_rule else "STREAMING",
                 "recommendationReasons": [
-                    "Aggregation query detected" if result.is_aggregation_rule else "Simple filter query"
+                    "Aggregation query detected"
+                    if result.is_aggregation_rule
+                    else "Simple filter query"
                 ],
                 "targetFormat": result.target_format.value,
                 "originalAql": result.original_aql,
@@ -438,7 +457,9 @@ class ConverterService:
                 "isAggregation": parsed.is_aggregation_query,
                 "recommendedType": "SCHEDULED" if parsed.is_aggregation_query else "STREAMING",
                 "recommendationReasons": [
-                    "Contains aggregation functions" if parsed.is_aggregation_query else "Simple filter query"
+                    "Contains aggregation functions"
+                    if parsed.is_aggregation_query
+                    else "Simple filter query"
                 ],
                 "parseDetails": {
                     "whereConditions": len(parsed.where_conditions),
@@ -463,7 +484,10 @@ class ConverterService:
                 "name": "Splunk SPL",
                 "description": "Splunk Search Processing Language queries",
                 "fileExtensions": [".spl", ".txt"],
-                "example": 'index=main sourcetype=access_combined status>=400 | stats count by src_ip',
+                "example": (
+                    "index=main sourcetype=access_combined status>=400 "
+                    "| stats count by src_ip"
+                ),
                 "targetFormats": ["python"],
             },
             {
@@ -471,7 +495,7 @@ class ConverterService:
                 "name": "Google SecOps YARA-L",
                 "description": "YARA-L detection rules from Google Chronicle/SecOps",
                 "fileExtensions": [".yaral", ".yar"],
-                "example": '''rule suspicious_login {
+                "example": """rule suspicious_login {
   meta:
     description = "Detects suspicious login attempts"
     severity = "HIGH"
@@ -480,7 +504,7 @@ class ConverterService:
     $login.security_result.action = "BLOCK"
   condition:
     $login
-}''',
+}""",
                 "targetFormats": ["python"],
             },
             {
@@ -488,7 +512,12 @@ class ConverterService:
                 "name": "IBM QRadar AQL",
                 "description": "Ariel Query Language from IBM QRadar SIEM",
                 "fileExtensions": [".aql", ".txt"],
-                "example": "SELECT sourceip, destinationip, username, COUNT(*) FROM events WHERE category = 'Authentication' AND LOGSOURCETYPENAME(logsourceid) ILIKE '%firewall%' GROUP BY sourceip, destinationip, username LAST 24 HOURS",
+                "example": (
+                    "SELECT sourceip, destinationip, username, COUNT(*) FROM events "
+                    "WHERE category = 'Authentication' "
+                    "AND LOGSOURCETYPENAME(logsourceid) ILIKE '%firewall%' "
+                    "GROUP BY sourceip, destinationip, username LAST 24 HOURS"
+                ),
                 "targetFormats": ["python", "sql"],
             },
         ]

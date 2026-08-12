@@ -6,7 +6,7 @@ Abstract base class for all workflow node executors.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from app.services.workflow_engine.context import ExecutionContext
 
@@ -14,10 +14,13 @@ from app.services.workflow_engine.context import ExecutionContext
 @dataclass
 class NodeResult:
     """Result from executing a node."""
+
     success: bool
     output: dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
-    next_handle: str = "default"  # Which output handle to follow (default, true, false, loop_item, loop_complete)
+    error: str | None = None
+    next_handle: str = (
+        "default"  # Which output handle to follow (default, true, false, loop_item, loop_complete)
+    )
 
 
 class NodeExecutor(ABC):

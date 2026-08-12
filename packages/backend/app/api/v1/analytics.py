@@ -1,10 +1,10 @@
+import logging
 from datetime import datetime, timedelta
 from typing import Annotated
-import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, cast, Date
+from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgIdDep, OrgUserDep
@@ -140,7 +140,9 @@ async def get_alert_analytics(
             )
             .group_by(NormalizedAlert.severity)
         )
-        severity_counts = {row[0].upper() if row[0] else "MEDIUM": row[1] for row in severity_result}
+        severity_counts = {
+            row[0].upper() if row[0] else "MEDIUM": row[1] for row in severity_result
+        }
         logger.info(f"Severity counts: {severity_counts}")
         by_severity = SeverityStats(
             INFO=severity_counts.get("INFO", 0),
@@ -172,7 +174,7 @@ async def get_alert_analytics(
         day_result = await db.execute(
             select(
                 cast(NormalizedAlert.created_at_source, Date).label("day"),
-                func.count(NormalizedAlert.id)
+                func.count(NormalizedAlert.id),
             )
             .where(
                 NormalizedAlert.organization_id == org_id,
@@ -189,16 +191,13 @@ async def get_alert_analytics(
             select(
                 cast(NormalizedAlert.created_at_source, Date).label("day"),
                 NormalizedAlert.severity,
-                func.count(NormalizedAlert.id)
+                func.count(NormalizedAlert.id),
             )
             .where(
                 NormalizedAlert.organization_id == org_id,
                 NormalizedAlert.created_at_source >= since,
             )
-            .group_by(
-                cast(NormalizedAlert.created_at_source, Date),
-                NormalizedAlert.severity
-            )
+            .group_by(cast(NormalizedAlert.created_at_source, Date), NormalizedAlert.severity)
             .order_by(cast(NormalizedAlert.created_at_source, Date))
         )
         by_day_severity: dict[str, dict[str, int]] = {}
@@ -206,7 +205,13 @@ async def get_alert_analytics(
             day_str = str(row[0])
             severity = (row[1] or "MEDIUM").upper()
             if day_str not in by_day_severity:
-                by_day_severity[day_str] = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
+                by_day_severity[day_str] = {
+                    "CRITICAL": 0,
+                    "HIGH": 0,
+                    "MEDIUM": 0,
+                    "LOW": 0,
+                    "INFO": 0,
+                }
             by_day_severity[day_str][severity] = row[2]
 
         # Top rules (by rule_name or title)

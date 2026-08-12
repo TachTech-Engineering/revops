@@ -7,15 +7,15 @@ Integrates with Splunk ES to fetch and normalize notable events/alerts.
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
 
 
@@ -155,8 +155,8 @@ class SplunkConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch notable events from Splunk ES."""
         try:
             base_url = self.config.get("base_url", "").rstrip("/")
@@ -167,7 +167,9 @@ class SplunkConnector(DataSourceConnector):
             earliest = since.strftime("%Y-%m-%dT%H:%M:%S")
             offset = int(cursor) if cursor else 0
 
-            search_query = f'search index={index} earliest="{earliest}" | head {limit + offset} | tail {limit}'
+            search_query = (
+                f'search index={index} earliest="{earliest}" | head {limit + offset} | tail {limit}'
+            )
 
             async with httpx.AsyncClient(timeout=120.0, verify=verify_ssl) as client:
                 # Create a search job
@@ -239,15 +241,23 @@ class SplunkConnector(DataSourceConnector):
             external_id=raw_alert.get("event_id", raw_alert.get("_serial", str(uuid.uuid4()))),
             title=rule_name or raw_alert.get("_raw", "Splunk Notable Event")[:200],
             description=raw_alert.get("description", raw_alert.get("_raw", "")),
-            severity=self.normalize_severity(raw_alert.get("urgency", raw_alert.get("severity", "medium"))),
-            status=self.normalize_status(raw_alert.get("status", raw_alert.get("status_label", "new"))),
+            severity=self.normalize_severity(
+                raw_alert.get("urgency", raw_alert.get("severity", "medium"))
+            ),
+            status=self.normalize_status(
+                raw_alert.get("status", raw_alert.get("status_label", "new"))
+            ),
             created_at_source=created_at,
             updated_at_source=None,
             rule_id=rule_id,
             rule_name=rule_name,
             tags=raw_alert.get("tag", "").split(",") if raw_alert.get("tag") else [],
-            mitre_tactics=raw_alert.get("mitre_tactic", "").split("|") if raw_alert.get("mitre_tactic") else [],
-            mitre_techniques=raw_alert.get("mitre_technique", "").split("|") if raw_alert.get("mitre_technique") else [],
+            mitre_tactics=raw_alert.get("mitre_tactic", "").split("|")
+            if raw_alert.get("mitre_tactic")
+            else [],
+            mitre_techniques=raw_alert.get("mitre_technique", "").split("|")
+            if raw_alert.get("mitre_technique")
+            else [],
             raw_data=raw_alert,
             ingested_at=datetime.utcnow(),
         )

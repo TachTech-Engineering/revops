@@ -2,18 +2,17 @@
 AI Playbook Generation API - Feature 6
 Generate playbooks from incident resolution patterns.
 """
+
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep, OrgAdminDep
-from app.db import get_db, PlaybookTemplate, IncidentResolutionPattern, Playbook, PlaybookStatus
-from fastapi import Depends
+from app.api.v1.deps import OrgAdminDep, OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import Playbook, PlaybookStatus, PlaybookTemplate, get_db
 
 router = APIRouter()
 
@@ -21,15 +20,15 @@ router = APIRouter()
 class PlaybookTemplateResponse(BaseModel):
     id: str
     name: str
-    description: Optional[str]
+    description: str | None
     trigger_conditions: dict
     actions: list
     confidence_score: float
     source_incident_count: int
     is_approved: bool
-    approved_by: Optional[str]
-    approved_at: Optional[str]
-    converted_playbook_id: Optional[str]
+    approved_by: str | None
+    approved_at: str | None
+    converted_playbook_id: str | None
     created_at: str
 
     class Config:
@@ -43,7 +42,7 @@ class TemplateListResponse(BaseModel):
 
 class GeneratePlaybooksRequest(BaseModel):
     min_incidents: int = 5  # Minimum incidents to identify a pattern
-    severity_filter: Optional[list[str]] = None
+    severity_filter: list[str] | None = None
     time_range_days: int = 90
 
 
@@ -54,7 +53,7 @@ class ApproveTemplateRequest(BaseModel):
 class SuggestedPlaybookResponse(BaseModel):
     template_id: str
     name: str
-    description: Optional[str]
+    description: str | None
     match_score: float
     trigger_conditions: dict
     suggested_actions: list
@@ -72,7 +71,9 @@ def serialize_template(template: PlaybookTemplate) -> PlaybookTemplateResponse:
         is_approved=template.is_approved,
         approved_by=template.approved_by,
         approved_at=template.approved_at.isoformat() if template.approved_at else None,
-        converted_playbook_id=str(template.converted_playbook_id) if template.converted_playbook_id else None,
+        converted_playbook_id=str(template.converted_playbook_id)
+        if template.converted_playbook_id
+        else None,
         created_at=template.created_at.isoformat(),
     )
 
@@ -82,8 +83,8 @@ async def list_playbook_templates(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: AsyncSession = Depends(get_db),
-    is_approved: Optional[bool] = Query(None),
-    min_confidence: Optional[float] = Query(None),
+    is_approved: bool | None = Query(None),
+    min_confidence: float | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -155,7 +156,10 @@ async def generate_playbooks(
         PlaybookTemplate(
             organization_id=org_id,
             name="Automated Phishing Response",
-            description="Auto-generated playbook for responding to phishing alerts. Based on 23 successfully resolved phishing incidents.",
+            description=(
+                "Auto-generated playbook for responding to phishing alerts. "
+                "Based on 23 successfully resolved phishing incidents."
+            ),
             trigger_conditions={
                 "severity": ["high", "critical"],
                 "title_pattern": ".*phishing.*|.*suspicious email.*",
@@ -188,7 +192,10 @@ async def generate_playbooks(
         PlaybookTemplate(
             organization_id=org_id,
             name="Malware Containment Workflow",
-            description="Auto-generated playbook for malware detection response. Based on 15 contained malware incidents.",
+            description=(
+                "Auto-generated playbook for malware detection response. "
+                "Based on 15 contained malware incidents."
+            ),
             trigger_conditions={
                 "severity": ["critical"],
                 "title_pattern": ".*malware.*|.*ransomware.*",
@@ -289,15 +296,15 @@ async def get_playbook_suggestions(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: AsyncSession = Depends(get_db),
-    alert_id: Optional[str] = Query(None, description="Alert ID to get suggestions for"),
-    rule_id: Optional[str] = Query(None, description="Rule ID to get suggestions for"),
-    severity: Optional[str] = Query(None, description="Alert severity"),
+    alert_id: str | None = Query(None, description="Alert ID to get suggestions for"),
+    rule_id: str | None = Query(None, description="Rule ID to get suggestions for"),
+    severity: str | None = Query(None, description="Alert severity"),
 ):
     """Get suggested playbooks for a given alert or context."""
     query = (
         select(PlaybookTemplate)
         .where(PlaybookTemplate.organization_id == org_id)
-        .where(PlaybookTemplate.is_approved == True)
+        .where(PlaybookTemplate.is_approved.is_(True))
         .order_by(desc(PlaybookTemplate.confidence_score))
         .limit(5)
     )

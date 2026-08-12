@@ -1,10 +1,9 @@
 import logging
-from typing import Optional
 
 import httpx
 
-from app.services.integrations.base import ActionConnector, ActionResult
 from app.config import settings
+from app.services.integrations.base import ActionConnector, ActionResult
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +59,7 @@ class SOARConnector(ActionConnector):
             logger.error(f"SOAR error: {e}")
             return ActionResult(success=False, message="SOAR request failed", error=str(e))
 
-    def validate_config(self, config: dict) -> tuple[bool, Optional[str]]:
+    def validate_config(self, config: dict) -> tuple[bool, str | None]:
         if not (config.get("url") or settings.soar_webhook_url):
             return False, "SOAR webhook URL is required"
         return True, None

@@ -15,12 +15,12 @@ security events and flows. Key features include:
 
 import re
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
-from enum import Enum
+from enum import StrEnum
 
 
-class AQLTargetFormat(str, Enum):
+class AQLTargetFormat(StrEnum):
     """Target output format for AQL conversion."""
+
     PYTHON = "python"
     SQL = "sql"
 
@@ -28,35 +28,37 @@ class AQLTargetFormat(str, Enum):
 @dataclass
 class AQLParseResult:
     """Result of parsing an AQL query."""
-    select_fields: List[str] = field(default_factory=list)
+
+    select_fields: list[str] = field(default_factory=list)
     from_table: str = ""
-    where_conditions: List[str] = field(default_factory=list)
-    group_by: List[str] = field(default_factory=list)
-    order_by: List[str] = field(default_factory=list)
+    where_conditions: list[str] = field(default_factory=list)
+    group_by: list[str] = field(default_factory=list)
+    order_by: list[str] = field(default_factory=list)
     having: str = ""
     time_range: str = ""
     start_time: str = ""
     stop_time: str = ""
-    limit: Optional[int] = None
-    aggregations: List[Dict[str, str]] = field(default_factory=list)
+    limit: int | None = None
+    aggregations: list[dict[str, str]] = field(default_factory=list)
     is_aggregation_query: bool = False
-    reference_sets: List[str] = field(default_factory=list)
-    qradar_functions: List[str] = field(default_factory=list)
+    reference_sets: list[str] = field(default_factory=list)
+    qradar_functions: list[str] = field(default_factory=list)
 
 
 @dataclass
 class AQLConversionResult:
     """Result of AQL conversion."""
+
     source_code: str
     rule_id: str
     class_name: str
-    log_types: List[str]
+    log_types: list[str]
     severity: str
-    todos: List[str]
+    todos: list[str]
     target_format: AQLTargetFormat
     is_aggregation_rule: bool = False
     original_aql: str = ""
-    parse_details: Optional[AQLParseResult] = None
+    parse_details: AQLParseResult | None = None
 
 
 # QRadar event categories mapped to Panther log types
@@ -162,7 +164,6 @@ QRADAR_CATEGORY_MAPPING = {
     16001: "Control",
     17001: "Asset Profiler",
     18001: "Potential Exploit",
-
     # Common Low Level Categories
     3002: "Brute Force",
     3003: "Privilege Escalation",
@@ -207,17 +208,26 @@ class AQLConverter:
     """Converts IBM QRadar AQL queries to Python/Panther or SQL."""
 
     def __init__(self):
-        self._aggregation_functions = {'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'UNIQUECOUNT', 'FIRST', 'LAST'}
+        self._aggregation_functions = {
+            "COUNT",
+            "SUM",
+            "AVG",
+            "MIN",
+            "MAX",
+            "UNIQUECOUNT",
+            "FIRST",
+            "LAST",
+        }
 
     def parse(self, aql: str) -> AQLParseResult:
         """Parse an AQL query into components."""
         result = AQLParseResult()
 
         # Normalize whitespace
-        aql = ' '.join(aql.split())
+        aql = " ".join(aql.split())
 
         # Extract SELECT fields
-        select_match = re.search(r'SELECT\s+(.+?)\s+FROM', aql, re.IGNORECASE)
+        select_match = re.search(r"SELECT\s+(.+?)\s+FROM", aql, re.IGNORECASE)
         if select_match:
             fields_str = select_match.group(1)
             result.select_fields = self._parse_select_fields(fields_str)
@@ -226,18 +236,17 @@ class AQLConverter:
             for func in self._aggregation_functions:
                 if func in fields_str.upper():
                     result.is_aggregation_query = True
-                    result.aggregations.append({
-                        'function': func,
-                        'raw': fields_str
-                    })
+                    result.aggregations.append({"function": func, "raw": fields_str})
 
         # Extract FROM table
-        from_match = re.search(r'FROM\s+(\w+)', aql, re.IGNORECASE)
+        from_match = re.search(r"FROM\s+(\w+)", aql, re.IGNORECASE)
         if from_match:
             result.from_table = from_match.group(1).lower()
 
         # Extract WHERE conditions
-        where_match = re.search(r'WHERE\s+(.+?)(?:GROUP BY|ORDER BY|HAVING|LIMIT|START|STOP|LAST|$)', aql, re.IGNORECASE)
+        where_match = re.search(
+            r"WHERE\s+(.+?)(?:GROUP BY|ORDER BY|HAVING|LIMIT|START|STOP|LAST|$)", aql, re.IGNORECASE
+        )
         if where_match:
             where_str = where_match.group(1).strip()
             result.where_conditions = self._parse_where_conditions(where_str)
@@ -248,32 +257,38 @@ class AQLConverter:
                     result.qradar_functions.append(func)
 
             # Check for reference sets
-            ref_matches = re.findall(r'(?:IN|NOT\s*IN)REFERENCESET\s*\(\s*[\'"]([^\'"]+)[\'"]', where_str, re.IGNORECASE)
+            ref_matches = re.findall(
+                r'(?:IN|NOT\s*IN)REFERENCESET\s*\(\s*[\'"]([^\'"]+)[\'"]', where_str, re.IGNORECASE
+            )
             result.reference_sets.extend(ref_matches)
 
         # Extract GROUP BY
-        group_match = re.search(r'GROUP BY\s+(.+?)(?:ORDER BY|HAVING|LIMIT|START|STOP|LAST|$)', aql, re.IGNORECASE)
+        group_match = re.search(
+            r"GROUP BY\s+(.+?)(?:ORDER BY|HAVING|LIMIT|START|STOP|LAST|$)", aql, re.IGNORECASE
+        )
         if group_match:
-            result.group_by = [f.strip() for f in group_match.group(1).split(',')]
+            result.group_by = [f.strip() for f in group_match.group(1).split(",")]
             result.is_aggregation_query = True
 
         # Extract ORDER BY
-        order_match = re.search(r'ORDER BY\s+(.+?)(?:HAVING|LIMIT|START|STOP|LAST|$)', aql, re.IGNORECASE)
+        order_match = re.search(
+            r"ORDER BY\s+(.+?)(?:HAVING|LIMIT|START|STOP|LAST|$)", aql, re.IGNORECASE
+        )
         if order_match:
-            result.order_by = [f.strip() for f in order_match.group(1).split(',')]
+            result.order_by = [f.strip() for f in order_match.group(1).split(",")]
 
         # Extract HAVING
-        having_match = re.search(r'HAVING\s+(.+?)(?:LIMIT|START|STOP|LAST|$)', aql, re.IGNORECASE)
+        having_match = re.search(r"HAVING\s+(.+?)(?:LIMIT|START|STOP|LAST|$)", aql, re.IGNORECASE)
         if having_match:
             result.having = having_match.group(1).strip()
 
         # Extract LIMIT
-        limit_match = re.search(r'LIMIT\s+(\d+)', aql, re.IGNORECASE)
+        limit_match = re.search(r"LIMIT\s+(\d+)", aql, re.IGNORECASE)
         if limit_match:
             result.limit = int(limit_match.group(1))
 
         # Extract time range (LAST X MINUTES/HOURS/DAYS)
-        last_match = re.search(r'LAST\s+(\d+)\s+(MINUTE|HOUR|DAY|WEEK|MONTH)S?', aql, re.IGNORECASE)
+        last_match = re.search(r"LAST\s+(\d+)\s+(MINUTE|HOUR|DAY|WEEK|MONTH)S?", aql, re.IGNORECASE)
         if last_match:
             result.time_range = f"LAST {last_match.group(1)} {last_match.group(2).upper()}S"
 
@@ -288,20 +303,20 @@ class AQLConverter:
 
         return result
 
-    def _parse_select_fields(self, fields_str: str) -> List[str]:
+    def _parse_select_fields(self, fields_str: str) -> list[str]:
         """Parse SELECT field list handling functions and aliases."""
         fields = []
         depth = 0
         current = ""
 
         for char in fields_str:
-            if char == '(':
+            if char == "(":
                 depth += 1
                 current += char
-            elif char == ')':
+            elif char == ")":
                 depth -= 1
                 current += char
-            elif char == ',' and depth == 0:
+            elif char == "," and depth == 0:
                 if current.strip():
                     fields.append(current.strip())
                 current = ""
@@ -313,15 +328,15 @@ class AQLConverter:
 
         return fields
 
-    def _parse_where_conditions(self, where_str: str) -> List[str]:
+    def _parse_where_conditions(self, where_str: str) -> list[str]:
         """Parse WHERE conditions into individual conditions."""
         conditions = []
         # Split on AND/OR while preserving them
-        parts = re.split(r'\s+(AND|OR)\s+', where_str, flags=re.IGNORECASE)
+        parts = re.split(r"\s+(AND|OR)\s+", where_str, flags=re.IGNORECASE)
 
         for i, part in enumerate(parts):
             part = part.strip()
-            if part.upper() in ('AND', 'OR'):
+            if part.upper() in ("AND", "OR"):
                 if conditions:
                     conditions[-1] = conditions[-1] + f" {part.upper()}"
             elif part:
@@ -333,8 +348,8 @@ class AQLConverter:
         self,
         aql: str,
         rule_id: str,
-        class_name: Optional[str] = None,
-        severity: Optional[str] = None,
+        class_name: str | None = None,
+        severity: str | None = None,
         target_format: AQLTargetFormat = AQLTargetFormat.PYTHON,
     ) -> AQLConversionResult:
         """Convert AQL to target format (Python/Panther or SQL)."""
@@ -349,8 +364,8 @@ class AQLConverter:
         self,
         aql: str,
         rule_id: str,
-        class_name: Optional[str],
-        severity: Optional[str],
+        class_name: str | None,
+        severity: str | None,
         parse_result: AQLParseResult,
     ) -> AQLConversionResult:
         """Convert AQL to Python/Panther detection rule."""
@@ -365,14 +380,14 @@ class AQLConverter:
 
         # Generate Python code
         code_lines = [
-            f'"""Detection rule converted from QRadar AQL.',
-            f'',
-            f'Original AQL:',
-            f'{aql}',
-            f'"""',
-            f'from panther_sdk import detection, PantherEvent',
-            f'',
-            f'',
+            '"""Detection rule converted from QRadar AQL.',
+            "",
+            "Original AQL:",
+            f"{aql}",
+            '"""',
+            "from panther_sdk import detection, PantherEvent",
+            "",
+            "",
         ]
 
         # Add helper functions for QRadar-specific functions
@@ -381,28 +396,39 @@ class AQLConverter:
 
         # Generate the rule class
         if parse_result.is_aggregation_query:
-            code_lines.extend(self._generate_scheduled_rule(
-                class_name, rule_id, severity or "Medium",
-                log_types, parse_result, todos
-            ))
+            code_lines.extend(
+                self._generate_scheduled_rule(
+                    class_name, rule_id, severity or "Medium", log_types, parse_result, todos
+                )
+            )
         else:
-            code_lines.extend(self._generate_streaming_rule(
-                class_name, rule_id, severity or "Medium",
-                log_types, parse_result, todos
-            ))
+            code_lines.extend(
+                self._generate_streaming_rule(
+                    class_name, rule_id, severity or "Medium", log_types, parse_result, todos
+                )
+            )
 
         # Add reference set handling TODOs
         if parse_result.reference_sets:
             for ref_set in parse_result.reference_sets:
-                todos.append(f"TODO: Implement reference set lookup for '{ref_set}' - consider using a Panther lookup table")
+                todos.append(
+                    f"TODO: Implement reference set lookup for '{ref_set}' "
+                    "- consider using a Panther lookup table"
+                )
 
         # Add QRadar function TODOs
         for func in parse_result.qradar_functions:
-            if func in ('LOGSOURCENAME', 'LOGSOURCEGROUPNAME', 'LOGSOURCETYPENAME', 'QIDNAME', 'CATEGORYNAME'):
+            if func in (
+                "LOGSOURCENAME",
+                "LOGSOURCEGROUPNAME",
+                "LOGSOURCETYPENAME",
+                "QIDNAME",
+                "CATEGORYNAME",
+            ):
                 todos.append(f"TODO: {func} is QRadar-specific - map to appropriate log field")
 
         return AQLConversionResult(
-            source_code='\n'.join(code_lines),
+            source_code="\n".join(code_lines),
             rule_id=rule_id,
             class_name=class_name,
             log_types=log_types,
@@ -418,8 +444,8 @@ class AQLConverter:
         self,
         aql: str,
         rule_id: str,
-        class_name: Optional[str],
-        severity: Optional[str],
+        class_name: str | None,
+        severity: str | None,
         parse_result: AQLParseResult,
     ) -> AQLConversionResult:
         """Convert AQL to standard SQL."""
@@ -428,8 +454,8 @@ class AQLConverter:
 
         # Build SELECT clause
         select_fields = []
-        for field in parse_result.select_fields:
-            converted = self._convert_field_to_sql(field)
+        for field_name in parse_result.select_fields:
+            converted = self._convert_field_to_sql(field_name)
             select_fields.append(converted)
 
         if select_fields:
@@ -467,7 +493,7 @@ class AQLConverter:
 
         # Add time range as comment
         if parse_result.time_range or parse_result.start_time:
-            time_comment = f"-- Time range: "
+            time_comment = "-- Time range: "
             if parse_result.time_range:
                 time_comment += parse_result.time_range
             elif parse_result.start_time:
@@ -477,12 +503,12 @@ class AQLConverter:
             sql_lines.insert(0, time_comment)
 
         # Add header comment
-        sql_lines.insert(0, f"-- Converted from QRadar AQL")
+        sql_lines.insert(0, "-- Converted from QRadar AQL")
         sql_lines.insert(1, f"-- Original: {aql}")
         sql_lines.insert(2, "")
 
         return AQLConversionResult(
-            source_code='\n'.join(sql_lines),
+            source_code="\n".join(sql_lines),
             rule_id=rule_id,
             class_name=class_name or self._generate_class_name(rule_id),
             log_types=self._infer_log_types(parse_result),
@@ -500,14 +526,19 @@ class AQLConverter:
 
         # Convert QRadar functions to SQL
         for qradar_func, sql_func in QRADAR_FUNCTION_TO_SQL.items():
-            pattern = rf'\b{qradar_func}\s*\('
+            pattern = rf"\b{qradar_func}\s*\("
             if re.search(pattern, result, re.IGNORECASE):
-                result = re.sub(pattern, f'{sql_func}(', result, flags=re.IGNORECASE)
+                result = re.sub(pattern, f"{sql_func}(", result, flags=re.IGNORECASE)
 
         # Handle UNIQUECOUNT -> COUNT(DISTINCT ...)
-        uniquecount_match = re.search(r'COUNT\(DISTINCT\s*\(([^)]+)\)', result, re.IGNORECASE)
+        uniquecount_match = re.search(r"COUNT\(DISTINCT\s*\(([^)]+)\)", result, re.IGNORECASE)
         if uniquecount_match:
-            result = re.sub(r'COUNT\(DISTINCT\s*\(([^)]+)\)\)', r'COUNT(DISTINCT \1)', result, flags=re.IGNORECASE)
+            result = re.sub(
+                r"COUNT\(DISTINCT\s*\(([^)]+)\)\)",
+                r"COUNT(DISTINCT \1)",
+                result,
+                flags=re.IGNORECASE,
+            )
 
         return result
 
@@ -515,17 +546,19 @@ class AQLConverter:
         """Convert QRadar table name to SQL table name."""
         # QRadar uses 'events' and 'flows' as main tables
         table_mapping = {
-            'events': 'security_events',
-            'flows': 'network_flows',
+            "events": "security_events",
+            "flows": "network_flows",
         }
         return table_mapping.get(table.lower(), table)
 
-    def _convert_condition_to_sql(self, condition: str, todos: List[str]) -> str:
+    def _convert_condition_to_sql(self, condition: str, todos: list[str]) -> str:
         """Convert a QRadar WHERE condition to SQL."""
         result = condition
 
         # Handle INCIDR function
-        incidr_match = re.search(r"INCIDR\s*\(\s*['\"]?([^'\"]+)['\"]?\s*,\s*(\w+)\s*\)", result, re.IGNORECASE)
+        incidr_match = re.search(
+            r"INCIDR\s*\(\s*['\"]?([^'\"]+)['\"]?\s*,\s*(\w+)\s*\)", result, re.IGNORECASE
+        )
         if incidr_match:
             cidr = incidr_match.group(1)
             field = incidr_match.group(2)
@@ -534,39 +567,55 @@ class AQLConverter:
                 r"INCIDR\s*\([^)]+\)",
                 f"{field}::inet <<= '{cidr}'::inet",
                 result,
-                flags=re.IGNORECASE
+                flags=re.IGNORECASE,
             )
-            todos.append(f"TODO: INCIDR converted to PostgreSQL inet syntax - adjust for your database")
+            todos.append(
+                "TODO: INCIDR converted to PostgreSQL inet syntax - adjust for your database"
+            )
 
         # Handle INREFERENCESET
-        refset_match = re.search(r"INREFERENCESET\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*(\w+)\s*\)", result, re.IGNORECASE)
+        refset_match = re.search(
+            r"INREFERENCESET\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*(\w+)\s*\)", result, re.IGNORECASE
+        )
         if refset_match:
             refset_name = refset_match.group(1)
             field = refset_match.group(2)
             result = re.sub(
                 r"INREFERENCESET\s*\([^)]+\)",
-                f"{field} IN (SELECT value FROM reference_set_{refset_name.replace(' ', '_').lower()})",
+                f"{field} IN (SELECT value FROM "
+                f"reference_set_{refset_name.replace(' ', '_').lower()})",
                 result,
-                flags=re.IGNORECASE
+                flags=re.IGNORECASE,
             )
-            todos.append(f"TODO: Create reference table 'reference_set_{refset_name.replace(' ', '_').lower()}' for reference set lookup")
+            todos.append(
+                "TODO: Create reference table "
+                f"'reference_set_{refset_name.replace(' ', '_').lower()}' "
+                "for reference set lookup"
+            )
 
         # Handle NOTINREFERENCESET
-        notrefset_match = re.search(r"NOTINREFERENCESET\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*(\w+)\s*\)", result, re.IGNORECASE)
+        notrefset_match = re.search(
+            r"NOTINREFERENCESET\s*\(\s*['\"]([^'\"]+)['\"]\s*,\s*(\w+)\s*\)", result, re.IGNORECASE
+        )
         if notrefset_match:
             refset_name = notrefset_match.group(1)
             field = notrefset_match.group(2)
             result = re.sub(
                 r"NOTINREFERENCESET\s*\([^)]+\)",
-                f"{field} NOT IN (SELECT value FROM reference_set_{refset_name.replace(' ', '_').lower()})",
+                f"{field} NOT IN (SELECT value FROM "
+                f"reference_set_{refset_name.replace(' ', '_').lower()})",
                 result,
-                flags=re.IGNORECASE
+                flags=re.IGNORECASE,
             )
-            todos.append(f"TODO: Create reference table 'reference_set_{refset_name.replace(' ', '_').lower()}' for reference set lookup")
+            todos.append(
+                "TODO: Create reference table "
+                f"'reference_set_{refset_name.replace(' ', '_').lower()}' "
+                "for reference set lookup"
+            )
 
         # Handle LOGSOURCENAME and similar
         for func, replacement in QRADAR_SPECIFIC_FUNCTIONS.items():
-            pattern = rf'\b{func}\s*\(\s*(\w+)\s*\)'
+            pattern = rf"\b{func}\s*\(\s*(\w+)\s*\)"
             if re.search(pattern, result, re.IGNORECASE):
                 result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
                 todos.append(f"TODO: {func} converted to '{replacement}' - verify field mapping")
@@ -576,10 +625,10 @@ class AQLConverter:
     def _generate_class_name(self, rule_id: str) -> str:
         """Generate a Python class name from rule ID."""
         # Remove non-alphanumeric characters and convert to PascalCase
-        words = re.split(r'[^a-zA-Z0-9]+', rule_id)
-        return ''.join(word.capitalize() for word in words if word)
+        words = re.split(r"[^a-zA-Z0-9]+", rule_id)
+        return "".join(word.capitalize() for word in words if word)
 
-    def _infer_log_types(self, parse_result: AQLParseResult) -> List[str]:
+    def _infer_log_types(self, parse_result: AQLParseResult) -> list[str]:
         """Infer Panther log types from parsed AQL."""
         log_types = []
 
@@ -601,151 +650,169 @@ class AQLConverter:
 
         return log_types
 
-    def _generate_helper_functions(self, functions: List[str]) -> List[str]:
+    def _generate_helper_functions(self, functions: list[str]) -> list[str]:
         """Generate helper functions for QRadar-specific operations."""
         lines = []
 
-        if 'INCIDR' in functions:
-            lines.extend([
-                'import ipaddress',
-                '',
-                '',
-                'def ip_in_cidr(ip: str, cidr: str) -> bool:',
-                '    """Check if IP address is in CIDR range (QRadar INCIDR equivalent).',
-                '    ',
-                '    Args:',
-                '        ip: IP address to check (IPv4 or IPv6)',
-                '        cidr: CIDR notation network (e.g., "192.168.1.0/24")',
-                '    ',
-                '    Returns:',
-                '        True if IP is in the CIDR range, False otherwise',
-                '    """',
-                '    if not ip or not cidr:',
-                '        return False',
-                '    try:',
-                '        # Handle both IPv4 and IPv6',
-                '        ip_obj = ipaddress.ip_address(ip.strip())',
-                '        network = ipaddress.ip_network(cidr.strip(), strict=False)',
-                '        return ip_obj in network',
-                '    except (ValueError, TypeError):',
-                '        # Invalid IP or CIDR format',
-                '        return False',
-                '',
-                '',
-                'def ip_in_cidrs(ip: str, cidrs: list) -> bool:',
-                '    """Check if IP address is in any of multiple CIDR ranges."""',
-                '    return any(ip_in_cidr(ip, cidr) for cidr in cidrs)',
-                '',
-                '',
-            ])
+        if "INCIDR" in functions:
+            lines.extend(
+                [
+                    "import ipaddress",
+                    "",
+                    "",
+                    "def ip_in_cidr(ip: str, cidr: str) -> bool:",
+                    '    """Check if IP address is in CIDR range (QRadar INCIDR equivalent).',
+                    "    ",
+                    "    Args:",
+                    "        ip: IP address to check (IPv4 or IPv6)",
+                    '        cidr: CIDR notation network (e.g., "192.168.1.0/24")',
+                    "    ",
+                    "    Returns:",
+                    "        True if IP is in the CIDR range, False otherwise",
+                    '    """',
+                    "    if not ip or not cidr:",
+                    "        return False",
+                    "    try:",
+                    "        # Handle both IPv4 and IPv6",
+                    "        ip_obj = ipaddress.ip_address(ip.strip())",
+                    "        network = ipaddress.ip_network(cidr.strip(), strict=False)",
+                    "        return ip_obj in network",
+                    "    except (ValueError, TypeError):",
+                    "        # Invalid IP or CIDR format",
+                    "        return False",
+                    "",
+                    "",
+                    "def ip_in_cidrs(ip: str, cidrs: list) -> bool:",
+                    '    """Check if IP address is in any of multiple CIDR ranges."""',
+                    "    return any(ip_in_cidr(ip, cidr) for cidr in cidrs)",
+                    "",
+                    "",
+                ]
+            )
 
-        if 'INREFERENCESET' in functions or 'NOTINREFERENCESET' in functions:
-            lines.extend([
-                '# Reference set implementation using Panther lookup tables',
-                '# To use: Create a Panther Lookup Table with the same name as the QRadar reference set',
-                '',
-                '# Lookup table cache for performance',
-                '_reference_set_cache = {}',
-                '',
-                '',
-                'def get_reference_set(set_name: str) -> set:',
-                '    """Get or load a reference set as a Panther lookup table.',
-                '    ',
-                '    In Panther, create a Lookup Table with columns: value, description, added_date',
-                '    The lookup table name should match the QRadar reference set name.',
-                '    """',
-                '    global _reference_set_cache',
-                '    ',
-                '    if set_name not in _reference_set_cache:',
-                '        try:',
-                '            # Import Panther lookup table at runtime',
-                '            from panther_sdk import lookup_table',
-                '            lt = lookup_table(set_name)',
-                '            # Load all values into a set for O(1) lookup',
-                '            _reference_set_cache[set_name] = set(lt.keys()) if lt else set()',
-                '        except ImportError:',
-                '            # Fallback: read from JSON file if Panther SDK not available',
-                '            import json',
-                '            import os',
-                '            ref_path = os.environ.get("REFERENCE_SETS_PATH", "/var/reference_sets")',
-                '            try:',
-                '                with open(f"{ref_path}/{set_name}.json") as f:',
-                '                    data = json.load(f)',
-                '                    _reference_set_cache[set_name] = set(data.get("values", []))',
-                '            except (FileNotFoundError, json.JSONDecodeError):',
-                '                _reference_set_cache[set_name] = set()',
-                '    ',
-                '    return _reference_set_cache.get(set_name, set())',
-                '',
-                '',
-                'def in_reference_set(set_name: str, value: str) -> bool:',
-                '    """Check if value is in reference set (QRadar INREFERENCESET equivalent)."""',
-                '    if value is None:',
-                '        return False',
-                '    return str(value).lower() in {v.lower() for v in get_reference_set(set_name)}',
-                '',
-                '',
-                'def not_in_reference_set(set_name: str, value: str) -> bool:',
-                '    """Check if value is NOT in reference set (QRadar NOTINREFERENCESET equivalent)."""',
-                '    if value is None:',
-                '        return True',
-                '    return str(value).lower() not in {v.lower() for v in get_reference_set(set_name)}',
-                '',
-                '',
-            ])
+        if "INREFERENCESET" in functions or "NOTINREFERENCESET" in functions:
+            lines.extend(
+                [
+                    "# Reference set implementation using Panther lookup tables",
+                    "# To use: Create a Panther Lookup Table with the same name "
+                    "as the QRadar reference set",
+                    "",
+                    "# Lookup table cache for performance",
+                    "_reference_set_cache = {}",
+                    "",
+                    "",
+                    "def get_reference_set(set_name: str) -> set:",
+                    '    """Get or load a reference set as a Panther lookup table.',
+                    "    ",
+                    "    In Panther, create a Lookup Table with columns: "
+                    "value, description, added_date",
+                    "    The lookup table name should match the QRadar reference set name.",
+                    '    """',
+                    "    global _reference_set_cache",
+                    "    ",
+                    "    if set_name not in _reference_set_cache:",
+                    "        try:",
+                    "            # Import Panther lookup table at runtime",
+                    "            from panther_sdk import lookup_table",
+                    "            lt = lookup_table(set_name)",
+                    "            # Load all values into a set for O(1) lookup",
+                    "            _reference_set_cache[set_name] = set(lt.keys()) if lt else set()",
+                    "        except ImportError:",
+                    "            # Fallback: read from JSON file if Panther SDK not available",
+                    "            import json",
+                    "            import os",
+                    '            ref_path = os.environ.get("REFERENCE_SETS_PATH", '
+                    '"/var/reference_sets")',
+                    "            try:",
+                    '                with open(f"{ref_path}/{set_name}.json") as f:',
+                    "                    data = json.load(f)",
+                    "                    _reference_set_cache[set_name] = "
+                    'set(data.get("values", []))',
+                    "            except (FileNotFoundError, json.JSONDecodeError):",
+                    "                _reference_set_cache[set_name] = set()",
+                    "    ",
+                    "    return _reference_set_cache.get(set_name, set())",
+                    "",
+                    "",
+                    "def in_reference_set(set_name: str, value: str) -> bool:",
+                    '    """Check if value is in reference set '
+                    '(QRadar INREFERENCESET equivalent)."""',
+                    "    if value is None:",
+                    "        return False",
+                    "    return str(value).lower() in "
+                    "{v.lower() for v in get_reference_set(set_name)}",
+                    "",
+                    "",
+                    "def not_in_reference_set(set_name: str, value: str) -> bool:",
+                    '    """Check if value is NOT in reference set '
+                    '(QRadar NOTINREFERENCESET equivalent)."""',
+                    "    if value is None:",
+                    "        return True",
+                    "    return str(value).lower() not in "
+                    "{v.lower() for v in get_reference_set(set_name)}",
+                    "",
+                    "",
+                ]
+            )
 
-        if 'PROTOCOLNAME' in functions:
-            lines.extend([
-                '# Protocol number to name mapping (QRadar PROTOCOLNAME equivalent)',
-                'PROTOCOL_MAP = {',
-                '    1: "ICMP", 6: "TCP", 17: "UDP", 47: "GRE", 50: "ESP",',
-                '    51: "AH", 58: "ICMPv6", 89: "OSPF", 132: "SCTP",',
-                '}',
-                '',
-                '',
-                'def get_protocol_name(protocol_number) -> str:',
-                '    """Convert protocol number to name (QRadar PROTOCOLNAME equivalent)."""',
-                '    try:',
-                '        return PROTOCOL_MAP.get(int(protocol_number), f"PROTOCOL_{protocol_number}")',
-                '    except (ValueError, TypeError):',
-                '        return str(protocol_number)',
-                '',
-                '',
-            ])
+        if "PROTOCOLNAME" in functions:
+            lines.extend(
+                [
+                    "# Protocol number to name mapping (QRadar PROTOCOLNAME equivalent)",
+                    "PROTOCOL_MAP = {",
+                    '    1: "ICMP", 6: "TCP", 17: "UDP", 47: "GRE", 50: "ESP",',
+                    '    51: "AH", 58: "ICMPv6", 89: "OSPF", 132: "SCTP",',
+                    "}",
+                    "",
+                    "",
+                    "def get_protocol_name(protocol_number) -> str:",
+                    '    """Convert protocol number to name (QRadar PROTOCOLNAME equivalent)."""',
+                    "    try:",
+                    "        return PROTOCOL_MAP.get(int(protocol_number), "
+                    'f"PROTOCOL_{protocol_number}")',
+                    "    except (ValueError, TypeError):",
+                    "        return str(protocol_number)",
+                    "",
+                    "",
+                ]
+            )
 
-        if 'CATEGORYNAME' in functions or 'QIDNAME' in functions:
-            lines.extend([
-                '# QRadar category ID to name mapping (subset - add more as needed)',
-                'CATEGORY_MAP = {',
-                '    1001: "Reconnaissance", 2001: "DoS", 3001: "Authentication",',
-                '    3002: "Brute Force", 3003: "Privilege Escalation",',
-                '    4001: "Access", 4002: "ACL Allow", 4003: "ACL Deny",',
-                '    5001: "Exploit", 5002: "Buffer Overflow", 5003: "SQL Injection",',
-                '    6001: "Malware", 6002: "Virus", 6003: "Trojan", 6006: "Ransomware",',
-                '    7001: "Suspicious Activity", 7002: "Port Scan", 7005: "Data Exfiltration",',
-                '    8001: "System", 8003: "Configuration Change",',
-                '}',
-                '',
-                '',
-                'def get_category_name(category_id) -> str:',
-                '    """Convert QRadar category ID to name (CATEGORYNAME equivalent)."""',
-                '    try:',
-                '        return CATEGORY_MAP.get(int(category_id), f"CATEGORY_{category_id}")',
-                '    except (ValueError, TypeError):',
-                '        return str(category_id)',
-                '',
-                '',
-                'def get_qid_name(qid) -> str:',
-                '    """Get QID name - requires mapping file or lookup table.',
-                '    ',
-                '    QIDs are QRadar-specific event identifiers. Map these to your',
-                '    log source event types for accurate detection.',
-                '    """',
-                '    # TODO: Implement QID lookup from mapping file or table',
-                '    return f"QID_{qid}"',
-                '',
-                '',
-            ])
+        if "CATEGORYNAME" in functions or "QIDNAME" in functions:
+            lines.extend(
+                [
+                    "# QRadar category ID to name mapping (subset - add more as needed)",
+                    "CATEGORY_MAP = {",
+                    '    1001: "Reconnaissance", 2001: "DoS", 3001: "Authentication",',
+                    '    3002: "Brute Force", 3003: "Privilege Escalation",',
+                    '    4001: "Access", 4002: "ACL Allow", 4003: "ACL Deny",',
+                    '    5001: "Exploit", 5002: "Buffer Overflow", 5003: "SQL Injection",',
+                    '    6001: "Malware", 6002: "Virus", 6003: "Trojan", 6006: "Ransomware",',
+                    '    7001: "Suspicious Activity", 7002: "Port Scan", '
+                    '7005: "Data Exfiltration",',
+                    '    8001: "System", 8003: "Configuration Change",',
+                    "}",
+                    "",
+                    "",
+                    "def get_category_name(category_id) -> str:",
+                    '    """Convert QRadar category ID to name (CATEGORYNAME equivalent)."""',
+                    "    try:",
+                    '        return CATEGORY_MAP.get(int(category_id), f"CATEGORY_{category_id}")',
+                    "    except (ValueError, TypeError):",
+                    "        return str(category_id)",
+                    "",
+                    "",
+                    "def get_qid_name(qid) -> str:",
+                    '    """Get QID name - requires mapping file or lookup table.',
+                    "    ",
+                    "    QIDs are QRadar-specific event identifiers. Map these to your",
+                    "    log source event types for accurate detection.",
+                    '    """',
+                    "    # TODO: Implement QID lookup from mapping file or table",
+                    '    return f"QID_{qid}"',
+                    "",
+                    "",
+                ]
+            )
 
         return lines
 
@@ -754,64 +821,72 @@ class AQLConverter:
         class_name: str,
         rule_id: str,
         severity: str,
-        log_types: List[str],
+        log_types: list[str],
         parse_result: AQLParseResult,
-        todos: List[str],
-    ) -> List[str]:
+        todos: list[str],
+    ) -> list[str]:
         """Generate a streaming Panther rule."""
         lines = [
-            f'@detection.rule(',
+            "@detection.rule(",
             f'    rule_id="{rule_id}",',
-            f'    log_types={log_types},',
-            f'    severity=detection.SeverityInfo' if severity.lower() == 'info' else
-            f'    severity=detection.SeverityLow' if severity.lower() == 'low' else
-            f'    severity=detection.SeverityMedium' if severity.lower() == 'medium' else
-            f'    severity=detection.SeverityHigh' if severity.lower() == 'high' else
-            f'    severity=detection.SeverityCritical',
-            f')',
-            f'class {class_name}(detection.Rule):',
-            f'    """Detection rule converted from QRadar AQL."""',
-            f'',
-            f'    def rule(self, event: PantherEvent) -> bool:',
-            f'        """',
-            f'        Original AQL WHERE conditions:',
+            f"    log_types={log_types},",
+            "    severity=detection.SeverityInfo"
+            if severity.lower() == "info"
+            else "    severity=detection.SeverityLow"
+            if severity.lower() == "low"
+            else "    severity=detection.SeverityMedium"
+            if severity.lower() == "medium"
+            else "    severity=detection.SeverityHigh"
+            if severity.lower() == "high"
+            else "    severity=detection.SeverityCritical",
+            ")",
+            f"class {class_name}(detection.Rule):",
+            '    """Detection rule converted from QRadar AQL."""',
+            "",
+            "    def rule(self, event: PantherEvent) -> bool:",
+            '        """',
+            "        Original AQL WHERE conditions:",
         ]
 
         for condition in parse_result.where_conditions:
-            lines.append(f'        - {condition}')
+            lines.append(f"        - {condition}")
 
-        lines.extend([
-            f'        """',
-            f'        # TODO: Implement detection logic based on AQL conditions',
-        ])
+        lines.extend(
+            [
+                '        """',
+                "        # TODO: Implement detection logic based on AQL conditions",
+            ]
+        )
 
         # Generate condition checks
         for i, condition in enumerate(parse_result.where_conditions):
             python_condition = self._condition_to_python(condition, todos)
             if i == 0:
-                lines.append(f'        if not ({python_condition}):')
-                lines.append(f'            return False')
+                lines.append(f"        if not ({python_condition}):")
+                lines.append("            return False")
             else:
                 # Handle AND/OR
-                if condition.rstrip().upper().endswith('AND'):
-                    lines.append(f'        if not ({python_condition.rstrip()[:-3]}):')
-                    lines.append(f'            return False')
-                elif condition.rstrip().upper().endswith('OR'):
-                    lines.append(f'        # OR condition - adjust logic as needed')
-                    lines.append(f'        # {python_condition}')
+                if condition.rstrip().upper().endswith("AND"):
+                    lines.append(f"        if not ({python_condition.rstrip()[:-3]}):")
+                    lines.append("            return False")
+                elif condition.rstrip().upper().endswith("OR"):
+                    lines.append("        # OR condition - adjust logic as needed")
+                    lines.append(f"        # {python_condition}")
                 else:
-                    lines.append(f'        if not ({python_condition}):')
-                    lines.append(f'            return False')
+                    lines.append(f"        if not ({python_condition}):")
+                    lines.append("            return False")
 
-        lines.extend([
-            f'',
-            f'        return True',
-            f'',
-            f'    def title(self, event: PantherEvent) -> str:',
-            f'        """Generate alert title."""',
-            f'        return f"{class_name} triggered"',
-            f'',
-        ])
+        lines.extend(
+            [
+                "",
+                "        return True",
+                "",
+                "    def title(self, event: PantherEvent) -> str:",
+                '        """Generate alert title."""',
+                f'        return f"{class_name} triggered"',
+                "",
+            ]
+        )
 
         return lines
 
@@ -820,82 +895,90 @@ class AQLConverter:
         class_name: str,
         rule_id: str,
         severity: str,
-        log_types: List[str],
+        log_types: list[str],
         parse_result: AQLParseResult,
-        todos: List[str],
-    ) -> List[str]:
+        todos: list[str],
+    ) -> list[str]:
         """Generate a scheduled Panther rule for aggregation queries."""
-        todos.append("TODO: This is an aggregation query - implement as a Scheduled Rule in Panther")
+        todos.append(
+            "TODO: This is an aggregation query - implement as a Scheduled Rule in Panther"
+        )
 
         lines = [
-            f'# NOTE: This AQL query uses aggregation and should be implemented as a Scheduled Rule',
-            f'# See: https://docs.panther.com/detections/scheduled-rules',
-            f'',
-            f'@detection.rule(',
+            "# NOTE: This AQL query uses aggregation and should be implemented as a Scheduled Rule",
+            "# See: https://docs.panther.com/detections/scheduled-rules",
+            "",
+            "@detection.rule(",
             f'    rule_id="{rule_id}",',
-            f'    log_types={log_types},',
-            f'    severity=detection.SeverityInfo' if severity.lower() == 'info' else
-            f'    severity=detection.SeverityLow' if severity.lower() == 'low' else
-            f'    severity=detection.SeverityMedium' if severity.lower() == 'medium' else
-            f'    severity=detection.SeverityHigh' if severity.lower() == 'high' else
-            f'    severity=detection.SeverityCritical',
-            f')',
-            f'class {class_name}(detection.Rule):',
-            f'    """',
-            f'    Aggregation-based detection rule converted from QRadar AQL.',
-            f'    ',
-            f'    Original aggregations:',
+            f"    log_types={log_types},",
+            "    severity=detection.SeverityInfo"
+            if severity.lower() == "info"
+            else "    severity=detection.SeverityLow"
+            if severity.lower() == "low"
+            else "    severity=detection.SeverityMedium"
+            if severity.lower() == "medium"
+            else "    severity=detection.SeverityHigh"
+            if severity.lower() == "high"
+            else "    severity=detection.SeverityCritical",
+            ")",
+            f"class {class_name}(detection.Rule):",
+            '    """',
+            "    Aggregation-based detection rule converted from QRadar AQL.",
+            "    ",
+            "    Original aggregations:",
         ]
 
         for agg in parse_result.aggregations:
-            lines.append(f'    - {agg["function"]}: {agg.get("raw", "")}')
+            lines.append(f"    - {agg['function']}: {agg.get('raw', '')}")
 
         if parse_result.group_by:
-            lines.append(f'    ')
-            lines.append(f'    Group by: {", ".join(parse_result.group_by)}')
+            lines.append("    ")
+            lines.append(f"    Group by: {', '.join(parse_result.group_by)}")
 
-        lines.extend([
-            f'    """',
-            f'',
-            f'    def rule(self, event: PantherEvent) -> bool:',
-            f'        """Streaming component - filter events for scheduled aggregation."""',
-        ])
+        lines.extend(
+            [
+                '    """',
+                "",
+                "    def rule(self, event: PantherEvent) -> bool:",
+                '        """Streaming component - filter events for scheduled aggregation."""',
+            ]
+        )
 
         # Add basic filtering
         for condition in parse_result.where_conditions:
             if not any(agg in condition.upper() for agg in self._aggregation_functions):
                 python_condition = self._condition_to_python(condition, todos)
-                lines.append(f'        if not ({python_condition}):')
-                lines.append(f'            return False')
+                lines.append(f"        if not ({python_condition}):")
+                lines.append("            return False")
 
-        lines.extend([
-            f'        return True',
-            f'',
-            f'    def title(self, event: PantherEvent) -> str:',
-            f'        """Generate alert title."""',
-            f'        return f"{class_name} - Aggregation Alert"',
-            f'',
-            f'    # Scheduled query SQL (for reference):',
-            f'    # """',
-        ])
+        lines.extend(
+            [
+                "        return True",
+                "",
+                "    def title(self, event: PantherEvent) -> str:",
+                '        """Generate alert title."""',
+                f'        return f"{class_name} - Aggregation Alert"',
+                "",
+                "    # Scheduled query SQL (for reference):",
+                '    # """',
+            ]
+        )
 
         # Add SQL equivalent
-        sql_result = self._convert_to_sql(
-            "", rule_id, class_name, severity, parse_result
-        )
-        for sql_line in sql_result.source_code.split('\n'):
-            lines.append(f'    # {sql_line}')
+        sql_result = self._convert_to_sql("", rule_id, class_name, severity, parse_result)
+        for sql_line in sql_result.source_code.split("\n"):
+            lines.append(f"    # {sql_line}")
 
-        lines.append(f'    # """')
+        lines.append('    # """')
 
         return lines
 
-    def _condition_to_python(self, condition: str, todos: List[str]) -> str:
+    def _condition_to_python(self, condition: str, todos: list[str]) -> str:
         """Convert a single AQL condition to Python."""
         result = condition
 
         # Remove trailing AND/OR
-        result = re.sub(r'\s+(AND|OR)\s*$', '', result, flags=re.IGNORECASE)
+        result = re.sub(r"\s+(AND|OR)\s*$", "", result, flags=re.IGNORECASE)
 
         # Handle common patterns
         # field = 'value' -> event.get('field') == 'value'
@@ -947,39 +1030,51 @@ class AQLConverter:
             return f"ip_in_cidr(event.get('{field}', ''), '{cidr}')"
 
         # INREFERENCESET('setname', field)
-        refset_match = re.search(r"INREFERENCESET\s*\(\s*'([^']+)'\s*,\s*(\w+)\s*\)", result, re.IGNORECASE)
+        refset_match = re.search(
+            r"INREFERENCESET\s*\(\s*'([^']+)'\s*,\s*(\w+)\s*\)", result, re.IGNORECASE
+        )
         if refset_match:
             setname, field = refset_match.groups()
             todos.append(f"TODO: Create Panther Lookup Table '{setname}' for reference set")
             return f"in_reference_set('{setname}', event.get('{field}', ''))"
 
         # NOTINREFERENCESET('setname', field)
-        notrefset_match = re.search(r"NOTINREFERENCESET\s*\(\s*'([^']+)'\s*,\s*(\w+)\s*\)", result, re.IGNORECASE)
+        notrefset_match = re.search(
+            r"NOTINREFERENCESET\s*\(\s*'([^']+)'\s*,\s*(\w+)\s*\)", result, re.IGNORECASE
+        )
         if notrefset_match:
             setname, field = notrefset_match.groups()
             todos.append(f"TODO: Create Panther Lookup Table '{setname}' for reference set")
             return f"not_in_reference_set('{setname}', event.get('{field}', ''))"
 
         # PROTOCOLNAME(protocol) = 'TCP'
-        protocolname_match = re.search(r"PROTOCOLNAME\s*\(\s*(\w+)\s*\)\s*=\s*'([^']+)'", result, re.IGNORECASE)
+        protocolname_match = re.search(
+            r"PROTOCOLNAME\s*\(\s*(\w+)\s*\)\s*=\s*'([^']+)'", result, re.IGNORECASE
+        )
         if protocolname_match:
             field, expected = protocolname_match.groups()
             return f"get_protocol_name(event.get('{field}')) == '{expected}'"
 
         # CATEGORYNAME(category) = 'Malware'
-        categoryname_match = re.search(r"CATEGORYNAME\s*\(\s*(\w+)\s*\)\s*=\s*'([^']+)'", result, re.IGNORECASE)
+        categoryname_match = re.search(
+            r"CATEGORYNAME\s*\(\s*(\w+)\s*\)\s*=\s*'([^']+)'", result, re.IGNORECASE
+        )
         if categoryname_match:
             field, expected = categoryname_match.groups()
             return f"get_category_name(event.get('{field}')) == '{expected}'"
 
         # CATEGORYNAME(category) LIKE '%Malware%'
-        categoryname_like_match = re.search(r"CATEGORYNAME\s*\(\s*(\w+)\s*\)\s+LIKE\s+'%([^%]+)%'", result, re.IGNORECASE)
+        categoryname_like_match = re.search(
+            r"CATEGORYNAME\s*\(\s*(\w+)\s*\)\s+LIKE\s+'%([^%]+)%'", result, re.IGNORECASE
+        )
         if categoryname_like_match:
             field, pattern = categoryname_like_match.groups()
             return f"'{pattern}' in get_category_name(event.get('{field}'))"
 
         # QIDNAME(qid) = 'event_name'
-        qidname_match = re.search(r"QIDNAME\s*\(\s*(\w+)\s*\)\s*=\s*'([^']+)'", result, re.IGNORECASE)
+        qidname_match = re.search(
+            r"QIDNAME\s*\(\s*(\w+)\s*\)\s*=\s*'([^']+)'", result, re.IGNORECASE
+        )
         if qidname_match:
             field, expected = qidname_match.groups()
             todos.append(f"TODO: Map QID to your log source event type for '{expected}'")
@@ -1011,7 +1106,7 @@ class AQLConverter:
         if in_match:
             field, values = in_match.groups()
             # Parse values
-            value_list = [v.strip().strip("'\"") for v in values.split(',')]
+            value_list = [v.strip().strip("'\"") for v in values.split(",")]
             return f"event.get('{field}') in {value_list}"
 
         # Default: add as comment with TODO

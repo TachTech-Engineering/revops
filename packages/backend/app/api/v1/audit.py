@@ -1,14 +1,14 @@
-from typing import Annotated, Optional
-from uuid import UUID
 from datetime import datetime
+from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
-from sqlalchemy import select, desc, and_
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, AuditLog
 from app.api.v1.deps import OrgAdminDep, OrgIdDep
+from app.db import AuditLog, get_db
 
 router = APIRouter()
 
@@ -18,10 +18,10 @@ class AuditLogResponse(BaseModel):
     user_email: str
     action: str
     resource_type: str
-    resource_id: Optional[str]
+    resource_id: str | None
     details: dict
-    ip_address: Optional[str]
-    user_agent: Optional[str]
+    ip_address: str | None
+    user_agent: str | None
     created_at: str
 
     class Config:
@@ -40,12 +40,12 @@ async def list_audit_logs(
     admin: OrgAdminDep,
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user_email: Optional[str] = Query(None, description="Filter by user email"),
-    action: Optional[str] = Query(None, description="Filter by action"),
-    resource_type: Optional[str] = Query(None, description="Filter by resource type"),
-    resource_id: Optional[str] = Query(None, description="Filter by resource ID"),
-    start_date: Optional[datetime] = Query(None, description="Filter by start date"),
-    end_date: Optional[datetime] = Query(None, description="Filter by end date"),
+    user_email: str | None = Query(None, description="Filter by user email"),
+    action: str | None = Query(None, description="Filter by action"),
+    resource_type: str | None = Query(None, description="Filter by resource type"),
+    resource_id: str | None = Query(None, description="Filter by resource ID"),
+    start_date: datetime | None = Query(None, description="Filter by start date"),
+    end_date: datetime | None = Query(None, description="Filter by end date"),
     page: int = Query(1, ge=1, description="Page number"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
 ) -> AuditLogListResponse:
@@ -68,6 +68,7 @@ async def list_audit_logs(
 
     # Get total count
     from sqlalchemy import func
+
     count_query = select(func.count()).select_from(query.subquery())
     total_result = await db.execute(count_query)
     total = total_result.scalar() or 0
@@ -108,6 +109,7 @@ async def list_audit_actions(
 ) -> list[str]:
     """List distinct audit actions. Admin only."""
     from sqlalchemy import distinct
+
     result = await db.execute(
         select(distinct(AuditLog.action))
         .where(AuditLog.organization_id == org_id)
@@ -124,6 +126,7 @@ async def list_audit_resource_types(
 ) -> list[str]:
     """List distinct resource types. Admin only."""
     from sqlalchemy import distinct
+
     result = await db.execute(
         select(distinct(AuditLog.resource_type))
         .where(AuditLog.organization_id == org_id)

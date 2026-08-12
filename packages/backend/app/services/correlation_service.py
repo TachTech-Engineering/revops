@@ -6,23 +6,21 @@ when rules match. Supports multi-alert time window correlation.
 """
 
 import hashlib
-import json
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, List, Tuple
 from uuid import UUID
 
-from sqlalchemy import select, and_, delete
+from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
+    AlertCorrelationWindow,
     CorrelationRule,
     Incident,
     IncidentAlert,
     IncidentSeverity,
     IncidentStatus,
     NormalizedAlert,
-    AlertCorrelationWindow,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,7 +36,7 @@ class CorrelationService:
         self,
         alert: NormalizedAlert,
         organization_id: UUID,
-    ) -> Optional[Incident]:
+    ) -> Incident | None:
         """
         Process a single alert against all active correlation rules.
         Supports both single-alert and multi-alert time window correlation.
@@ -70,7 +68,9 @@ class CorrelationService:
         severity_filter = conditions.get("severity_filter")
         if severity_filter:
             # severity_filter is a list of allowed severities
-            if alert.severity and alert.severity.lower() not in [s.lower() for s in severity_filter]:
+            if alert.severity and alert.severity.lower() not in [
+                s.lower() for s in severity_filter
+            ]:
                 return False
 
         # Check rule_id filter (matches against rule_name or title patterns)
@@ -80,7 +80,10 @@ class CorrelationService:
             alert_title = alert.title or ""
             alert_rule_name = alert.rule_name or ""
             for pattern in rule_id_filter:
-                if pattern.lower() in alert_title.lower() or pattern.lower() in alert_rule_name.lower():
+                if (
+                    pattern.lower() in alert_title.lower()
+                    or pattern.lower() in alert_rule_name.lower()
+                ):
                     matched = True
                     break
             if not matched:
@@ -89,7 +92,9 @@ class CorrelationService:
         # Check source_type filter if present
         source_type_filter = conditions.get("source_type_filter")
         if source_type_filter:
-            if alert.source_type and alert.source_type.lower() not in [s.lower() for s in source_type_filter]:
+            if alert.source_type and alert.source_type.lower() not in [
+                s.lower() for s in source_type_filter
+            ]:
                 return False
 
         # For single-alert rules (min_alerts=1 or not set), match immediately
@@ -142,7 +147,7 @@ class CorrelationService:
         alert: NormalizedAlert,
         rule: CorrelationRule,
         organization_id: UUID,
-    ) -> Tuple[AlertCorrelationWindow, bool]:
+    ) -> tuple[AlertCorrelationWindow, bool]:
         """
         Get or create a correlation window for the alert and rule.
 
@@ -169,7 +174,7 @@ class CorrelationService:
                     AlertCorrelationWindow.rule_id == rule.id,
                     AlertCorrelationWindow.window_key == window_key,
                     AlertCorrelationWindow.last_alert_at >= window_start,
-                    AlertCorrelationWindow.triggered == False,
+                    AlertCorrelationWindow.triggered.is_(False),
                 )
             )
         )
@@ -232,7 +237,7 @@ class CorrelationService:
         self,
         alert: NormalizedAlert,
         organization_id: UUID,
-    ) -> Optional[Incident]:
+    ) -> Incident | None:
         """
         Process alert with multi-alert time window correlation.
 
@@ -248,8 +253,8 @@ class CorrelationService:
             select(CorrelationRule).where(
                 and_(
                     CorrelationRule.organization_id == organization_id,
-                    CorrelationRule.is_active == True,
-                    CorrelationRule.auto_create_incident == True,
+                    CorrelationRule.is_active.is_(True),
+                    CorrelationRule.auto_create_incident.is_(True),
                 )
             )
         )
@@ -268,7 +273,9 @@ class CorrelationService:
 
             # For single-alert rules, create incident immediately
             if min_alerts <= 1:
-                logger.info(f"Alert {alert.id} matched single-alert rule '{rule.name}', creating incident")
+                logger.info(
+                    f"Alert {alert.id} matched single-alert rule '{rule.name}', creating incident"
+                )
                 return await self._create_incident_from_alert(alert, rule, organization_id)
 
             # For multi-alert rules, use time window tracking
@@ -289,7 +296,9 @@ class CorrelationService:
         # Check severity filter
         severity_filter = conditions.get("severity_filter")
         if severity_filter:
-            if alert.severity and alert.severity.lower() not in [s.lower() for s in severity_filter]:
+            if alert.severity and alert.severity.lower() not in [
+                s.lower() for s in severity_filter
+            ]:
                 return False
 
         # Check rule_id filter
@@ -299,7 +308,10 @@ class CorrelationService:
             alert_title = alert.title or ""
             alert_rule_name = alert.rule_name or ""
             for pattern in rule_id_filter:
-                if pattern.lower() in alert_title.lower() or pattern.lower() in alert_rule_name.lower():
+                if (
+                    pattern.lower() in alert_title.lower()
+                    or pattern.lower() in alert_rule_name.lower()
+                ):
                     matched = True
                     break
             if not matched:
@@ -308,7 +320,9 @@ class CorrelationService:
         # Check source_type filter
         source_type_filter = conditions.get("source_type_filter")
         if source_type_filter:
-            if alert.source_type and alert.source_type.lower() not in [s.lower() for s in source_type_filter]:
+            if alert.source_type and alert.source_type.lower() not in [
+                s.lower() for s in source_type_filter
+            ]:
                 return False
 
         return True
@@ -350,7 +364,7 @@ class CorrelationService:
         await self.db.flush()
 
         # Link all alerts to incident
-        for alert_id in (window.alert_ids or []):
+        for alert_id in window.alert_ids or []:
             incident_alert = IncidentAlert(
                 organization_id=organization_id,
                 incident_id=incident.id,
@@ -388,15 +402,17 @@ class CorrelationService:
             "info": IncidentSeverity.LOW,
         }
         incident_severity = severity_map.get(
-            (alert.severity or "medium").lower(),
-            IncidentSeverity.MEDIUM
+            (alert.severity or "medium").lower(), IncidentSeverity.MEDIUM
         )
 
         # Create incident
         incident = Incident(
             organization_id=organization_id,
             title=f"[Auto] {alert.title}",
-            description=f"Incident auto-created by correlation rule '{rule.name}' from {alert.source_type} alert.\n\nOriginal alert: {alert.title}",
+            description=(
+                f"Incident auto-created by correlation rule '{rule.name}' "
+                f"from {alert.source_type} alert.\n\nOriginal alert: {alert.title}"
+            ),
             status=IncidentStatus.OPEN,
             severity=incident_severity,
             tags=["auto-created", f"source:{alert.source_type}", f"rule:{rule.name}"],
@@ -439,7 +455,6 @@ class CorrelationService:
                 incidents.append(incident)
         return incidents
 
-
     async def cleanup_expired_windows(self, max_age_hours: int = 24) -> int:
         """
         Clean up expired correlation windows.
@@ -453,9 +468,7 @@ class CorrelationService:
         cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
 
         result = await self.db.execute(
-            delete(AlertCorrelationWindow).where(
-                AlertCorrelationWindow.last_alert_at < cutoff
-            )
+            delete(AlertCorrelationWindow).where(AlertCorrelationWindow.last_alert_at < cutoff)
         )
 
         deleted_count = result.rowcount

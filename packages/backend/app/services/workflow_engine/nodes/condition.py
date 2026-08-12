@@ -7,8 +7,8 @@ Evaluates conditions and routes execution to true/false branches.
 import operator
 from typing import Any
 
-from app.services.workflow_engine.nodes.base import NodeExecutor, NodeResult
 from app.services.workflow_engine.context import ExecutionContext
+from app.services.workflow_engine.nodes.base import NodeExecutor, NodeResult
 
 
 class ConditionExecutor(NodeExecutor):
@@ -133,6 +133,7 @@ class ConditionExecutor(NodeExecutor):
 
         elif op == "matches":
             import re
+
             try:
                 return bool(re.match(str(expected), str(actual)))
             except re.error:

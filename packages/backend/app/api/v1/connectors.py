@@ -5,37 +5,37 @@ Endpoints for managing data source and action connectors.
 All endpoints are organization-scoped for multi-tenancy.
 """
 
-from typing import Annotated, Optional
-from uuid import UUID
 from datetime import datetime
+from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, desc, func, and_
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, User
+from app.api.v1.deps import OrgAdminDep, OrgIdDep, OrgUserDep
+from app.db import get_db
 from app.db.models import (
     Connector,
-    NormalizedAlert,
     ConnectorCategory,
     ConnectorStatus,
+    NormalizedAlert,
 )
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAdminDep
-from app.services.encryption import get_encryption_service, EncryptionError
 from app.services.connectors.base import (
     get_connector_registry,
-    ConnectionTestResult,
 )
+from app.services.encryption import EncryptionError, get_encryption_service
 
 router = APIRouter()
 
 
 # ==================== Request/Response Models ====================
 
+
 class ConnectorCreate(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     category: ConnectorCategory
     connector_type: str
     config: dict = {}
@@ -45,28 +45,28 @@ class ConnectorCreate(BaseModel):
 
 
 class ConnectorUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    config: Optional[dict] = None
-    credentials: Optional[dict] = None
-    sync_enabled: Optional[bool] = None
-    sync_interval_minutes: Optional[int] = None
-    status: Optional[ConnectorStatus] = None
+    name: str | None = None
+    description: str | None = None
+    config: dict | None = None
+    credentials: dict | None = None
+    sync_enabled: bool | None = None
+    sync_interval_minutes: int | None = None
+    status: ConnectorStatus | None = None
 
 
 class ConnectorResponse(BaseModel):
     id: UUID
     name: str
-    description: Optional[str]
+    description: str | None
     category: ConnectorCategory
     connector_type: str
     status: ConnectorStatus
     config: dict
     sync_enabled: bool
     sync_interval_minutes: int
-    last_health_check: Optional[str]
-    last_error: Optional[str]
-    last_sync_at: Optional[str]
+    last_health_check: str | None
+    last_error: str | None
+    last_sync_at: str | None
     created_by: str
     created_at: str
     updated_at: str
@@ -88,8 +88,8 @@ class ConnectorTypeInfo(BaseModel):
 class ConnectionTestResponse(BaseModel):
     success: bool
     message: str
-    details: Optional[dict] = None
-    latency_ms: Optional[int] = None
+    details: dict | None = None
+    latency_ms: int | None = None
 
 
 class NormalizedAlertResponse(BaseModel):
@@ -98,13 +98,13 @@ class NormalizedAlertResponse(BaseModel):
     source_type: str
     external_id: str
     title: str
-    description: Optional[str]
+    description: str | None
     severity: str
     status: str
     created_at_source: str
-    updated_at_source: Optional[str]
-    rule_id: Optional[str]
-    rule_name: Optional[str]
+    updated_at_source: str | None
+    rule_id: str | None
+    rule_name: str | None
     tags: list
     mitre_tactics: list
     mitre_techniques: list
@@ -121,10 +121,11 @@ class ConnectorListResponse(BaseModel):
 
 # ==================== Connector Endpoints ====================
 
+
 @router.get("/types")
 async def list_connector_types(
     user: OrgUserDep,
-    category: Optional[ConnectorCategory] = None,
+    category: ConnectorCategory | None = None,
 ) -> list[ConnectorTypeInfo]:
     """List all available connector types with their configuration schemas."""
     registry = get_connector_registry()
@@ -132,27 +133,31 @@ async def list_connector_types(
     types = []
     if category is None or category == ConnectorCategory.DATA_SOURCE:
         for metadata in registry.list_data_sources():
-            types.append(ConnectorTypeInfo(
-                type=metadata.connector_type,
-                category=metadata.category.value,
-                name=metadata.display_name,
-                description=metadata.description,
-                icon=metadata.icon,
-                config_schema=metadata.config_schema,
-                credential_schema=metadata.credentials_schema,
-            ))
+            types.append(
+                ConnectorTypeInfo(
+                    type=metadata.connector_type,
+                    category=metadata.category.value,
+                    name=metadata.display_name,
+                    description=metadata.description,
+                    icon=metadata.icon,
+                    config_schema=metadata.config_schema,
+                    credential_schema=metadata.credentials_schema,
+                )
+            )
 
     if category is None or category == ConnectorCategory.ACTION:
         for metadata in registry.list_actions():
-            types.append(ConnectorTypeInfo(
-                type=metadata.connector_type,
-                category=metadata.category.value,
-                name=metadata.display_name,
-                description=metadata.description,
-                icon=metadata.icon,
-                config_schema=metadata.config_schema,
-                credential_schema=metadata.credentials_schema,
-            ))
+            types.append(
+                ConnectorTypeInfo(
+                    type=metadata.connector_type,
+                    category=metadata.category.value,
+                    name=metadata.display_name,
+                    description=metadata.description,
+                    icon=metadata.icon,
+                    config_schema=metadata.config_schema,
+                    credential_schema=metadata.credentials_schema,
+                )
+            )
 
     return types
 
@@ -162,13 +167,15 @@ async def list_connectors(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    category: Optional[ConnectorCategory] = None,
-    status: Optional[ConnectorStatus] = None,
+    category: ConnectorCategory | None = None,
+    status: ConnectorStatus | None = None,
 ) -> ConnectorListResponse:
     """List all configured connectors for the current organization."""
-    query = select(Connector).where(
-        Connector.organization_id == org_id
-    ).order_by(desc(Connector.created_at))
+    query = (
+        select(Connector)
+        .where(Connector.organization_id == org_id)
+        .order_by(desc(Connector.created_at))
+    )
 
     if category:
         query = query.where(Connector.category == category)
@@ -232,7 +239,9 @@ async def get_connector(
         config=connector.config,
         sync_enabled=connector.sync_enabled,
         sync_interval_minutes=connector.sync_interval_minutes,
-        last_health_check=connector.last_health_check.isoformat() if connector.last_health_check else None,
+        last_health_check=connector.last_health_check.isoformat()
+        if connector.last_health_check
+        else None,
         last_error=connector.last_error,
         last_sync_at=connector.last_sync_at.isoformat() if connector.last_sync_at else None,
         created_by=connector.created_by,
@@ -252,10 +261,14 @@ async def create_connector(
     registry = get_connector_registry()
     if connector.category == ConnectorCategory.DATA_SOURCE:
         if not registry.get_data_source(connector.connector_type):
-            raise HTTPException(status_code=400, detail=f"Unknown data source type: {connector.connector_type}")
+            raise HTTPException(
+                status_code=400, detail=f"Unknown data source type: {connector.connector_type}"
+            )
     else:
         if not registry.get_action(connector.connector_type):
-            raise HTTPException(status_code=400, detail=f"Unknown action type: {connector.connector_type}")
+            raise HTTPException(
+                status_code=400, detail=f"Unknown action type: {connector.connector_type}"
+            )
 
     # Encrypt credentials
     encrypted_creds = None
@@ -349,7 +362,9 @@ async def update_connector(
         config=connector.config,
         sync_enabled=connector.sync_enabled,
         sync_interval_minutes=connector.sync_interval_minutes,
-        last_health_check=connector.last_health_check.isoformat() if connector.last_health_check else None,
+        last_health_check=connector.last_health_check.isoformat()
+        if connector.last_health_check
+        else None,
         last_error=connector.last_error,
         last_sync_at=connector.last_sync_at.isoformat() if connector.last_sync_at else None,
         created_by=connector.created_by,
@@ -417,7 +432,9 @@ async def test_connector(
         connector_cls = registry.get_action(connector.connector_type)
 
     if not connector_cls:
-        raise HTTPException(status_code=400, detail=f"Unknown connector type: {connector.connector_type}")
+        raise HTTPException(
+            status_code=400, detail=f"Unknown connector type: {connector.connector_type}"
+        )
 
     # Test connection
     connector_instance = connector_cls(connector.id, connector.config, credentials)
@@ -448,7 +465,9 @@ async def trigger_sync(
     admin: OrgAdminDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     background_tasks: BackgroundTasks,
-    full_sync: bool = Query(False, description="Force full resync from max age window, ignoring last sync time"),
+    full_sync: bool = Query(
+        False, description="Force full resync from max age window, ignoring last sync time"
+    ),
 ) -> dict:
     """Trigger a manual sync for a data source connector. Requires admin role."""
     result = await db.execute(
@@ -469,20 +488,25 @@ async def trigger_sync(
     if connector.status == ConnectorStatus.PENDING:
         raise HTTPException(
             status_code=400,
-            detail="Connector has not been tested yet. Please test the connection first."
+            detail="Connector has not been tested yet. Please test the connection first.",
         )
 
     if connector.status == ConnectorStatus.ERROR:
         raise HTTPException(
             status_code=400,
-            detail=f"Connector is in error state: {connector.last_error or 'Unknown error'}. Please fix the issue and test the connection again."
+            detail=(
+                f"Connector is in error state: {connector.last_error or 'Unknown error'}. "
+                "Please fix the issue and test the connection again."
+            ),
         )
 
     if connector.status == ConnectorStatus.DISABLED:
         raise HTTPException(status_code=400, detail="Connector is disabled")
 
     if connector.status != ConnectorStatus.CONNECTED:
-        raise HTTPException(status_code=400, detail=f"Connector is not connected (status: {connector.status.value})")
+        raise HTTPException(
+            status_code=400, detail=f"Connector is not connected (status: {connector.status.value})"
+        )
 
     # Queue sync in background (pass org_id for proper alert creation)
     background_tasks.add_task(sync_connector_alerts, connector_id, admin.organization_id, full_sync)
@@ -492,10 +516,11 @@ async def trigger_sync(
 
 async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_sync: bool = False):
     """Background task to sync alerts from a connector."""
-    from app.db.session import AsyncSessionLocal
-    from app.config import settings
-    from app.services.correlation_service import CorrelationService
     import logging
+
+    from app.config import settings
+    from app.db.session import AsyncSessionLocal
+    from app.services.correlation_service import CorrelationService
 
     logger = logging.getLogger(__name__)
     logger.info(f"Starting sync for connector {connector_id}, full_sync={full_sync}")
@@ -532,6 +557,7 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_
 
         # Calculate sync time range
         from datetime import timedelta
+
         since = datetime.utcnow() - timedelta(days=settings.alert_sync_max_age_days)
         if connector.last_sync_at and not full_sync:
             since = connector.last_sync_at
@@ -557,13 +583,15 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_
 
                     # Check if alert already exists (use .first() to handle duplicates gracefully)
                     existing = await db.execute(
-                        select(NormalizedAlert.id).where(
+                        select(NormalizedAlert.id)
+                        .where(
                             and_(
                                 NormalizedAlert.organization_id == organization_id,
                                 NormalizedAlert.connector_id == connector_id,
                                 NormalizedAlert.external_id == alert.external_id,
                             )
-                        ).limit(1)
+                        )
+                        .limit(1)
                     )
                     if existing.scalar():
                         continue
@@ -603,6 +631,7 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_
 
 # ==================== Normalized Alerts Endpoints ====================
 
+
 @router.get("/{connector_id}/alerts")
 async def list_connector_alerts(
     connector_id: UUID,
@@ -611,8 +640,8 @@ async def list_connector_alerts(
     db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
-    severity: Optional[str] = None,
-    status: Optional[str] = None,
+    severity: str | None = None,
+    status: str | None = None,
 ) -> dict:
     """List alerts from a specific connector (must belong to user's organization)."""
     # Verify connector exists and belongs to user's org
@@ -687,13 +716,13 @@ async def list_unified_alerts(
     db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
-    severity: Optional[str] = None,
-    status: Optional[str] = None,
-    source_type: Optional[str] = None,
-    connector_id: Optional[UUID] = None,
-    exclude_resolved: Optional[bool] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
+    severity: str | None = None,
+    status: str | None = None,
+    source_type: str | None = None,
+    connector_id: UUID | None = None,
+    exclude_resolved: bool | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> dict:
     """List alerts from all connected sources (unified view) for the current organization."""
     # Filter by organization
@@ -711,7 +740,9 @@ async def list_unified_alerts(
         query = query.where(NormalizedAlert.connector_id == connector_id)
     if start_date:
         try:
-            start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00")).replace(tzinfo=None)
+            start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00")).replace(
+                tzinfo=None
+            )
             query = query.where(NormalizedAlert.created_at_source >= start_dt)
         except ValueError:
             pass
@@ -728,29 +759,40 @@ async def list_unified_alerts(
     total = count_result.scalar() or 0
 
     # Get severity counts (apply all filters except severity filter for accurate totals)
-    severity_counts_query = (
-        select(NormalizedAlert.severity, func.count().label("count"))
-        .where(NormalizedAlert.organization_id == org_id)
+    severity_counts_query = select(NormalizedAlert.severity, func.count().label("count")).where(
+        NormalizedAlert.organization_id == org_id
     )
     # Apply same filters as main query (except severity) for accurate counts
     if status:
-        severity_counts_query = severity_counts_query.where(NormalizedAlert.status == status.lower())
+        severity_counts_query = severity_counts_query.where(
+            NormalizedAlert.status == status.lower()
+        )
     if exclude_resolved:
         severity_counts_query = severity_counts_query.where(NormalizedAlert.status != "resolved")
     if source_type:
-        severity_counts_query = severity_counts_query.where(NormalizedAlert.source_type == source_type)
+        severity_counts_query = severity_counts_query.where(
+            NormalizedAlert.source_type == source_type
+        )
     if connector_id:
-        severity_counts_query = severity_counts_query.where(NormalizedAlert.connector_id == connector_id)
+        severity_counts_query = severity_counts_query.where(
+            NormalizedAlert.connector_id == connector_id
+        )
     if start_date:
         try:
-            start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00")).replace(tzinfo=None)
-            severity_counts_query = severity_counts_query.where(NormalizedAlert.created_at_source >= start_dt)
+            start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00")).replace(
+                tzinfo=None
+            )
+            severity_counts_query = severity_counts_query.where(
+                NormalizedAlert.created_at_source >= start_dt
+            )
         except ValueError:
             pass
     if end_date:
         try:
             end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00")).replace(tzinfo=None)
-            severity_counts_query = severity_counts_query.where(NormalizedAlert.created_at_source <= end_dt)
+            severity_counts_query = severity_counts_query.where(
+                NormalizedAlert.created_at_source <= end_dt
+            )
         except ValueError:
             pass
 
@@ -824,7 +866,9 @@ async def get_normalized_alert(
         "severity": alert.severity,
         "status": alert.status,
         "created_at_source": alert.created_at_source.isoformat(),
-        "updated_at_source": alert.updated_at_source.isoformat() if alert.updated_at_source else None,
+        "updated_at_source": alert.updated_at_source.isoformat()
+        if alert.updated_at_source
+        else None,
         "rule_id": alert.rule_id,
         "rule_name": alert.rule_name,
         "tags": alert.tags,

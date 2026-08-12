@@ -7,9 +7,8 @@ Supports:
 - URLhaus (malicious URLs)
 - Feodo Tracker (botnet C2)
 """
-import hashlib
+
 import httpx
-from typing import Optional
 
 
 class AbuseCHConnector:
@@ -45,7 +44,7 @@ class AbuseCHConnector:
                 f"{self.MALWARE_BAZAAR_URL}/",
                 data={
                     "query": "get_info",
-                    f"hash": file_hash,
+                    "hash": file_hash,
                 },
                 headers={"Accept": "application/json"},
                 timeout=30.0,

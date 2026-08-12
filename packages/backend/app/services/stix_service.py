@@ -1,13 +1,12 @@
 """
 STIX 2.1 Service for parsing and creating STIX bundles.
 """
+
 import re
 import uuid
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime
 
-from app.db.models import IOCType, IOCSeverity
-
+from app.db.models import IOCSeverity, IOCType
 
 # STIX 2.1 pattern mappings
 IOC_TYPE_TO_STIX_PATTERN = {
@@ -64,7 +63,7 @@ class STIXService:
 
         return iocs
 
-    def parse_indicator(self, indicator: dict) -> Optional[dict]:
+    def parse_indicator(self, indicator: dict) -> dict | None:
         """
         Parse a single STIX indicator object into an IOC.
 
@@ -107,7 +106,7 @@ class STIXService:
             "stix_id": indicator.get("id"),
         }
 
-    def _parse_pattern(self, pattern: str) -> tuple[Optional[IOCType], Optional[str]]:
+    def _parse_pattern(self, pattern: str) -> tuple[IOCType | None, str | None]:
         """Extract IOC type and value from a STIX pattern."""
         # Simple pattern: [type:property = 'value']
         match = re.search(r"\[([^\]]+)\]", pattern)
@@ -149,7 +148,7 @@ class STIXService:
         }
         return mapping.get(severity, 50)
 
-    def _parse_timestamp(self, ts_str: Optional[str]) -> Optional[datetime]:
+    def _parse_timestamp(self, ts_str: str | None) -> datetime | None:
         """Parse a STIX timestamp string."""
         if not ts_str:
             return None
@@ -185,7 +184,7 @@ class STIXService:
             "objects": objects,
         }
 
-    def create_indicator(self, ioc: dict) -> Optional[dict]:
+    def create_indicator(self, ioc: dict) -> dict | None:
         """
         Create a STIX indicator object from an IOC.
 
@@ -237,7 +236,8 @@ class STIXService:
             "created": created_str,
             "modified": created_str,
             "name": f"{ioc_type.value}: {value}",
-            "description": ioc.get("description") or f"IOC imported from {ioc.get('source', 'unknown')}",
+            "description": ioc.get("description")
+            or f"IOC imported from {ioc.get('source', 'unknown')}",
             "pattern": pattern,
             "pattern_type": "stix",
             "valid_from": valid_from,

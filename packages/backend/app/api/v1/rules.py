@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -13,43 +13,43 @@ class RuleCreateRequest(BaseModel):
     body: str
     severity: str
     logTypes: list[str]
-    displayName: Optional[str] = None
-    description: Optional[str] = None
+    displayName: str | None = None
+    description: str | None = None
     enabled: bool = True
     dedupPeriodMinutes: int = 60
     threshold: int = 1
     tags: list[str] = []
-    runbook: Optional[str] = None
-    reference: Optional[str] = None
+    runbook: str | None = None
+    reference: str | None = None
 
 
 class RuleUpdateRequest(BaseModel):
-    body: Optional[str] = None
-    severity: Optional[str] = None
-    logTypes: Optional[list[str]] = None
-    displayName: Optional[str] = None
-    description: Optional[str] = None
-    enabled: Optional[bool] = None
-    dedupPeriodMinutes: Optional[int] = None
-    threshold: Optional[int] = None
-    tags: Optional[list[str]] = None
-    runbook: Optional[str] = None
-    reference: Optional[str] = None
+    body: str | None = None
+    severity: str | None = None
+    logTypes: list[str] | None = None
+    displayName: str | None = None
+    description: str | None = None
+    enabled: bool | None = None
+    dedupPeriodMinutes: int | None = None
+    threshold: int | None = None
+    tags: list[str] | None = None
+    runbook: str | None = None
+    reference: str | None = None
 
 
 class PaginatedResponse(BaseModel):
     results: list[dict[str, Any]]
-    cursor: Optional[str] = None
+    cursor: str | None = None
     hasMore: bool = False
 
 
 @router.get("")
 async def list_rules(
     panther: PantherServiceDep,
-    enabled: Optional[bool] = Query(None, description="Filter by enabled status"),
-    severity: Optional[str] = Query(None, description="Filter by severity"),
-    logTypes: Optional[list[str]] = Query(None, description="Filter by log types"),
-    tags: Optional[list[str]] = Query(None, description="Filter by tags"),
+    enabled: bool | None = Query(None, description="Filter by enabled status"),
+    severity: str | None = Query(None, description="Filter by severity"),
+    logTypes: list[str] | None = Query(None, description="Filter by log types"),
+    tags: list[str] | None = Query(None, description="Filter by tags"),
     pageSize: int = Query(50, ge=1, le=1000, description="Page size"),
 ) -> PaginatedResponse:
     """List detection rules with optional filtering."""

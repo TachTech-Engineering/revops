@@ -3,18 +3,17 @@ Real-time Presence API
 
 Tracks which users are currently viewing alerts for collaboration awareness.
 """
+
 from datetime import datetime, timedelta
-from typing import List
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import Depends
 
-from app.api.v1.deps import OrgUserDep, OrgIdDep
-from app.db import get_db, AlertPresence
+from app.api.v1.deps import OrgIdDep, OrgUserDep
+from app.db import AlertPresence, get_db
 
 router = APIRouter()
 
@@ -23,6 +22,7 @@ PRESENCE_TIMEOUT_SECONDS = 60
 
 
 # ==================== Models ====================
+
 
 class PresenceUser(BaseModel):
     user_id: str
@@ -34,7 +34,7 @@ class PresenceUser(BaseModel):
 
 class AlertPresenceResponse(BaseModel):
     alert_id: str
-    viewers: List[PresenceUser]
+    viewers: list[PresenceUser]
     viewer_count: int
 
 
@@ -43,6 +43,7 @@ class PresenceHeartbeat(BaseModel):
 
 
 # ==================== Endpoints ====================
+
 
 @router.get("/alert/{alert_id}", response_model=AlertPresenceResponse)
 async def get_alert_presence(

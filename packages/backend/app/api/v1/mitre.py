@@ -1,16 +1,16 @@
-from typing import Annotated, Optional
-from uuid import UUID
-from datetime import datetime, timedelta
-import re
 import logging
+import re
+from datetime import datetime, timedelta
+from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, MitreMapping, MitreTactic, NormalizedAlert
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep, OptionalPantherServiceDep
+from app.api.v1.deps import OptionalPantherServiceDep, OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import MitreMapping, MitreTactic, NormalizedAlert, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -76,19 +76,19 @@ class MitreMappingCreate(BaseModel):
     rule_name: str
     technique_id: str
     technique_name: str
-    subtechnique_id: Optional[str] = None
-    subtechnique_name: Optional[str] = None
+    subtechnique_id: str | None = None
+    subtechnique_name: str | None = None
     tactic: MitreTactic
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class MitreMappingUpdate(BaseModel):
-    technique_id: Optional[str] = None
-    technique_name: Optional[str] = None
-    subtechnique_id: Optional[str] = None
-    subtechnique_name: Optional[str] = None
-    tactic: Optional[MitreTactic] = None
-    notes: Optional[str] = None
+    technique_id: str | None = None
+    technique_name: str | None = None
+    subtechnique_id: str | None = None
+    subtechnique_name: str | None = None
+    tactic: MitreTactic | None = None
+    notes: str | None = None
 
 
 class MitreMappingResponse(BaseModel):
@@ -97,10 +97,10 @@ class MitreMappingResponse(BaseModel):
     rule_name: str
     technique_id: str
     technique_name: str
-    subtechnique_id: Optional[str]
-    subtechnique_name: Optional[str]
+    subtechnique_id: str | None
+    subtechnique_name: str | None
     tactic: MitreTactic
-    notes: Optional[str]
+    notes: str | None
     created_by: str
     created_at: str
     updated_at: str
@@ -112,10 +112,7 @@ class MitreMappingResponse(BaseModel):
 @router.get("/tactics")
 async def get_tactics(user: OrgUserDep) -> list[dict]:
     """Get all MITRE ATT&CK tactics in order."""
-    return [
-        {"value": t.value, "label": TACTIC_LABELS[t]}
-        for t in TACTICS_ORDER
-    ]
+    return [{"value": t.value, "label": TACTIC_LABELS[t]} for t in TACTICS_ORDER]
 
 
 @router.get("/mappings")
@@ -123,13 +120,15 @@ async def list_mappings(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    tactic: Optional[MitreTactic] = None,
-    technique_id: Optional[str] = None,
+    tactic: MitreTactic | None = None,
+    technique_id: str | None = None,
 ) -> list[MitreMappingResponse]:
     """List all MITRE mappings."""
-    query = select(MitreMapping).where(
-        MitreMapping.organization_id == org_id
-    ).order_by(MitreMapping.technique_id)
+    query = (
+        select(MitreMapping)
+        .where(MitreMapping.organization_id == org_id)
+        .order_by(MitreMapping.technique_id)
+    )
 
     if tactic:
         query = query.where(MitreMapping.tactic == tactic)
@@ -179,7 +178,7 @@ async def get_coverage(
             MitreMapping.tactic,
             MitreMapping.technique_id,
             MitreMapping.technique_name,
-            func.count(MitreMapping.rule_id).label('rule_count')
+            func.count(MitreMapping.rule_id).label("rule_count"),
         )
         .where(MitreMapping.organization_id == org_id)
         .group_by(MitreMapping.tactic, MitreMapping.technique_id, MitreMapping.technique_name)
@@ -190,23 +189,27 @@ async def get_coverage(
         tactic = row[0].value
         if tactic not in techniques_by_tactic:
             techniques_by_tactic[tactic] = []
-        techniques_by_tactic[tactic].append({
-            "technique_id": row[1],
-            "technique_name": row[2],
-            "rule_count": row[3],
-        })
+        techniques_by_tactic[tactic].append(
+            {
+                "technique_id": row[1],
+                "technique_name": row[2],
+                "rule_count": row[3],
+            }
+        )
 
     # Get total unique techniques
     total_result = await db.execute(
-        select(func.count(func.distinct(MitreMapping.technique_id)))
-        .where(MitreMapping.organization_id == org_id)
+        select(func.count(func.distinct(MitreMapping.technique_id))).where(
+            MitreMapping.organization_id == org_id
+        )
     )
     total_techniques = total_result.scalar() or 0
 
     # Get total rules with mappings
     rules_result = await db.execute(
-        select(func.count(func.distinct(MitreMapping.rule_id)))
-        .where(MitreMapping.organization_id == org_id)
+        select(func.count(func.distinct(MitreMapping.rule_id))).where(
+            MitreMapping.organization_id == org_id
+        )
     )
     total_mapped_rules = rules_result.scalar() or 0
 
@@ -241,28 +244,28 @@ def parse_mitre_tags(tags: list[str]) -> tuple[list[str], list[str]]:
     techniques = []
 
     # Technique pattern: T followed by 4 digits, optionally with .xxx subtechnique
-    technique_pattern = re.compile(r'[Tt](\d{4})(?:\.(\d{3}))?')
+    technique_pattern = re.compile(r"[Tt](\d{4})(?:\.(\d{3}))?")
 
     # Map common tactic names
     tactic_names = {
-        'reconnaissance': 'reconnaissance',
-        'resource_development': 'resource_development',
-        'initial_access': 'initial_access',
-        'execution': 'execution',
-        'persistence': 'persistence',
-        'privilege_escalation': 'privilege_escalation',
-        'defense_evasion': 'defense_evasion',
-        'credential_access': 'credential_access',
-        'discovery': 'discovery',
-        'lateral_movement': 'lateral_movement',
-        'collection': 'collection',
-        'command_and_control': 'command_and_control',
-        'exfiltration': 'exfiltration',
-        'impact': 'impact',
+        "reconnaissance": "reconnaissance",
+        "resource_development": "resource_development",
+        "initial_access": "initial_access",
+        "execution": "execution",
+        "persistence": "persistence",
+        "privilege_escalation": "privilege_escalation",
+        "defense_evasion": "defense_evasion",
+        "credential_access": "credential_access",
+        "discovery": "discovery",
+        "lateral_movement": "lateral_movement",
+        "collection": "collection",
+        "command_and_control": "command_and_control",
+        "exfiltration": "exfiltration",
+        "impact": "impact",
     }
 
     for tag in tags:
-        tag_lower = tag.lower().replace('-', '_').replace(' ', '_')
+        tag_lower = tag.lower().replace("-", "_").replace(" ", "_")
 
         # Check for technique ID
         match = technique_pattern.search(tag)
@@ -320,7 +323,7 @@ async def get_alert_coverage(
             )
 
             for alert in alerts_list:
-                tags = alert.get('tags', []) or []
+                tags = alert.get("tags", []) or []
                 if not tags:
                     continue
 
@@ -331,8 +334,8 @@ async def get_alert_coverage(
                 panther_alerts_processed += 1
                 total_alerts_with_mitre += 1
 
-                rule_name = alert.get('title') or alert.get('detectionId') or "Unknown"
-                severity = str(alert.get('severity', 'medium')).lower()
+                rule_name = alert.get("title") or alert.get("detectionId") or "Unknown"
+                severity = str(alert.get("severity", "medium")).lower()
 
                 # Process tactics
                 for tactic in tactics:
@@ -342,43 +345,50 @@ async def get_alert_coverage(
                         tactic_key = TACTIC_ID_MAP[tactic_upper]
                     else:
                         # Keep hyphens, just lowercase and replace spaces
-                        tactic_key = tactic.lower().replace(' ', '-').replace('_', '-')
+                        tactic_key = tactic.lower().replace(" ", "-").replace("_", "-")
 
                     if tactic_key not in tactic_data:
                         tactic_data[tactic_key] = {
-                            'alert_count': 0,
-                            'techniques': set(),
-                            'rules': set(),
+                            "alert_count": 0,
+                            "techniques": set(),
+                            "rules": set(),
                         }
-                    tactic_data[tactic_key]['alert_count'] += 1
-                    tactic_data[tactic_key]['rules'].add(rule_name)
+                    tactic_data[tactic_key]["alert_count"] += 1
+                    tactic_data[tactic_key]["rules"].add(rule_name)
                     for tech in techniques:
-                        tactic_data[tactic_key]['techniques'].add(tech)
+                        tactic_data[tactic_key]["techniques"].add(tech)
 
                 # Process techniques
                 for technique in techniques:
                     if technique not in technique_data:
                         technique_data[technique] = {
-                            'alert_count': 0,
-                            'rules': set(),
-                            'severities': {},
+                            "alert_count": 0,
+                            "rules": set(),
+                            "severities": {},
                         }
-                    technique_data[technique]['alert_count'] += 1
-                    technique_data[technique]['rules'].add(rule_name)
-                    technique_data[technique]['severities'][severity] = technique_data[technique]['severities'].get(severity, 0) + 1
+                    technique_data[technique]["alert_count"] += 1
+                    technique_data[technique]["rules"].add(rule_name)
+                    technique_data[technique]["severities"][severity] = (
+                        technique_data[technique]["severities"].get(severity, 0) + 1
+                    )
 
                     # Track alerts per technique
                     if technique not in technique_alerts:
                         technique_alerts[technique] = []
-                    technique_alerts[technique].append({
-                        'rule_name': rule_name,
-                        'alert_count': 1,
-                        'severity': severity,
-                        'tactics': tactics,
-                        'source': 'panther',
-                    })
+                    technique_alerts[technique].append(
+                        {
+                            "rule_name": rule_name,
+                            "alert_count": 1,
+                            "severity": severity,
+                            "tactics": tactics,
+                            "source": "panther",
+                        }
+                    )
 
-            logger.info(f"Processed {panther_alerts_processed} Panther alerts with MITRE tags out of {len(alerts_list)} total")
+            logger.info(
+                f"Processed {panther_alerts_processed} Panther alerts with MITRE tags "
+                f"out of {len(alerts_list)} total"
+            )
     except Exception as e:
         logger.warning(f"Failed to fetch Panther alerts for MITRE coverage: {e}")
 
@@ -390,8 +400,7 @@ async def get_alert_coverage(
             NormalizedAlert.mitre_techniques,
             NormalizedAlert.rule_name,
             NormalizedAlert.severity,
-        )
-        .where(
+        ).where(
             NormalizedAlert.organization_id == org_id,
             NormalizedAlert.created_at_source >= since,
         )
@@ -416,114 +425,106 @@ async def get_alert_coverage(
             if tactic_upper in TACTIC_ID_MAP:
                 tactic_key = TACTIC_ID_MAP[tactic_upper]
             else:
-                tactic_key = tactic.lower().replace(' ', '_').replace('-', '_')
+                tactic_key = tactic.lower().replace(" ", "_").replace("-", "_")
 
             if tactic_key not in tactic_data:
                 tactic_data[tactic_key] = {
-                    'alert_count': 0,
-                    'techniques': set(),
-                    'rules': set(),
+                    "alert_count": 0,
+                    "techniques": set(),
+                    "rules": set(),
                 }
-            tactic_data[tactic_key]['alert_count'] += alert_count
-            tactic_data[tactic_key]['rules'].add(rule_name)
+            tactic_data[tactic_key]["alert_count"] += alert_count
+            tactic_data[tactic_key]["rules"].add(rule_name)
             for tech in techniques:
-                tactic_data[tactic_key]['techniques'].add(tech)
+                tactic_data[tactic_key]["techniques"].add(tech)
 
         # Process techniques
         for technique in techniques:
             if technique not in technique_data:
                 technique_data[technique] = {
-                    'alert_count': 0,
-                    'rules': set(),
-                    'severities': {},
+                    "alert_count": 0,
+                    "rules": set(),
+                    "severities": {},
                 }
-            technique_data[technique]['alert_count'] += alert_count
-            technique_data[technique]['rules'].add(rule_name)
+            technique_data[technique]["alert_count"] += alert_count
+            technique_data[technique]["rules"].add(rule_name)
             if severity:
                 sev = severity.lower()
-                technique_data[technique]['severities'][sev] = technique_data[technique]['severities'].get(sev, 0) + alert_count
+                technique_data[technique]["severities"][sev] = (
+                    technique_data[technique]["severities"].get(sev, 0) + alert_count
+                )
 
             # Track alerts per technique
             if technique not in technique_alerts:
                 technique_alerts[technique] = []
-            technique_alerts[technique].append({
-                'rule_name': rule_name,
-                'alert_count': alert_count,
-                'severity': severity,
-                'tactics': tactics,
-            })
+            technique_alerts[technique].append(
+                {
+                    "rule_name": rule_name,
+                    "alert_count": alert_count,
+                    "severity": severity,
+                    "tactics": tactics,
+                }
+            )
 
     # Map tactics to standard MITRE names
-    tactic_mapping = {
-        'reconnaissance': 'reconnaissance',
-        'resource_development': 'resource_development',
-        'initial_access': 'initial_access',
-        'execution': 'execution',
-        'persistence': 'persistence',
-        'privilege_escalation': 'privilege_escalation',
-        'defense_evasion': 'defense_evasion',
-        'credential_access': 'credential_access',
-        'discovery': 'discovery',
-        'lateral_movement': 'lateral_movement',
-        'collection': 'collection',
-        'command_and_control': 'command_and_control',
-        'exfiltration': 'exfiltration',
-        'impact': 'impact',
-    }
 
     # Build response with tactics in order
     by_tactic = []
     for tactic in TACTICS_ORDER:
         tactic_key = tactic.value
-        data = tactic_data.get(tactic_key, {'alert_count': 0, 'techniques': set(), 'rules': set()})
+        data = tactic_data.get(tactic_key, {"alert_count": 0, "techniques": set(), "rules": set()})
 
         # Get techniques for this tactic
         techniques_list = []
-        for tech_id in data['techniques']:
+        for tech_id in data["techniques"]:
             tech_info = technique_data.get(tech_id, {})
-            techniques_list.append({
-                'technique_id': tech_id,
-                'technique_name': tech_id,  # Would need MITRE data to get the name
-                'alert_count': tech_info.get('alert_count', 0),
-                'rule_count': len(tech_info.get('rules', set())),
-                'severities': tech_info.get('severities', {}),
-            })
+            techniques_list.append(
+                {
+                    "technique_id": tech_id,
+                    "technique_name": tech_id,  # Would need MITRE data to get the name
+                    "alert_count": tech_info.get("alert_count", 0),
+                    "rule_count": len(tech_info.get("rules", set())),
+                    "severities": tech_info.get("severities", {}),
+                }
+            )
 
-        by_tactic.append({
-            'tactic': tactic_key,
-            'label': TACTIC_LABELS[tactic],
-            'alert_count': data['alert_count'],
-            'technique_count': len(data['techniques']),
-            'rule_count': len(data['rules']),
-            'techniques': sorted(techniques_list, key=lambda x: x['alert_count'], reverse=True),
-        })
+        by_tactic.append(
+            {
+                "tactic": tactic_key,
+                "label": TACTIC_LABELS[tactic],
+                "alert_count": data["alert_count"],
+                "technique_count": len(data["techniques"]),
+                "rule_count": len(data["rules"]),
+                "techniques": sorted(techniques_list, key=lambda x: x["alert_count"], reverse=True),
+            }
+        )
 
     # Top techniques by alert count
     top_techniques = sorted(
         [
             {
-                'technique_id': tech_id,
-                'alert_count': info['alert_count'],
-                'rule_count': len(info['rules']),
-                'rules': list(info['rules'])[:5],  # Top 5 rules
-                'severities': info['severities'],
+                "technique_id": tech_id,
+                "alert_count": info["alert_count"],
+                "rule_count": len(info["rules"]),
+                "rules": list(info["rules"])[:5],  # Top 5 rules
+                "severities": info["severities"],
             }
             for tech_id, info in technique_data.items()
         ],
-        key=lambda x: x['alert_count'],
-        reverse=True
+        key=lambda x: x["alert_count"],
+        reverse=True,
     )[:20]  # Top 20 techniques
 
     return {
-        'period_days': days,
-        'total_alerts_with_mitre': total_alerts_with_mitre,
-        'total_techniques_detected': len(technique_data),
-        'total_tactics_detected': len([t for t in tactic_data.values() if t['alert_count'] > 0]),
-        'by_tactic': by_tactic,
-        'top_techniques': top_techniques,
-        'sources': {
-            'panther_alerts': panther_alerts_processed,
-            'connector_alerts': total_alerts_with_mitre - panther_alerts_processed,
+        "period_days": days,
+        "total_alerts_with_mitre": total_alerts_with_mitre,
+        "total_techniques_detected": len(technique_data),
+        "total_tactics_detected": len([t for t in tactic_data.values() if t["alert_count"] > 0]),
+        "by_tactic": by_tactic,
+        "top_techniques": top_techniques,
+        "sources": {
+            "panther_alerts": panther_alerts_processed,
+            "connector_alerts": total_alerts_with_mitre - panther_alerts_processed,
         },
     }
 
@@ -538,10 +539,7 @@ async def get_rule_mappings(
     """Get MITRE mappings for a specific rule."""
     result = await db.execute(
         select(MitreMapping)
-        .where(and_(
-            MitreMapping.organization_id == org_id,
-            MitreMapping.rule_id == rule_id
-        ))
+        .where(and_(MitreMapping.organization_id == org_id, MitreMapping.rule_id == rule_id))
         .order_by(MitreMapping.technique_id)
     )
     mappings = result.scalars().all()
@@ -613,10 +611,12 @@ async def update_mapping(
 ) -> MitreMappingResponse:
     """Update a MITRE mapping. Requires analyst role."""
     result = await db.execute(
-        select(MitreMapping).where(and_(
-            MitreMapping.id == mapping_id,
-            MitreMapping.organization_id == analyst.organization_id
-        ))
+        select(MitreMapping).where(
+            and_(
+                MitreMapping.id == mapping_id,
+                MitreMapping.organization_id == analyst.organization_id,
+            )
+        )
     )
     mapping = result.scalar_one_or_none()
     if not mapping:
@@ -652,10 +652,12 @@ async def delete_mapping(
 ) -> dict[str, str]:
     """Delete a MITRE mapping. Requires analyst role."""
     result = await db.execute(
-        select(MitreMapping).where(and_(
-            MitreMapping.id == mapping_id,
-            MitreMapping.organization_id == analyst.organization_id
-        ))
+        select(MitreMapping).where(
+            and_(
+                MitreMapping.id == mapping_id,
+                MitreMapping.organization_id == analyst.organization_id,
+            )
+        )
     )
     mapping = result.scalar_one_or_none()
     if not mapping:

@@ -1,22 +1,21 @@
 import logging
 from datetime import datetime
-from typing import Optional
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import Playbook, PlaybookExecution, ExecutionStatus, ActionType
+from app.db import ActionType, ExecutionStatus, Playbook, PlaybookExecution
 from app.services.integrations import (
     ActionConnector,
     ActionResult,
-    WebhookConnector,
-    JiraConnector,
-    ServiceNowConnector,
     CrowdStrikeConnector,
-    SentinelOneConnector,
     FirewallConnector,
+    JiraConnector,
+    SentinelOneConnector,
+    ServiceNowConnector,
     SOARConnector,
+    WebhookConnector,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,25 +71,29 @@ class PlaybookService:
         for idx, action_config in enumerate(playbook.actions):
             action_type = action_config.get("type")
             if not action_type:
-                action_results.append({
-                    "index": idx,
-                    "type": "unknown",
-                    "success": False,
-                    "message": "Missing action type",
-                })
+                action_results.append(
+                    {
+                        "index": idx,
+                        "type": "unknown",
+                        "success": False,
+                        "message": "Missing action type",
+                    }
+                )
                 all_success = False
                 continue
 
             try:
                 result = await self._execute_action(action_type, action_config, alert_data)
-                action_results.append({
-                    "index": idx,
-                    "type": action_type,
-                    "success": result.success,
-                    "message": result.message,
-                    "data": result.data,
-                    "error": result.error,
-                })
+                action_results.append(
+                    {
+                        "index": idx,
+                        "type": action_type,
+                        "success": result.success,
+                        "message": result.message,
+                        "data": result.data,
+                        "error": result.error,
+                    }
+                )
 
                 if result.success:
                     any_success = True
@@ -103,13 +106,15 @@ class PlaybookService:
 
             except Exception as e:
                 logger.error(f"Error executing action {idx}: {e}")
-                action_results.append({
-                    "index": idx,
-                    "type": action_type,
-                    "success": False,
-                    "message": "Action execution failed",
-                    "error": str(e),
-                })
+                action_results.append(
+                    {
+                        "index": idx,
+                        "type": action_type,
+                        "success": False,
+                        "message": "Action execution failed",
+                        "error": str(e),
+                    }
+                )
                 all_success = False
 
         # Update execution record
@@ -173,7 +178,10 @@ class PlaybookService:
         new_status = config.get("status")
         assignee = config.get("assignee")
 
-        logger.info(f"Would update alert {alert_data.get('id')} - status: {new_status}, assignee: {assignee}")
+        logger.info(
+            f"Would update alert {alert_data.get('id')} - "
+            f"status: {new_status}, assignee: {assignee}"
+        )
 
         return ActionResult(
             success=True,
@@ -215,6 +223,7 @@ class PlaybookService:
         # Check title pattern
         if "title_pattern" in conditions:
             import re
+
             title = alert_data.get("title", "")
             if not re.search(conditions["title_pattern"], title, re.IGNORECASE):
                 return False

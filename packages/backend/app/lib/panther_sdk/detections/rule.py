@@ -28,7 +28,8 @@ class Rule(ABC):
             def rule(self, event):
                 return (
                     event.get("eventType") == "user.session.start"
-                    and event.get("client", {}).get("geographicalContext", {}).get("country") == "RU"
+                    and event.get("client", {}).get("geographicalContext", {}).get("country")
+                    == "RU"
                 )
 
             def title(self, event):
@@ -184,9 +185,7 @@ class Rule(ABC):
             "description": self.description,
             "enabled": self.enabled,
             "severity": self.severity if isinstance(self.severity, str) else self.severity.value,
-            "logTypes": [
-                lt if isinstance(lt, str) else lt.value for lt in self.log_types
-            ],
+            "logTypes": [lt if isinstance(lt, str) else lt.value for lt in self.log_types],
             "threshold": self.threshold,
             "dedupPeriodMinutes": self.dedup_period_minutes,
             "tags": self.tags,

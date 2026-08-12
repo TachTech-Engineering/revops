@@ -6,14 +6,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-
-class RecommendedDetectionType(Enum):
-    """Recommended Panther detection type based on SPL analysis."""
-
-    STREAMING = "streaming"  # Real-time Python rule
-    SCHEDULED = "scheduled"  # Scheduled SQL query
-
-
 from .ast_nodes import (
     AggregationFunction,
     BooleanExpr,
@@ -21,7 +13,6 @@ from .ast_nodes import (
     EvalCommand,
     FieldComparison,
     FieldsCommand,
-    FreeTextSearch,
     NotExpr,
     ParenExpr,
     RexCommand,
@@ -38,8 +29,14 @@ from .mappings import (
     DEFAULT_SEVERITY,
     get_log_type,
     get_severity,
-    is_command_supported,
 )
+
+
+class RecommendedDetectionType(Enum):
+    """Recommended Panther detection type based on SPL analysis."""
+
+    STREAMING = "streaming"  # Real-time Python rule
+    SCHEDULED = "scheduled"  # Scheduled SQL query
 
 
 @dataclass
@@ -215,9 +212,7 @@ class SPLAnalyzer:
     def _analyze_stats_command(self, command: StatsCommand) -> None:
         """Analyze a stats command."""
         # Check for count aggregation
-        has_count = any(
-            agg.function == AggregationFunction.COUNT for agg in command.aggregations
-        )
+        has_count = any(agg.function == AggregationFunction.COUNT for agg in command.aggregations)
 
         if has_count:
             self.result.is_threshold_rule = True
@@ -252,16 +247,16 @@ class SPLAnalyzer:
         """Analyze a table command."""
         # Table fields become alert_context fields
         self.result.alert_context_fields.extend(command.fields)
-        for field in command.fields:
-            self.result.referenced_fields.add(field)
+        for field_name in command.fields:
+            self.result.referenced_fields.add(field_name)
 
     def _analyze_fields_command(self, command: FieldsCommand) -> None:
         """Analyze a fields command."""
         if command.include:
             # Fields to include become alert_context candidates
             self.result.alert_context_fields.extend(command.fields)
-        for field in command.fields:
-            self.result.referenced_fields.add(field)
+        for field_name in command.fields:
+            self.result.referenced_fields.add(field_name)
 
     def _detect_threshold_pattern(self, commands: list[Command]) -> None:
         """
@@ -304,9 +299,7 @@ class SPLAnalyzer:
             )
             self.result.is_threshold_rule = True
 
-    def _extract_threshold_from_where(
-        self, where_cmd: WhereCommand, count_agg
-    ) -> int | None:
+    def _extract_threshold_from_where(self, where_cmd: WhereCommand, count_agg) -> int | None:
         """Extract threshold value from where condition."""
         from .ast_nodes import EvalBinaryOp, EvalFieldRef, EvalLiteral
 
@@ -432,9 +425,18 @@ class SPLAnalyzer:
 
         # Parse relative time like -7d, -24h, -1w
         large_patterns = [
-            "-7d", "-1w", "-30d", "-1mon", "-1y",
-            "-2d", "-3d", "-4d", "-5d", "-6d",
-            "-48h", "-72h",
+            "-7d",
+            "-1w",
+            "-30d",
+            "-1mon",
+            "-1y",
+            "-2d",
+            "-3d",
+            "-4d",
+            "-5d",
+            "-6d",
+            "-48h",
+            "-72h",
         ]
 
         for pattern in large_patterns:

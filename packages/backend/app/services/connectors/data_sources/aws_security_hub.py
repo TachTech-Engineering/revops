@@ -7,15 +7,13 @@ Integrates with AWS Security Hub to fetch and normalize security findings.
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
-import httpx
-
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
 
 
@@ -111,7 +109,9 @@ class AWSSecurityHubConnector(DataSourceConnector):
         try:
             import boto3
         except ImportError:
-            raise Exception("boto3 is required for AWS Security Hub connector. Install with: pip install boto3")
+            raise Exception(
+                "boto3 is required for AWS Security Hub connector. Install with: pip install boto3"
+            )
 
         region = self.config.get("region", "us-east-1")
 
@@ -167,7 +167,10 @@ class AWSSecurityHubConnector(DataSourceConnector):
         except Exception as e:
             error_msg = str(e)
             if "AccessDenied" in error_msg:
-                error_msg = "Access denied - check IAM permissions (securityhub:DescribeHub, securityhub:GetFindings)"
+                error_msg = (
+                    "Access denied - check IAM permissions "
+                    "(securityhub:DescribeHub, securityhub:GetFindings)"
+                )
             elif "InvalidAccessKeyId" in error_msg:
                 error_msg = "Invalid AWS access key ID"
             elif "SignatureDoesNotMatch" in error_msg:
@@ -182,8 +185,8 @@ class AWSSecurityHubConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch findings from AWS Security Hub."""
         try:
             client = self._get_boto3_client()
@@ -301,7 +304,9 @@ class AWSSecurityHubConnector(DataSourceConnector):
             created_at_source=created_at,
             updated_at_source=updated_at,
             rule_id=generator_id,
-            rule_name=f"{product_name}: {generator_id.split('/')[-1]}" if generator_id else product_name,
+            rule_name=f"{product_name}: {generator_id.split('/')[-1]}"
+            if generator_id
+            else product_name,
             tags=resource_tags[:20],
             mitre_tactics=list(set(mitre_tactics)),
             mitre_techniques=list(set(mitre_techniques)),

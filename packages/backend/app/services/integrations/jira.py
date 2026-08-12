@@ -1,10 +1,9 @@
 import logging
-from typing import Optional
 
 import httpx
 
-from app.services.integrations.base import ActionConnector, ActionResult
 from app.config import settings
+from app.services.integrations.base import ActionConnector, ActionResult
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +25,7 @@ class JiraConnector(ActionConnector):
 
         title = alert_data.get("title", "Security Alert")
         severity = alert_data.get("severity", "MEDIUM")
-        alert_id = alert_data.get("id", "unknown")
+        alert_data.get("id", "unknown")
 
         # Map severity to Jira priority
         priority_map = {
@@ -81,7 +80,7 @@ class JiraConnector(ActionConnector):
             logger.error(f"Jira error: {e}")
             return ActionResult(success=False, message="Jira request failed", error=str(e))
 
-    def validate_config(self, config: dict) -> tuple[bool, Optional[str]]:
+    def validate_config(self, config: dict) -> tuple[bool, str | None]:
         # Config is optional if environment vars are set
         if not (config.get("url") or settings.jira_url):
             return False, "Jira URL is required"
@@ -108,9 +107,11 @@ class JiraConnector(ActionConnector):
 
         rule = alert_data.get("rule", {})
         if rule:
-            lines.extend([
-                f"*Rule Name:* {rule.get('displayName', rule.get('id', 'N/A'))}",
-                f"*Rule ID:* {rule.get('id', 'N/A')}",
-            ])
+            lines.extend(
+                [
+                    f"*Rule Name:* {rule.get('displayName', rule.get('id', 'N/A'))}",
+                    f"*Rule ID:* {rule.get('id', 'N/A')}",
+                ]
+            )
 
         return "\n".join(lines)

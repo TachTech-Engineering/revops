@@ -2,12 +2,13 @@
 SSO authentication service for per-organization OAuth2/OIDC.
 Supports Google, Okta, Azure AD, and generic SAML.
 """
+
 import logging
 import os
 from datetime import datetime
-from typing import Optional, Any
-from uuid import UUID
+from typing import Any
 from urllib.parse import urlparse
+from uuid import UUID
 
 from authlib.integrations.starlette_client import OAuth
 from sqlalchemy import select
@@ -15,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
-from app.db import User, Organization, OrganizationSSO, SSOProvider, UserRoleType
+from app.db import Organization, OrganizationSSO, SSOProvider, User
 from app.services.encryption_service import decrypt_credential
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ def _get_oauth_client(sso_config: OrganizationSSO) -> Any:
     return client
 
 
-def invalidate_oauth_cache(organization_id: UUID, provider: Optional[SSOProvider] = None):
+def invalidate_oauth_cache(organization_id: UUID, provider: SSOProvider | None = None):
     """
     Invalidate cached OAuth clients for an organization.
     Call this when SSO configuration is updated.
@@ -106,12 +107,12 @@ def invalidate_oauth_cache(organization_id: UUID, provider: Optional[SSOProvider
 async def get_sso_config_by_id(
     db: AsyncSession,
     config_id: UUID,
-) -> Optional[OrganizationSSO]:
+) -> OrganizationSSO | None:
     """Get SSO configuration by ID."""
     result = await db.execute(
         select(OrganizationSSO)
         .options(selectinload(OrganizationSSO.organization))
-        .where(OrganizationSSO.id == config_id, OrganizationSSO.is_enabled == True)
+        .where(OrganizationSSO.id == config_id, OrganizationSSO.is_enabled.is_(True))
     )
     return result.scalar_one_or_none()
 
@@ -124,8 +125,7 @@ async def get_org_sso_configs(
     result = await db.execute(
         select(OrganizationSSO)
         .where(
-            OrganizationSSO.organization_id == organization_id,
-            OrganizationSSO.is_enabled == True
+            OrganizationSSO.organization_id == organization_id, OrganizationSSO.is_enabled.is_(True)
         )
         .order_by(OrganizationSSO.provider)
     )
@@ -140,8 +140,7 @@ async def org_has_sso_enabled(
     result = await db.execute(
         select(OrganizationSSO.id)
         .where(
-            OrganizationSSO.organization_id == organization_id,
-            OrganizationSSO.is_enabled == True
+            OrganizationSSO.organization_id == organization_id, OrganizationSSO.is_enabled.is_(True)
         )
         .limit(1)
     )
@@ -154,10 +153,8 @@ async def get_org_sso_provider_names(
 ) -> list[str]:
     """Get list of enabled SSO provider names for an organization."""
     result = await db.execute(
-        select(OrganizationSSO.provider)
-        .where(
-            OrganizationSSO.organization_id == organization_id,
-            OrganizationSSO.is_enabled == True
+        select(OrganizationSSO.provider).where(
+            OrganizationSSO.organization_id == organization_id, OrganizationSSO.is_enabled.is_(True)
         )
     )
     return [row[0].value.title() for row in result.all()]
@@ -166,18 +163,16 @@ async def get_org_sso_provider_names(
 async def get_org_by_slug(
     db: AsyncSession,
     slug: str,
-) -> Optional[Organization]:
+) -> Organization | None:
     """Get organization by slug."""
-    result = await db.execute(
-        select(Organization).where(Organization.slug == slug.lower())
-    )
+    result = await db.execute(select(Organization).where(Organization.slug == slug.lower()))
     return result.scalar_one_or_none()
 
 
 async def get_org_by_email_domain(
     db: AsyncSession,
     email: str,
-) -> Optional[tuple[Organization, OrganizationSSO]]:
+) -> tuple[Organization, OrganizationSSO] | None:
     """
     Find organization and SSO config by email domain.
     Used for email-based organization detection during login.
@@ -191,7 +186,7 @@ async def get_org_by_email_domain(
     result = await db.execute(
         select(OrganizationSSO)
         .options(selectinload(OrganizationSSO.organization))
-        .where(OrganizationSSO.is_enabled == True)
+        .where(OrganizationSSO.is_enabled.is_(True))
     )
     configs = result.scalars().all()
 
@@ -240,7 +235,7 @@ async def get_or_create_sso_user(
     sso_config: OrganizationSSO,
     sso_id: str,
     email: str,
-    name: Optional[str] = None,
+    name: str | None = None,
 ) -> User:
     """
     Get an existing user by SSO ID or create a new one.
@@ -256,7 +251,7 @@ async def get_or_create_sso_user(
         .where(
             User.sso_provider == provider,
             User.sso_id == sso_id,
-            User.organization_id == organization_id
+            User.organization_id == organization_id,
         )
     )
     user = result.scalar_one_or_none()
@@ -274,10 +269,7 @@ async def get_or_create_sso_user(
     result = await db.execute(
         select(User)
         .options(selectinload(User.organization))
-        .where(
-            User.email == email.lower(),
-            User.organization_id == organization_id
-        )
+        .where(User.email == email.lower(), User.organization_id == organization_id)
     )
     user = result.scalar_one_or_none()
 
@@ -296,10 +288,7 @@ async def get_or_create_sso_user(
     result = await db.execute(
         select(User)
         .options(selectinload(User.organization))
-        .where(
-            User.email == email.lower(),
-            User.organization_id.is_(None)
-        )
+        .where(User.email == email.lower(), User.organization_id.is_(None))
     )
     user = result.scalar_one_or_none()
 
@@ -412,25 +401,30 @@ async def complete_sso_flow(
 # These functions support the original environment-variable based SSO
 # They can be removed once all tenants are migrated to per-org SSO
 
+
 def get_global_providers() -> list[dict]:
     """Get globally configured SSO providers (from environment variables)."""
     providers = []
 
     if settings.google_client_id and settings.google_client_secret:
-        providers.append({
-            "id": "global_google",
-            "provider": "google",
-            "name": "Google",
-            "icon": "google",
-        })
+        providers.append(
+            {
+                "id": "global_google",
+                "provider": "google",
+                "name": "Google",
+                "icon": "google",
+            }
+        )
 
     if settings.okta_domain and settings.okta_client_id and settings.okta_client_secret:
-        providers.append({
-            "id": "global_okta",
-            "provider": "okta",
-            "name": "Okta",
-            "icon": "okta",
-        })
+        providers.append(
+            {
+                "id": "global_okta",
+                "provider": "okta",
+                "name": "Okta",
+                "icon": "okta",
+            }
+        )
 
     return providers
 
@@ -440,7 +434,9 @@ def is_global_provider_configured(provider: str) -> bool:
     if provider == "google":
         return bool(settings.google_client_id and settings.google_client_secret)
     elif provider == "okta":
-        return bool(settings.okta_domain and settings.okta_client_id and settings.okta_client_secret)
+        return bool(
+            settings.okta_domain and settings.okta_client_id and settings.okta_client_secret
+        )
     return False
 
 
@@ -641,7 +637,7 @@ async def initiate_saml_flow(
     request,
     db: AsyncSession,
     config_id: UUID,
-    return_to: Optional[str] = None,
+    return_to: str | None = None,
 ) -> str:
     """
     Initiate SAML SSO flow (SP-initiated).
@@ -717,7 +713,12 @@ async def process_saml_response(
 
     # Get email from attributes or NameID
     email = None
-    email_attrs = ["email", "Email", "mail", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress"]
+    email_attrs = [
+        "email",
+        "Email",
+        "mail",
+        "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress",
+    ]
     for attr in email_attrs:
         if attr in attributes:
             email = attributes[attr][0] if isinstance(attributes[attr], list) else attributes[attr]
@@ -732,9 +733,11 @@ async def process_saml_response(
     # Get name from attributes
     name = None
     name_attrs = [
-        "displayName", "name", "Name",
+        "displayName",
+        "name",
+        "Name",
         "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name",
-        "http://schemas.microsoft.com/identity/claims/displayname"
+        "http://schemas.microsoft.com/identity/claims/displayname",
     ]
     for attr in name_attrs:
         if attr in attributes:
@@ -743,8 +746,16 @@ async def process_saml_response(
 
     # Use firstName + lastName if name not found
     if not name:
-        first_name = attributes.get("firstName", attributes.get("givenName", [""]))[0] if "firstName" in attributes or "givenName" in attributes else ""
-        last_name = attributes.get("lastName", attributes.get("surname", [""]))[0] if "lastName" in attributes or "surname" in attributes else ""
+        first_name = (
+            attributes.get("firstName", attributes.get("givenName", [""]))[0]
+            if "firstName" in attributes or "givenName" in attributes
+            else ""
+        )
+        last_name = (
+            attributes.get("lastName", attributes.get("surname", [""]))[0]
+            if "lastName" in attributes or "surname" in attributes
+            else ""
+        )
         if first_name or last_name:
             name = f"{first_name} {last_name}".strip()
 
@@ -772,7 +783,7 @@ async def process_saml_logout(
     request,
     db: AsyncSession,
     config_id: UUID,
-) -> Optional[str]:
+) -> str | None:
     """
     Process SAML logout request or response.
 

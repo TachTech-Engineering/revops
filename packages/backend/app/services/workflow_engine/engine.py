@@ -7,32 +7,32 @@ Executes workflows by traversing the node graph and running each node's logic.
 import asyncio
 import time
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import (
+    NodeType,
     Workflow,
-    WorkflowNode,
     WorkflowEdge,
     WorkflowExecution,
-    WorkflowStepExecution,
-    WorkflowStatus,
     WorkflowExecutionStatus,
-    NodeType,
+    WorkflowNode,
+    WorkflowStatus,
+    WorkflowStepExecution,
 )
 from app.services.workflow_engine.context import ExecutionContext
-from app.services.workflow_engine.templating import resolve_templates
 from app.services.workflow_engine.nodes.base import NodeExecutor, NodeResult, TriggerNodeExecutor
-from app.services.workflow_engine.nodes.http_request import HTTPRequestExecutor
 from app.services.workflow_engine.nodes.condition import ConditionExecutor
-from app.services.workflow_engine.nodes.transform import TransformExecutor
-from app.services.workflow_engine.nodes.delay import DelayExecutor
-from app.services.workflow_engine.nodes.loop import LoopExecutor
 from app.services.workflow_engine.nodes.connector_action import ConnectorActionExecutor
+from app.services.workflow_engine.nodes.delay import DelayExecutor
+from app.services.workflow_engine.nodes.http_request import HTTPRequestExecutor
+from app.services.workflow_engine.nodes.loop import LoopExecutor
 from app.services.workflow_engine.nodes.set_variable import SetVariableExecutor
+from app.services.workflow_engine.nodes.transform import TransformExecutor
+from app.services.workflow_engine.templating import resolve_templates
 
 
 class WorkflowEngine:
@@ -68,9 +68,7 @@ class WorkflowEngine:
             WorkflowExecution record with results
         """
         # Get workflow
-        result = await self.db.execute(
-            select(Workflow).where(Workflow.id == workflow_id)
-        )
+        result = await self.db.execute(select(Workflow).where(Workflow.id == workflow_id))
         workflow = result.scalar_one_or_none()
         if not workflow:
             raise ValueError(f"Workflow not found: {workflow_id}")
@@ -147,7 +145,7 @@ class WorkflowEngine:
         await self.db.flush()
         return execution
 
-    def _find_trigger_node(self, nodes: dict[str, WorkflowNode]) -> Optional[WorkflowNode]:
+    def _find_trigger_node(self, nodes: dict[str, WorkflowNode]) -> WorkflowNode | None:
         """Find the trigger node (entry point) of the workflow."""
         trigger_types = {
             NodeType.TRIGGER_ALERT,
@@ -192,7 +190,9 @@ class WorkflowEngine:
             node_key = queue.pop(0)
 
             # Prevent infinite loops
-            visit_key = f"{node_key}:{context.current_loop.current_index if context.current_loop else 0}"
+            visit_key = (
+                f"{node_key}:{context.current_loop.current_index if context.current_loop else 0}"
+            )
             if visit_key in visited:
                 continue
             visited.add(visit_key)
@@ -287,7 +287,7 @@ class WorkflowEngine:
 
             return result
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             step_execution.status = "failed"
             step_execution.error_message = f"Node timed out after {node.timeout_seconds}s"
             step_execution.completed_at = datetime.utcnow()

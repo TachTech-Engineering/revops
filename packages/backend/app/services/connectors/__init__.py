@@ -24,11 +24,11 @@ Action Connectors:
 """
 
 from app.services.connectors.base import (
-    ConnectionTestResult,
-    ActionResult,
-    DataSourceConnector,
     ActionConnector,
+    ActionResult,
+    ConnectionTestResult,
     ConnectorRegistry,
+    DataSourceConnector,
     get_connector_registry,
 )
 

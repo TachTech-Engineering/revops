@@ -280,9 +280,7 @@ class FieldsCommand(Command):
 class SortCommand(Command):
     """sort command: sort [+|-]field1, [+|-]field2, ..."""
 
-    sort_fields: list[tuple[str, bool]] = field(
-        default_factory=list
-    )  # (field, ascending)
+    sort_fields: list[tuple[str, bool]] = field(default_factory=list)  # (field, ascending)
 
     def __init__(self, sort_fields: list[tuple[str, bool]] | None = None) -> None:
         super().__init__(name="sort")
@@ -361,9 +359,7 @@ class RegexCommand(Command):
     pattern: str = ""
     negate: bool = False
 
-    def __init__(
-        self, field: str = "", pattern: str = "", negate: bool = False
-    ) -> None:
+    def __init__(self, field: str = "", pattern: str = "", negate: bool = False) -> None:
         super().__init__(name="regex")
         self.field = field
         self.pattern = pattern
@@ -378,9 +374,7 @@ class UnsupportedCommand(Command):
     raw_text: str = ""
     suggestion: str | None = None
 
-    def __init__(
-        self, name: str, raw_text: str = "", suggestion: str | None = None
-    ) -> None:
+    def __init__(self, name: str, raw_text: str = "", suggestion: str | None = None) -> None:
         super().__init__(name=name)
         self.raw_text = raw_text
         self.suggestion = suggestion

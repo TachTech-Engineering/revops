@@ -9,9 +9,10 @@ import asyncio
 import logging
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Optional
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
@@ -20,12 +21,13 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SyslogMessage:
     """Parsed syslog message."""
+
     timestamp: datetime
     facility: int
     severity: int
     hostname: str
     app_name: str
-    process_id: Optional[str]
+    process_id: str | None
     message: str
     raw: str
     source_ip: str
@@ -35,22 +37,52 @@ class SyslogMessage:
     def facility_name(self) -> str:
         """Human-readable facility name."""
         facilities = [
-            "kern", "user", "mail", "daemon", "auth", "syslog", "lpr", "news",
-            "uucp", "cron", "authpriv", "ftp", "ntp", "audit", "alert", "clock",
-            "local0", "local1", "local2", "local3", "local4", "local5", "local6", "local7"
+            "kern",
+            "user",
+            "mail",
+            "daemon",
+            "auth",
+            "syslog",
+            "lpr",
+            "news",
+            "uucp",
+            "cron",
+            "authpriv",
+            "ftp",
+            "ntp",
+            "audit",
+            "alert",
+            "clock",
+            "local0",
+            "local1",
+            "local2",
+            "local3",
+            "local4",
+            "local5",
+            "local6",
+            "local7",
         ]
-        return facilities[self.facility] if self.facility < len(facilities) else f"facility{self.facility}"
+        return (
+            facilities[self.facility]
+            if self.facility < len(facilities)
+            else f"facility{self.facility}"
+        )
 
     @property
     def severity_name(self) -> str:
         """Human-readable severity name."""
         severities = ["emerg", "alert", "crit", "err", "warning", "notice", "info", "debug"]
-        return severities[self.severity] if self.severity < len(severities) else f"severity{self.severity}"
+        return (
+            severities[self.severity]
+            if self.severity < len(severities)
+            else f"severity{self.severity}"
+        )
 
 
 @dataclass
 class SyslogHandler:
     """Handler registration for syslog messages."""
+
     connector_id: UUID
     callback: Callable[[SyslogMessage], None]
     source_ips: set[str] = field(default_factory=set)  # Empty = all IPs
@@ -68,7 +100,9 @@ class SyslogProtocol(asyncio.DatagramProtocol):
         """Process received UDP datagram."""
         try:
             message = data.decode("utf-8", errors="replace")
-            logger.info(f"Syslog UDP received from {addr[0]}:{addr[1]} - {len(data)} bytes: {message[:100]}")
+            logger.info(
+                f"Syslog UDP received from {addr[0]}:{addr[1]} - {len(data)} bytes: {message[:100]}"
+            )
             self.receiver._process_message(message, addr[0], addr[1])
         except Exception as e:
             logger.error(f"Error processing syslog datagram: {e}")
@@ -123,8 +157,8 @@ class SyslogReceiverService:
 
         self._initialized = True
         self._handlers: dict[UUID, SyslogHandler] = {}
-        self._udp_transport: Optional[asyncio.DatagramTransport] = None
-        self._tcp_server: Optional[asyncio.Server] = None
+        self._udp_transport: asyncio.DatagramTransport | None = None
+        self._tcp_server: asyncio.Server | None = None
         self._running = False
         self._message_buffer: dict[UUID, list[SyslogMessage]] = defaultdict(list)
         self._buffer_max_size = 10000  # Max messages per connector
@@ -153,7 +187,8 @@ class SyslogReceiverService:
             r"(.*)"  # Message
         )
 
-        # UniFi CEF format: TIMESTAMP TIMESTAMP HOSTNAME CEF:0|Vendor|Product|Version|EventID|Name|...
+        # UniFi CEF format:
+        # TIMESTAMP TIMESTAMP HOSTNAME CEF:0|Vendor|Product|Version|EventID|Name|...
         self._unifi_cef_pattern = re.compile(
             r"(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+"  # BSD timestamp
             r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s+"  # ISO timestamp
@@ -166,7 +201,9 @@ class SyslogReceiverService:
             r"(.*)"  # Rest of message
         )
 
-    async def start(self, udp_port: int = 514, tcp_port: int = 514, bind_address: str = "0.0.0.0") -> None:
+    async def start(
+        self, udp_port: int = 514, tcp_port: int = 514, bind_address: str = "0.0.0.0"
+    ) -> None:
         """Start the syslog receiver on specified ports."""
         if self._running:
             return
@@ -176,8 +213,7 @@ class SyslogReceiverService:
         # Start UDP listener
         try:
             transport, _ = await loop.create_datagram_endpoint(
-                lambda: SyslogProtocol(self),
-                local_addr=(bind_address, udp_port)
+                lambda: SyslogProtocol(self), local_addr=(bind_address, udp_port)
             )
             self._udp_transport = transport
             logger.info(f"Syslog UDP receiver started on {bind_address}:{udp_port}")
@@ -187,9 +223,7 @@ class SyslogReceiverService:
         # Start TCP listener
         try:
             server = await loop.create_server(
-                lambda: SyslogTCPHandler(self),
-                bind_address,
-                tcp_port
+                lambda: SyslogTCPHandler(self), bind_address, tcp_port
             )
             self._tcp_server = server
             logger.info(f"Syslog TCP receiver started on {bind_address}:{tcp_port}")
@@ -216,9 +250,9 @@ class SyslogReceiverService:
         self,
         connector_id: UUID,
         callback: Callable[[SyslogMessage], None],
-        source_ips: Optional[list[str]] = None,
-        hostname_patterns: Optional[list[str]] = None,
-        app_name_patterns: Optional[list[str]] = None,
+        source_ips: list[str] | None = None,
+        hostname_patterns: list[str] | None = None,
+        app_name_patterns: list[str] | None = None,
     ) -> None:
         """
         Register a handler for syslog messages.
@@ -272,11 +306,17 @@ class SyslogReceiverService:
         if not parsed:
             logger.warning(f"Failed to parse syslog message: {raw_message[:100]}")
             return
-        logger.info(f"Parsed syslog: hostname={parsed.hostname}, app={parsed.app_name}, handlers={len(self._handlers)}")
+        logger.info(
+            f"Parsed syslog: hostname={parsed.hostname}, app={parsed.app_name}, "
+            f"handlers={len(self._handlers)}"
+        )
 
         # Route to matching handlers
         for connector_id, handler in self._handlers.items():
-            logger.info(f"Checking handler {connector_id}: source_ips={handler.source_ips}, patterns={[p.pattern for p in handler.hostname_patterns]}")
+            logger.info(
+                f"Checking handler {connector_id}: source_ips={handler.source_ips}, "
+                f"patterns={[p.pattern for p in handler.hostname_patterns]}"
+            )
             if self._matches_handler(parsed, handler):
                 logger.info(f"Handler {connector_id} MATCHED - buffering message")
                 try:
@@ -288,7 +328,9 @@ class SyslogReceiverService:
                         # Remove oldest message
                         buffer.pop(0)
                         buffer.append(parsed)
-                    logger.info(f"Buffered message for {connector_id}, buffer size now: {len(buffer)}")
+                    logger.info(
+                        f"Buffered message for {connector_id}, buffer size now: {len(buffer)}"
+                    )
 
                     # Also call the callback if provided
                     if handler.callback:
@@ -298,7 +340,7 @@ class SyslogReceiverService:
             else:
                 logger.info(f"Handler {connector_id} did NOT match")
 
-    def _parse_message(self, raw: str, source_ip: str, source_port: int) -> Optional[SyslogMessage]:
+    def _parse_message(self, raw: str, source_ip: str, source_port: int) -> SyslogMessage | None:
         """Parse a raw syslog message."""
         raw = raw.strip()
 
@@ -357,7 +399,7 @@ class SyslogReceiverService:
             try:
                 end_pri = raw.index(">")
                 pri = int(raw[1:end_pri])
-                message = raw[end_pri + 1:].strip()
+                message = raw[end_pri + 1 :].strip()
                 return SyslogMessage(
                     timestamp=datetime.utcnow(),
                     facility=pri >> 3,

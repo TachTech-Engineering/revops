@@ -7,15 +7,15 @@ Integrates with Microsoft Sentinel to fetch and normalize security alerts.
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
 
 
@@ -175,8 +175,8 @@ class SentinelConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch incidents/alerts from Sentinel API."""
         try:
             token = await self._get_access_token()
@@ -199,7 +199,9 @@ class SentinelConnector(DataSourceConnector):
                 url = cursor  # Azure uses full URL as cursor
 
             async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.get(url, headers=headers, params=params if not cursor else None)
+                response = await client.get(
+                    url, headers=headers, params=params if not cursor else None
+                )
 
             if response.status_code != 200:
                 raise Exception(f"API returned status {response.status_code}")
@@ -253,7 +255,9 @@ class SentinelConnector(DataSourceConnector):
             status=self.normalize_status(properties.get("status", "New")),
             created_at_source=created_at,
             updated_at_source=updated_at,
-            rule_id=properties.get("relatedAnalyticRuleIds", [""])[0] if properties.get("relatedAnalyticRuleIds") else None,
+            rule_id=properties.get("relatedAnalyticRuleIds", [""])[0]
+            if properties.get("relatedAnalyticRuleIds")
+            else None,
             rule_name=None,  # Would need additional API call
             tags=tags,
             mitre_tactics=tactics if isinstance(tactics, list) else [],

@@ -4,8 +4,8 @@ HTTP Action Connector
 Makes arbitrary HTTP requests for workflow automation.
 """
 
-import time
 import json
+import time
 from typing import Any
 
 import httpx
@@ -13,9 +13,9 @@ import httpx
 from app.db.models import ConnectorCategory
 from app.services.connectors.base import (
     ActionConnector,
-    ConnectorMetadata,
-    ConnectionTestResult,
     ActionResult,
+    ConnectionTestResult,
+    ConnectorMetadata,
 )
 
 
@@ -338,7 +338,9 @@ class HTTPActionConnector(ActionConnector):
                 return ActionResult(
                     success=False,
                     message=f"HTTP {method} failed with status {response.status_code}",
-                    error=str(response_body)[:500] if response_body else f"Status {response.status_code}",
+                    error=str(response_body)[:500]
+                    if response_body
+                    else f"Status {response.status_code}",
                     output=output,
                     execution_time_ms=execution_time_ms,
                 )

@@ -7,15 +7,15 @@ Integrates with Okta to fetch and normalize security events and threat insights.
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
 
 
@@ -51,7 +51,9 @@ class OktaConnector(DataSourceConnector):
                     "event_types": {
                         "type": "array",
                         "title": "Event Types",
-                        "description": "Security event types to fetch (empty = all security events)",
+                        "description": (
+                            "Security event types to fetch (empty = all security events)"
+                        ),
                         "items": {
                             "type": "string",
                             "enum": [
@@ -169,8 +171,8 @@ class OktaConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch security events from Okta System Log."""
         try:
             base_url = self._get_base_url()
@@ -199,8 +201,13 @@ class OktaConnector(DataSourceConnector):
                 ]
                 event_filter = " or ".join([f'eventType eq "{et}"' for et in security_events])
                 # Also include failed authentications
-                event_filter += ' or (eventType eq "user.authentication.auth_via_mfa" and outcome.result eq "FAILURE")'
-                event_filter += ' or (eventType eq "user.session.start" and outcome.result eq "FAILURE")'
+                event_filter += (
+                    ' or (eventType eq "user.authentication.auth_via_mfa"'
+                    ' and outcome.result eq "FAILURE")'
+                )
+                event_filter += (
+                    ' or (eventType eq "user.session.start" and outcome.result eq "FAILURE")'
+                )
                 filters.append(f"({event_filter})")
 
             # Severity filter
@@ -230,7 +237,9 @@ class OktaConnector(DataSourceConnector):
                 )
 
                 if response.status_code != 200:
-                    raise Exception(f"Failed to fetch logs: {response.status_code} - {response.text}")
+                    raise Exception(
+                        f"Failed to fetch logs: {response.status_code} - {response.text}"
+                    )
 
                 events = response.json()
 
@@ -314,7 +323,9 @@ class OktaConnector(DataSourceConnector):
         # Add actor info
         actor = raw_alert.get("actor", {})
         if actor.get("displayName"):
-            description_parts.append(f"Actor: {actor['displayName']} ({actor.get('alternateId', 'N/A')})")
+            description_parts.append(
+                f"Actor: {actor['displayName']} ({actor.get('alternateId', 'N/A')})"
+            )
 
         # Add target info
         targets = raw_alert.get("target", [])
@@ -431,7 +442,9 @@ class OktaConnector(DataSourceConnector):
         """Map Okta event types to MITRE ATT&CK techniques."""
         technique_map = {
             "user.session.start": ["T1078"],  # Valid Accounts
-            "user.authentication.auth_via_mfa": ["T1111"],  # Multi-Factor Authentication Interception
+            "user.authentication.auth_via_mfa": [
+                "T1111"
+            ],  # Multi-Factor Authentication Interception
             "user.account.lock": ["T1110"],  # Brute Force
             "user.account.privilege.grant": ["T1098"],  # Account Manipulation
             "user.mfa.factor.deactivate": ["T1556"],  # Modify Authentication Process

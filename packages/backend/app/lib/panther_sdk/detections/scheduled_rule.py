@@ -5,7 +5,6 @@ from __future__ import annotations
 from abc import abstractmethod
 from typing import Any, ClassVar
 
-from ..models.common import Severity
 from .rule import Rule
 
 
@@ -91,9 +90,11 @@ class ScheduledRule(Rule):
             Dictionary representation of the scheduled rule
         """
         base = super().to_dict()
-        base.update({
-            "scheduleExpression": self.schedule_expression,
-            "timeoutMinutes": self.timeout_minutes,
-            "scheduledQuery": self.scheduled_query,
-        })
+        base.update(
+            {
+                "scheduleExpression": self.schedule_expression,
+                "timeoutMinutes": self.timeout_minutes,
+                "scheduledQuery": self.scheduled_query,
+            }
+        )
         return base

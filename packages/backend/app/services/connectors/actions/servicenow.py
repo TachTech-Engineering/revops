@@ -12,9 +12,9 @@ import httpx
 from app.db.models import ConnectorCategory
 from app.services.connectors.base import (
     ActionConnector,
-    ConnectorMetadata,
-    ConnectionTestResult,
     ActionResult,
+    ConnectionTestResult,
+    ConnectorMetadata,
 )
 
 
@@ -75,7 +75,12 @@ class ServiceNowActionConnector(ActionConnector):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["create_incident", "update_incident", "add_work_note", "resolve_incident"],
+                    "enum": [
+                        "create_incident",
+                        "update_incident",
+                        "add_work_note",
+                        "resolve_incident",
+                    ],
                     "title": "Action",
                     "description": "Action to perform",
                     "default": "create_incident",
@@ -234,7 +239,9 @@ class ServiceNowActionConnector(ActionConnector):
                 execution_time_ms=int((time.time() - start_time) * 1000),
             )
 
-    async def _create_incident(self, config: dict[str, Any], context: dict[str, Any]) -> ActionResult:
+    async def _create_incident(
+        self, config: dict[str, Any], context: dict[str, Any]
+    ) -> ActionResult:
         """Create a new ServiceNow incident."""
         payload = {
             "short_description": config.get("short_description", "New Incident"),
@@ -249,7 +256,9 @@ class ServiceNowActionConnector(ActionConnector):
         if config.get("subcategory"):
             payload["subcategory"] = config["subcategory"]
 
-        assignment_group = config.get("assignment_group") or self.config.get("default_assignment_group")
+        assignment_group = config.get("assignment_group") or self.config.get(
+            "default_assignment_group"
+        )
         if assignment_group:
             payload["assignment_group"] = assignment_group
 
@@ -286,7 +295,9 @@ class ServiceNowActionConnector(ActionConnector):
                 error=response.text,
             )
 
-    async def _update_incident(self, config: dict[str, Any], context: dict[str, Any]) -> ActionResult:
+    async def _update_incident(
+        self, config: dict[str, Any], context: dict[str, Any]
+    ) -> ActionResult:
         """Update an existing ServiceNow incident."""
         sys_id = config.get("sys_id")
         if not sys_id:
@@ -297,7 +308,16 @@ class ServiceNowActionConnector(ActionConnector):
             )
 
         payload = {}
-        for field in ["short_description", "description", "urgency", "impact", "category", "subcategory", "assignment_group", "assigned_to"]:
+        for field in [
+            "short_description",
+            "description",
+            "urgency",
+            "impact",
+            "category",
+            "subcategory",
+            "assignment_group",
+            "assigned_to",
+        ]:
             if config.get(field):
                 payload[field] = config[field]
 
@@ -366,7 +386,9 @@ class ServiceNowActionConnector(ActionConnector):
                 error=response.text,
             )
 
-    async def _resolve_incident(self, config: dict[str, Any], context: dict[str, Any]) -> ActionResult:
+    async def _resolve_incident(
+        self, config: dict[str, Any], context: dict[str, Any]
+    ) -> ActionResult:
         """Resolve a ServiceNow incident."""
         sys_id = config.get("sys_id")
         if not sys_id:

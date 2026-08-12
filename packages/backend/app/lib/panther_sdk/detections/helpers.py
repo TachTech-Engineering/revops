@@ -186,9 +186,7 @@ def is_aws_arn(value: str) -> bool:
     Returns:
         True if it matches ARN format
     """
-    return bool(
-        re.match(r"^arn:aws[a-z\-]*:[a-z0-9\-]+:[a-z0-9\-]*:\d{12}:.+$", str(value))
-    )
+    return bool(re.match(r"^arn:aws[a-z\-]*:[a-z0-9\-]+:[a-z0-9\-]*:\d{12}:.+$", str(value)))
 
 
 def get_val(event: dict[str, Any], key: str, default: Any = None) -> Any:

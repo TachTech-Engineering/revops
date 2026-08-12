@@ -1,14 +1,13 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Optional
 
 
 @dataclass
 class ActionResult:
     success: bool
     message: str
-    data: Optional[dict] = None
-    error: Optional[str] = None
+    data: dict | None = None
+    error: str | None = None
 
 
 class ActionConnector(ABC):
@@ -20,6 +19,6 @@ class ActionConnector(ABC):
         pass
 
     @abstractmethod
-    def validate_config(self, config: dict) -> tuple[bool, Optional[str]]:
+    def validate_config(self, config: dict) -> tuple[bool, str | None]:
         """Validate the action configuration. Returns (is_valid, error_message)."""
         pass

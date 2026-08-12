@@ -1,16 +1,16 @@
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
-from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from sqlalchemy import select, and_
-from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import and_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, WebhookConfig
+from app.api.v1.deps import OrgAdminDep, OrgIdDep, OrgUserDep
+from app.db import WebhookConfig, get_db
 from app.db.models import WebhookType
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAdminDep
 
 router = APIRouter()
 
@@ -161,7 +161,9 @@ async def update_webhook(
         headers=webhook.headers,
         severity_filter=webhook.severity_filter,
         is_active=webhook.is_active,
-        last_triggered_at=webhook.last_triggered_at.isoformat() if webhook.last_triggered_at else None,
+        last_triggered_at=webhook.last_triggered_at.isoformat()
+        if webhook.last_triggered_at
+        else None,
         created_at=webhook.created_at.isoformat(),
         updated_at=webhook.updated_at.isoformat(),
     )
@@ -218,20 +220,22 @@ async def test_webhook(
             "title": "Test Alert",
             "severity": "INFO",
             "status": "OPEN",
-        }
+        },
     }
 
     # Format payload based on webhook type
     if webhook.webhook_type == WebhookType.SLACK:
         payload = {
             "text": f"*Test Alert*\n{test_payload['message']}",
-            "attachments": [{
-                "color": "#36a64f",
-                "fields": [
-                    {"title": "Severity", "value": "INFO", "short": True},
-                    {"title": "Status", "value": "OPEN", "short": True},
-                ]
-            }]
+            "attachments": [
+                {
+                    "color": "#36a64f",
+                    "fields": [
+                        {"title": "Severity", "value": "INFO", "short": True},
+                        {"title": "Status", "value": "OPEN", "short": True},
+                    ],
+                }
+            ],
         }
     elif webhook.webhook_type == WebhookType.TEAMS:
         payload = {

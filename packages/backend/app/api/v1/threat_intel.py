@@ -1,12 +1,12 @@
-from typing import Any, Optional
+from typing import Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
-import httpx
 
+from app.api.v1.deps import OrgAnalystDep, OrgUserDep
 from app.config import settings
 from app.services.threat_intel_service import threat_intel_service
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
 
 router = APIRouter()
 
@@ -40,10 +40,7 @@ async def lookup_threat_intel(
         if settings.virustotal_api_key:
             try:
                 vt_result = await lookup_virustotal(
-                    client,
-                    request.indicator,
-                    request.indicator_type,
-                    settings.virustotal_api_key
+                    client, request.indicator, request.indicator_type, settings.virustotal_api_key
                 )
                 result.virustotal = vt_result
             except Exception as e:
@@ -55,9 +52,7 @@ async def lookup_threat_intel(
         if request.indicator_type == "ip" and settings.abuseipdb_api_key:
             try:
                 abuse_result = await lookup_abuseipdb(
-                    client,
-                    request.indicator,
-                    settings.abuseipdb_api_key
+                    client, request.indicator, settings.abuseipdb_api_key
                 )
                 result.abuseipdb = abuse_result
             except Exception as e:
@@ -102,28 +97,34 @@ async def lookup_virustotal(
     result: dict[str, Any] = {"found": True}
 
     if indicator_type == "ip":
-        result.update({
-            "country": attributes.get("country"),
-            "as_owner": attributes.get("as_owner"),
-            "reputation": attributes.get("reputation", 0),
-            "last_analysis_stats": attributes.get("last_analysis_stats", {}),
-        })
+        result.update(
+            {
+                "country": attributes.get("country"),
+                "as_owner": attributes.get("as_owner"),
+                "reputation": attributes.get("reputation", 0),
+                "last_analysis_stats": attributes.get("last_analysis_stats", {}),
+            }
+        )
     elif indicator_type == "domain":
-        result.update({
-            "registrar": attributes.get("registrar"),
-            "creation_date": attributes.get("creation_date"),
-            "reputation": attributes.get("reputation", 0),
-            "last_analysis_stats": attributes.get("last_analysis_stats", {}),
-            "categories": attributes.get("categories", {}),
-        })
+        result.update(
+            {
+                "registrar": attributes.get("registrar"),
+                "creation_date": attributes.get("creation_date"),
+                "reputation": attributes.get("reputation", 0),
+                "last_analysis_stats": attributes.get("last_analysis_stats", {}),
+                "categories": attributes.get("categories", {}),
+            }
+        )
     elif indicator_type.startswith("hash"):
-        result.update({
-            "meaningful_name": attributes.get("meaningful_name"),
-            "type_description": attributes.get("type_description"),
-            "reputation": attributes.get("reputation", 0),
-            "last_analysis_stats": attributes.get("last_analysis_stats", {}),
-            "names": attributes.get("names", [])[:5],
-        })
+        result.update(
+            {
+                "meaningful_name": attributes.get("meaningful_name"),
+                "type_description": attributes.get("type_description"),
+                "reputation": attributes.get("reputation", 0),
+                "last_analysis_stats": attributes.get("last_analysis_stats", {}),
+                "names": attributes.get("names", [])[:5],
+            }
+        )
 
     return result
 
@@ -169,7 +170,13 @@ async def get_threat_intel_status(
     # Add legacy VirusTotal status
     unified_status["virustotal"] = {
         "configured": bool(settings.virustotal_api_key),
-        "supported_types": ["ip_address", "domain", "file_hash_md5", "file_hash_sha1", "file_hash_sha256"],
+        "supported_types": [
+            "ip_address",
+            "domain",
+            "file_hash_md5",
+            "file_hash_sha1",
+            "file_hash_sha256",
+        ],
         "description": "VirusTotal threat intelligence",
     }
 
@@ -180,7 +187,12 @@ async def get_threat_intel_status(
 async def unified_lookup(
     user: OrgUserDep,
     indicator: str = Query(..., description="Indicator value"),
-    indicator_type: str = Query(..., description="Type: ip_address, domain, url, file_hash_md5, file_hash_sha1, file_hash_sha256"),
+    indicator_type: str = Query(
+        ...,
+        description=(
+            "Type: ip_address, domain, url, file_hash_md5, file_hash_sha1, file_hash_sha256"
+        ),
+    ),
 ) -> dict[str, Any]:
     """
     Unified threat intelligence lookup across all configured providers.

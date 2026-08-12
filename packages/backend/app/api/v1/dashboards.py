@@ -1,13 +1,13 @@
-from typing import Annotated, Optional
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, or_, and_
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, CustomDashboard, WidgetType
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import CustomDashboard, WidgetType, get_db
 
 router = APIRouter()
 
@@ -25,31 +25,31 @@ class LayoutItem(BaseModel):
     y: int
     w: int
     h: int
-    minW: Optional[int] = None
-    minH: Optional[int] = None
+    minW: int | None = None
+    minH: int | None = None
 
 
 class DashboardCreate(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     is_shared: bool = False
     layout: list[LayoutItem] = []
     widgets: list[WidgetConfig] = []
 
 
 class DashboardUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    is_default: Optional[bool] = None
-    is_shared: Optional[bool] = None
-    layout: Optional[list[LayoutItem]] = None
-    widgets: Optional[list[WidgetConfig]] = None
+    name: str | None = None
+    description: str | None = None
+    is_default: bool | None = None
+    is_shared: bool | None = None
+    layout: list[LayoutItem] | None = None
+    widgets: list[WidgetConfig] | None = None
 
 
 class DashboardResponse(BaseModel):
     id: UUID
     name: str
-    description: Optional[str]
+    description: str | None
     is_default: bool
     is_shared: bool
     layout: list
@@ -79,7 +79,7 @@ async def list_dashboards(
                 CustomDashboard.organization_id == org_id,
                 or_(
                     CustomDashboard.owner_email == email,
-                    CustomDashboard.is_shared == True,
+                    CustomDashboard.is_shared.is_(True),
                 ),
             )
         )
@@ -223,7 +223,7 @@ async def create_dashboard(
         name=dashboard.name,
         description=dashboard.description,
         is_shared=dashboard.is_shared,
-        layout=[l.model_dump() for l in dashboard.layout],
+        layout=[item.model_dump() for item in dashboard.layout],
         widgets=[w.model_dump() for w in dashboard.widgets],
         owner_email=analyst.email,
         organization_id=analyst.organization_id,
@@ -290,13 +290,12 @@ async def update_dashboard(
     # Convert nested models to dicts
     if "layout" in update_data and update_data["layout"]:
         update_data["layout"] = [
-            l.model_dump() if hasattr(l, 'model_dump') else l
-            for l in update_data["layout"]
+            item.model_dump() if hasattr(item, "model_dump") else item
+            for item in update_data["layout"]
         ]
     if "widgets" in update_data and update_data["widgets"]:
         update_data["widgets"] = [
-            w.model_dump() if hasattr(w, 'model_dump') else w
-            for w in update_data["widgets"]
+            w.model_dump() if hasattr(w, "model_dump") else w for w in update_data["widgets"]
         ]
 
     for field, value in update_data.items():

@@ -5,37 +5,40 @@ Provides abstract base classes for data source connectors (SIEM integrations)
 and action connectors (response integrations).
 """
 
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, AsyncGenerator, Optional
-import uuid
+from typing import Any
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 
 
 @dataclass
 class ConnectionTestResult:
     """Result of testing a connector's connection."""
+
     success: bool
     message: str
-    details: Optional[dict[str, Any]] = None
-    latency_ms: Optional[int] = None
+    details: dict[str, Any] | None = None
+    latency_ms: int | None = None
 
 
 @dataclass
 class ActionResult:
     """Result of executing an action via a connector."""
+
     success: bool
     message: str
     output: dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
-    execution_time_ms: Optional[int] = None
+    error: str | None = None
+    execution_time_ms: int | None = None
 
 
 @dataclass
 class ConnectorMetadata:
     """Metadata describing a connector type."""
+
     connector_type: str
     category: ConnectorCategory
     display_name: str
@@ -53,7 +56,9 @@ class DataSourceConnector(ABC):
     them to a common schema for unified analysis and workflow triggering.
     """
 
-    def __init__(self, connector_id: uuid.UUID, config: dict[str, Any], credentials: dict[str, Any]):
+    def __init__(
+        self, connector_id: uuid.UUID, config: dict[str, Any], credentials: dict[str, Any]
+    ):
         """
         Initialize a data source connector.
 
@@ -89,11 +94,8 @@ class DataSourceConnector(ABC):
 
     @abstractmethod
     async def fetch_alerts(
-        self,
-        since: datetime,
-        limit: int = 100,
-        cursor: Optional[str] = None
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        self, since: datetime, limit: int = 100, cursor: str | None = None
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """
         Fetch alerts from the data source.
 
@@ -185,7 +187,9 @@ class ActionConnector(ABC):
     sending notifications, or triggering EDR actions.
     """
 
-    def __init__(self, connector_id: uuid.UUID, config: dict[str, Any], credentials: dict[str, Any]):
+    def __init__(
+        self, connector_id: uuid.UUID, config: dict[str, Any], credentials: dict[str, Any]
+    ):
         """
         Initialize an action connector.
 
@@ -309,23 +313,29 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     """Register all available connector implementations."""
     # Import and register data sources
     # SIEM
-    from app.services.connectors.data_sources.panther import PantherDataSourceConnector
-    from app.services.connectors.data_sources.google_secops import GoogleSecOpsConnector
-    from app.services.connectors.data_sources.splunk import SplunkConnector
-    from app.services.connectors.data_sources.sentinel import SentinelConnector
-    from app.services.connectors.data_sources.elastic import ElasticConnector
-    # EDR
-    from app.services.connectors.data_sources.crowdstrike_falcon import CrowdStrikeFalconConnector
-    from app.services.connectors.data_sources.sentinelone import SentinelOneConnector
-    from app.services.connectors.data_sources.microsoft_defender import MicrosoftDefenderConnector
     # Cloud Security
     from app.services.connectors.data_sources.aws_security_hub import AWSSecurityHubConnector
-    from app.services.connectors.data_sources.gcp_security_command_center import GCPSecurityCommandCenterConnector
-    # Identity
-    from app.services.connectors.data_sources.okta import OktaConnector
-    from app.services.connectors.data_sources.entra_id import EntraIDConnector
+
     # Network Security
     from app.services.connectors.data_sources.cloudflare import CloudflareConnector
+
+    # EDR
+    from app.services.connectors.data_sources.crowdstrike_falcon import CrowdStrikeFalconConnector
+    from app.services.connectors.data_sources.elastic import ElasticConnector
+    from app.services.connectors.data_sources.entra_id import EntraIDConnector
+    from app.services.connectors.data_sources.gcp_security_command_center import (
+        GCPSecurityCommandCenterConnector,
+    )
+    from app.services.connectors.data_sources.google_secops import GoogleSecOpsConnector
+    from app.services.connectors.data_sources.microsoft_defender import MicrosoftDefenderConnector
+
+    # Identity
+    from app.services.connectors.data_sources.okta import OktaConnector
+    from app.services.connectors.data_sources.panther import PantherDataSourceConnector
+    from app.services.connectors.data_sources.sentinel import SentinelConnector
+    from app.services.connectors.data_sources.sentinelone import SentinelOneConnector
+    from app.services.connectors.data_sources.splunk import SplunkConnector
+
     # UniFi Network
     from app.services.connectors.data_sources.unifi_api import UniFiAPIConnector
     from app.services.connectors.data_sources.unifi_syslog import UniFiSyslogConnector
@@ -353,16 +363,16 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     registry.register_data_source("unifi_syslog", UniFiSyslogConnector)
 
     # Import and register action connectors
-    from app.services.connectors.actions.jira import JiraActionConnector
-    from app.services.connectors.actions.slack import SlackActionConnector
-    from app.services.connectors.actions.pagerduty import PagerDutyActionConnector
-    from app.services.connectors.actions.teams import TeamsActionConnector
     from app.services.connectors.actions.crowdstrike import CrowdStrikeActionConnector
+    from app.services.connectors.actions.email import EmailActionConnector
+    from app.services.connectors.actions.http import HTTPActionConnector
+    from app.services.connectors.actions.jira import JiraActionConnector
+    from app.services.connectors.actions.pagerduty import PagerDutyActionConnector
     from app.services.connectors.actions.sentinelone import SentinelOneActionConnector
     from app.services.connectors.actions.servicenow import ServiceNowActionConnector
+    from app.services.connectors.actions.slack import SlackActionConnector
+    from app.services.connectors.actions.teams import TeamsActionConnector
     from app.services.connectors.actions.webhook import WebhookActionConnector
-    from app.services.connectors.actions.http import HTTPActionConnector
-    from app.services.connectors.actions.email import EmailActionConnector
 
     registry.register_action("jira", JiraActionConnector)
     registry.register_action("slack", SlackActionConnector)

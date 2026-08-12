@@ -1,14 +1,14 @@
-from typing import Annotated, Optional
-from uuid import UUID
 from datetime import datetime
+from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func, update, and_
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, Notification, NotificationType
-from app.api.v1.deps import OrgUserDep, OrgIdDep
+from app.api.v1.deps import OrgIdDep, OrgUserDep
+from app.db import Notification, NotificationType, get_db
 
 router = APIRouter()
 
@@ -18,11 +18,11 @@ class NotificationResponse(BaseModel):
     notification_type: NotificationType
     title: str
     message: str
-    resource_type: Optional[str]
-    resource_id: Optional[str]
+    resource_type: str | None
+    resource_id: str | None
     is_read: bool
-    read_at: Optional[str]
-    created_by: Optional[str]
+    read_at: str | None
+    created_by: str | None
     created_at: str
 
     class Config:
@@ -37,12 +37,13 @@ class NotificationListResponse(BaseModel):
 
 class NotificationCreate(BaseModel):
     """For creating notifications programmatically."""
+
     user_email: str
     notification_type: NotificationType
     title: str
     message: str
-    resource_type: Optional[str] = None
-    resource_id: Optional[str] = None
+    resource_type: str | None = None
+    resource_id: str | None = None
 
 
 def format_notification(n: Notification) -> NotificationResponse:
@@ -66,7 +67,7 @@ async def list_notifications(
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     unread_only: bool = False,
-    notification_type: Optional[NotificationType] = None,
+    notification_type: NotificationType | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> NotificationListResponse:
@@ -79,7 +80,7 @@ async def list_notifications(
     )
 
     if unread_only:
-        query = query.where(Notification.is_read == False)
+        query = query.where(Notification.is_read.is_(False))
 
     if notification_type:
         query = query.where(Notification.notification_type == notification_type)
@@ -95,7 +96,7 @@ async def list_notifications(
             and_(
                 Notification.organization_id == org_id,
                 Notification.user_email == user.email,
-                Notification.is_read == False,
+                Notification.is_read.is_(False),
             )
         )
     )
@@ -127,7 +128,7 @@ async def get_unread_count(
             and_(
                 Notification.organization_id == org_id,
                 Notification.user_email == user.email,
-                Notification.is_read == False,
+                Notification.is_read.is_(False),
             )
         )
     )
@@ -204,7 +205,7 @@ async def mark_all_as_read(
             and_(
                 Notification.organization_id == org_id,
                 Notification.user_email == user.email,
-                Notification.is_read == False,
+                Notification.is_read.is_(False),
             )
         )
         .values(is_read=True, read_at=now)
@@ -254,7 +255,7 @@ async def clear_notifications(
     )
 
     if read_only:
-        query = query.where(Notification.is_read == True)
+        query = query.where(Notification.is_read.is_(True))
 
     result = await db.execute(query)
     notifications = result.scalars().all()

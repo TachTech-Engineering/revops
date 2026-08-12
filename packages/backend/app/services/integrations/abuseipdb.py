@@ -2,8 +2,8 @@
 AbuseIPDB integration for IP reputation lookups.
 Free tier: 1000 checks/day
 """
+
 import httpx
-from typing import Optional
 
 from app.config import settings
 
@@ -13,7 +13,7 @@ class AbuseIPDBConnector:
 
     BASE_URL = "https://api.abuseipdb.com/api/v2"
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.abuseipdb_api_key
 
     @property
@@ -146,7 +146,7 @@ class AbuseIPDBConnector:
             return "low"
         return "clean"
 
-    def _get_category_name(self, category_id: int) -> Optional[str]:
+    def _get_category_name(self, category_id: int) -> str | None:
         """Map AbuseIPDB category ID to name."""
         categories = {
             1: "DNS Compromise",

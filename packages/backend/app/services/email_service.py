@@ -1,9 +1,8 @@
 import logging
 import smtplib
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from email.mime.application import MIMEApplication
-from typing import Optional
 
 from app.config import settings
 
@@ -29,8 +28,8 @@ class EmailService:
         to: list[str],
         subject: str,
         body_html: str,
-        body_text: Optional[str] = None,
-        attachments: Optional[list[tuple[str, bytes, str]]] = None,  # (filename, content, mime_type)
+        body_text: str | None = None,
+        attachments: list[tuple[str, bytes, str]] | None = None,  # (filename, content, mime_type)
     ) -> bool:
         """Send an email with optional attachments."""
         if not self.is_configured():
@@ -38,28 +37,28 @@ class EmailService:
             return False
 
         try:
-            msg = MIMEMultipart('alternative')
-            msg['Subject'] = subject
-            msg['From'] = self.from_email
-            msg['To'] = ', '.join(to)
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = self.from_email
+            msg["To"] = ", ".join(to)
 
             # Add text body
             if body_text:
-                msg.attach(MIMEText(body_text, 'plain'))
+                msg.attach(MIMEText(body_text, "plain"))
 
             # Add HTML body
-            msg.attach(MIMEText(body_html, 'html'))
+            msg.attach(MIMEText(body_html, "html"))
 
             # Add attachments
             if attachments:
                 for filename, content, mime_type in attachments:
                     attachment = MIMEApplication(content)
                     attachment.add_header(
-                        'Content-Disposition',
-                        'attachment',
+                        "Content-Disposition",
+                        "attachment",
                         filename=filename,
                     )
-                    attachment.add_header('Content-Type', mime_type)
+                    attachment.add_header("Content-Type", mime_type)
                     msg.attach(attachment)
 
             # Send email

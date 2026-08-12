@@ -5,7 +5,6 @@ Creates and updates tickets in Jira for incident response workflows.
 """
 
 import time
-import uuid
 from typing import Any
 
 import httpx
@@ -13,9 +12,9 @@ import httpx
 from app.db.models import ConnectorCategory
 from app.services.connectors.base import (
     ActionConnector,
-    ConnectorMetadata,
-    ConnectionTestResult,
     ActionResult,
+    ConnectionTestResult,
+    ConnectorMetadata,
 )
 
 
@@ -213,7 +212,10 @@ class JiraActionConnector(ActionConnector):
                 return ActionResult(
                     success=False,
                     message=f"Unknown action: {action}",
-                    error=f"Supported actions: create_issue, update_issue, add_comment, transition_issue",
+                    error=(
+                        "Supported actions: create_issue, update_issue, "
+                        "add_comment, transition_issue"
+                    ),
                 )
 
             execution_time_ms = int((time.time() - start_time) * 1000)
@@ -402,7 +404,9 @@ class JiraActionConnector(ActionConnector):
                 error=response.text,
             )
 
-    async def _transition_issue(self, config: dict[str, Any], context: dict[str, Any]) -> ActionResult:
+    async def _transition_issue(
+        self, config: dict[str, Any], context: dict[str, Any]
+    ) -> ActionResult:
         """Transition a Jira issue to a new status."""
         issue_key = config.get("issue_key")
         transition_id = config.get("transition_id")

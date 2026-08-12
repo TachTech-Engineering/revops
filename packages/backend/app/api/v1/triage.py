@@ -2,23 +2,23 @@
 Auto-Triage Suggestions API - Feature 3
 AI recommends priority/severity with confidence scores.
 """
+
 import json
+import logging
 import re
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Any
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_, case
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep, OrgAdminDep
-from app.db import get_db, TriageSuggestion, AssetCriticality, NormalizedAlert
+from app.api.v1.deps import OrgAdminDep, OrgAnalystDep, OrgIdDep, OrgUserDep
 from app.config import settings
-from fastapi import Depends
-import logging
+from app.db import AssetCriticality, NormalizedAlert, TriageSuggestion, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ router = APIRouter()
 
 
 # ==================== Triage Suggestions ====================
+
 
 class TriageSuggestionResponse(BaseModel):
     id: str
@@ -35,7 +36,7 @@ class TriageSuggestionResponse(BaseModel):
     confidence_score: float
     reasoning: str
     contributing_factors: list
-    was_accepted: Optional[bool]
+    was_accepted: bool | None
     created_at: str
 
     class Config:
@@ -45,14 +46,14 @@ class TriageSuggestionResponse(BaseModel):
 class TriageFeedbackRequest(BaseModel):
     suggestion_id: str
     was_accepted: bool
-    feedback_comment: Optional[str] = None
+    feedback_comment: str | None = None
 
 
 async def get_asset_criticality_for_alert(
     db: AsyncSession,
     org_id: UUID,
-    alert_data: Dict[str, Any],
-) -> Tuple[int, str]:
+    alert_data: dict[str, Any],
+) -> tuple[int, str]:
     """
     Look up asset criticality based on alert data.
 
@@ -61,10 +62,20 @@ async def get_asset_criticality_for_alert(
     """
     # Extract potential identifiers from alert
     raw_data = alert_data.get("raw_data", {})
-    hostname = raw_data.get("hostname", "") or raw_data.get("host", "") or raw_data.get("computer_name", "")
-    ip_address = raw_data.get("src_ip", "") or raw_data.get("ip", "") or raw_data.get("source_ip", "")
+    hostname = (
+        raw_data.get("hostname", "")
+        or raw_data.get("host", "")
+        or raw_data.get("computer_name", "")
+    )
+    ip_address = (
+        raw_data.get("src_ip", "") or raw_data.get("ip", "") or raw_data.get("source_ip", "")
+    )
     user = raw_data.get("user", "") or raw_data.get("username", "") or raw_data.get("actor", "")
-    service = raw_data.get("service", "") or raw_data.get("application", "") or raw_data.get("process_name", "")
+    service = (
+        raw_data.get("service", "")
+        or raw_data.get("application", "")
+        or raw_data.get("process_name", "")
+    )
 
     # Also check title and description for common patterns
     title = alert_data.get("title", "").lower()
@@ -74,7 +85,7 @@ async def get_asset_criticality_for_alert(
     result = await db.execute(
         select(AssetCriticality)
         .where(AssetCriticality.organization_id == org_id)
-        .where(AssetCriticality.is_active == True)
+        .where(AssetCriticality.is_active.is_(True))
         .order_by(AssetCriticality.criticality_level.desc())
     )
     rules = result.scalars().all()
@@ -84,22 +95,43 @@ async def get_asset_criticality_for_alert(
 
         if rule.match_type == "hostname" and hostname:
             if re.search(pattern, hostname.lower()):
-                return rule.criticality_level, f"Hostname '{hostname}' matches critical asset rule '{rule.name}'"
+                return (
+                    rule.criticality_level,
+                    f"Hostname '{hostname}' matches critical asset rule '{rule.name}'",
+                )
 
         elif rule.match_type == "ip" and ip_address:
             if pattern in ip_address:
-                return rule.criticality_level, f"IP '{ip_address}' matches critical asset rule '{rule.name}'"
+                return (
+                    rule.criticality_level,
+                    f"IP '{ip_address}' matches critical asset rule '{rule.name}'",
+                )
 
         elif rule.match_type == "user" and user:
             if re.search(pattern, user.lower()):
-                return rule.criticality_level, f"User '{user}' matches critical asset rule '{rule.name}'"
+                return (
+                    rule.criticality_level,
+                    f"User '{user}' matches critical asset rule '{rule.name}'",
+                )
 
         elif rule.match_type == "service" and service:
             if re.search(pattern, service.lower()):
-                return rule.criticality_level, f"Service '{service}' matches critical asset rule '{rule.name}'"
+                return (
+                    rule.criticality_level,
+                    f"Service '{service}' matches critical asset rule '{rule.name}'",
+                )
 
     # Check for common critical keywords in title/description
-    critical_keywords = ["production", "database", "payment", "pci", "hipaa", "admin", "root", "domain controller"]
+    critical_keywords = [
+        "production",
+        "database",
+        "payment",
+        "pci",
+        "hipaa",
+        "admin",
+        "root",
+        "domain controller",
+    ]
     for keyword in critical_keywords:
         if keyword in title or keyword in description:
             return 7, f"Alert mentions critical keyword '{keyword}'"
@@ -110,16 +142,16 @@ async def get_asset_criticality_for_alert(
 async def get_historical_patterns(
     db: AsyncSession,
     org_id: UUID,
-    alert_data: Dict[str, Any],
-) -> Dict[str, Any]:
+    alert_data: dict[str, Any],
+) -> dict[str, Any]:
     """
     Analyze historical triage patterns for similar alerts.
 
     Returns:
         Dict with historical analysis data
     """
-    rule_name = alert_data.get("rule_name", "")
-    source_type = alert_data.get("source_type", "")
+    alert_data.get("rule_name", "")
+    alert_data.get("source_type", "")
 
     # Get historical suggestions for similar alerts (same rule/source)
     thirty_days_ago = datetime.utcnow() - timedelta(days=30)
@@ -128,7 +160,7 @@ async def get_historical_patterns(
         select(
             TriageSuggestion.suggested_severity,
             TriageSuggestion.was_accepted,
-            func.count(TriageSuggestion.id).label("count")
+            func.count(TriageSuggestion.id).label("count"),
         )
         .where(TriageSuggestion.organization_id == org_id)
         .where(TriageSuggestion.created_at >= thirty_days_ago)
@@ -147,7 +179,9 @@ async def get_historical_patterns(
         if row[1] is True:  # was_accepted
             severity_counts[row[0]] = severity_counts.get(row[0], 0) + row[2]
 
-    most_common_severity = max(severity_counts, key=severity_counts.get) if severity_counts else "medium"
+    most_common_severity = (
+        max(severity_counts, key=severity_counts.get) if severity_counts else "medium"
+    )
 
     return {
         "total_similar_alerts": total_suggestions,
@@ -161,7 +195,7 @@ async def generate_triage_suggestion(
     db: AsyncSession,
     org_id: UUID,
     alert_id: str,
-    alert_data: Dict[str, Any],
+    alert_data: dict[str, Any],
 ) -> TriageSuggestion:
     """
     Generate AI-powered triage suggestion for an alert.
@@ -176,7 +210,9 @@ async def generate_triage_suggestion(
         TriageSuggestion model instance
     """
     # 1. Get asset criticality
-    criticality_level, criticality_reason = await get_asset_criticality_for_alert(db, org_id, alert_data)
+    criticality_level, criticality_reason = await get_asset_criticality_for_alert(
+        db, org_id, alert_data
+    )
 
     # 2. Get historical patterns
     historical = await get_historical_patterns(db, org_id, alert_data)
@@ -192,10 +228,10 @@ async def generate_triage_suggestion(
     historical_score = severity_scores.get(historical["most_common_severity"], 5)
 
     weighted_score = (
-        criticality_score * 0.4 +
-        historical_score * 0.3 +
-        base_score * 0.2 +
-        (7 if datetime.utcnow().hour >= 8 and datetime.utcnow().hour <= 18 else 5) * 0.1
+        criticality_score * 0.4
+        + historical_score * 0.3
+        + base_score * 0.2
+        + (7 if datetime.utcnow().hour >= 8 and datetime.utcnow().hour <= 18 else 5) * 0.1
     )
 
     # Map score to severity
@@ -222,12 +258,33 @@ async def generate_triage_suggestion(
 
     # 6. Generate reasoning using LLM if available
     contributing_factors = [
-        {"factor": "asset_criticality", "value": str(criticality_level), "weight": 0.4, "reason": criticality_reason},
-        {"factor": "historical_severity", "value": historical["most_common_severity"], "weight": 0.3,
-         "reason": f"Based on {historical['total_similar_alerts']} similar alerts with {historical['acceptance_rate']:.0%} acceptance rate"},
-        {"factor": "rule_baseline", "value": base_severity, "weight": 0.2, "reason": f"Original alert severity from detection rule"},
-        {"factor": "time_sensitivity", "value": "business_hours" if 8 <= datetime.utcnow().hour <= 18 else "off_hours",
-         "weight": 0.1, "reason": "Current time of day consideration"},
+        {
+            "factor": "asset_criticality",
+            "value": str(criticality_level),
+            "weight": 0.4,
+            "reason": criticality_reason,
+        },
+        {
+            "factor": "historical_severity",
+            "value": historical["most_common_severity"],
+            "weight": 0.3,
+            "reason": (
+                f"Based on {historical['total_similar_alerts']} similar alerts "
+                f"with {historical['acceptance_rate']:.0%} acceptance rate"
+            ),
+        },
+        {
+            "factor": "rule_baseline",
+            "value": base_severity,
+            "weight": 0.2,
+            "reason": "Original alert severity from detection rule",
+        },
+        {
+            "factor": "time_sensitivity",
+            "value": "business_hours" if 8 <= datetime.utcnow().hour <= 18 else "off_hours",
+            "weight": 0.1,
+            "reason": "Current time of day consideration",
+        },
     ]
 
     reasoning = await generate_reasoning_with_llm(
@@ -248,23 +305,27 @@ async def generate_triage_suggestion(
 
 
 async def generate_reasoning_with_llm(
-    alert_data: Dict[str, Any],
+    alert_data: dict[str, Any],
     severity: str,
     priority: str,
     confidence: float,
-    factors: List[Dict[str, Any]],
+    factors: list[dict[str, Any]],
 ) -> str:
     """Generate human-readable reasoning using LLM."""
     if not settings.anthropic_api_key:
         # Fallback to template-based reasoning
-        return f"Based on asset criticality analysis and historical patterns, this alert is recommended as {severity.upper()} severity with {priority.upper()} priority. " + \
-               f"Confidence: {confidence:.0%}. Key factors: " + \
-               ", ".join([f"{f['factor']} ({f['reason']})" for f in factors])
+        return (
+            "Based on asset criticality analysis and historical patterns, "
+            f"this alert is recommended as {severity.upper()} severity "
+            f"with {priority.upper()} priority. "
+            + f"Confidence: {confidence:.0%}. Key factors: "
+            + ", ".join([f"{f['factor']} ({f['reason']})" for f in factors])
+        )
 
     try:
         prompt = f"""Generate a brief (2-3 sentences) triage recommendation for a security analyst.
 
-Alert: {alert_data.get('title', 'Unknown')}
+Alert: {alert_data.get("title", "Unknown")}
 Suggested Severity: {severity}
 Suggested Priority: {priority}
 Confidence: {confidence:.0%}
@@ -272,7 +333,8 @@ Confidence: {confidence:.0%}
 Contributing factors:
 {json.dumps(factors, indent=2)}
 
-Write a concise explanation that helps the analyst understand why this severity/priority is recommended."""
+Write a concise explanation that helps the analyst understand
+why this severity/priority is recommended."""
 
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -298,7 +360,11 @@ Write a concise explanation that helps the analyst understand why this severity/
         logger.error(f"Error generating reasoning with LLM: {e}")
 
     # Fallback
-    return f"Based on asset criticality analysis and historical patterns, this alert is recommended as {severity.upper()} severity with {priority.upper()} priority. Confidence: {confidence:.0%}."
+    return (
+        "Based on asset criticality analysis and historical patterns, "
+        f"this alert is recommended as {severity.upper()} severity "
+        f"with {priority.upper()} priority. Confidence: {confidence:.0%}."
+    )
 
 
 @router.get("/suggest/{alert_id}", response_model=TriageSuggestionResponse)
@@ -423,15 +489,16 @@ async def submit_triage_feedback(
 
 # ==================== Asset Criticality ====================
 
+
 class AssetCriticalityResponse(BaseModel):
     id: str
     name: str
-    description: Optional[str]
+    description: str | None
     match_type: str
     match_pattern: str
     criticality_level: int
-    business_unit: Optional[str]
-    data_classification: Optional[str]
+    business_unit: str | None
+    data_classification: str | None
     is_active: bool
     created_by: str
     created_at: str
@@ -442,23 +509,23 @@ class AssetCriticalityResponse(BaseModel):
 
 class AssetCriticalityCreate(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     match_type: str  # hostname, ip, user, service
     match_pattern: str
     criticality_level: int  # 1-10
-    business_unit: Optional[str] = None
-    data_classification: Optional[str] = None
+    business_unit: str | None = None
+    data_classification: str | None = None
     is_active: bool = True
 
 
 class AssetCriticalityUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    match_pattern: Optional[str] = None
-    criticality_level: Optional[int] = None
-    business_unit: Optional[str] = None
-    data_classification: Optional[str] = None
-    is_active: Optional[bool] = None
+    name: str | None = None
+    description: str | None = None
+    match_pattern: str | None = None
+    criticality_level: int | None = None
+    business_unit: str | None = None
+    data_classification: str | None = None
+    is_active: bool | None = None
 
 
 def serialize_asset_criticality(ac: AssetCriticality) -> AssetCriticalityResponse:
@@ -482,8 +549,8 @@ async def list_asset_criticality(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: AsyncSession = Depends(get_db),
-    match_type: Optional[str] = Query(None),
-    is_active: Optional[bool] = Query(None),
+    match_type: str | None = Query(None),
+    is_active: bool | None = Query(None),
 ):
     """List asset criticality rules."""
     query = select(AssetCriticality).where(AssetCriticality.organization_id == org_id)
@@ -576,7 +643,9 @@ async def update_asset_criticality(
     update_data = request.model_dump(exclude_none=True)
     if "criticality_level" in update_data:
         if update_data["criticality_level"] < 1 or update_data["criticality_level"] > 10:
-            raise HTTPException(status_code=400, detail="Criticality level must be between 1 and 10")
+            raise HTTPException(
+                status_code=400, detail="Criticality level must be between 1 and 10"
+            )
 
     for key, value in update_data.items():
         setattr(asset, key, value)

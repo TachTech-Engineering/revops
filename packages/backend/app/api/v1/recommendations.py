@@ -1,19 +1,19 @@
 """
 Rule Recommendations API endpoints.
 """
+
 import uuid
-from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import get_db
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep, get_panther_service
 from app.db.models import RecommendationStatus, RuleRecommendation
-from app.services.rule_recommendation_service import rule_recommendation_service
+from app.db.session import get_db
 from app.services.panther_service import PantherService
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep, get_panther_service
+from app.services.rule_recommendation_service import rule_recommendation_service
 
 router = APIRouter()
 
@@ -25,7 +25,7 @@ class RecommendationResponse(BaseModel):
     rule_name: str
     rule_id: str
     rule_code: str
-    description: Optional[str] = None
+    description: str | None = None
     mitre_techniques: list[str]
     confidence_score: float
     status: str
@@ -50,7 +50,7 @@ class CoverageGapResponse(BaseModel):
 
 
 class DismissRequest(BaseModel):
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 class StatsResponse(BaseModel):
@@ -82,8 +82,8 @@ def recommendation_to_response(rec) -> RecommendationResponse:
 async def list_recommendations(
     user: OrgUserDep,
     org_id: OrgIdDep,
-    log_source: Optional[str] = Query(None, description="Filter by log source"),
-    status: Optional[str] = Query(None, description="Filter by status: pending, accepted, dismissed"),
+    log_source: str | None = Query(None, description="Filter by log source"),
+    status: str | None = Query(None, description="Filter by status: pending, accepted, dismissed"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -97,7 +97,7 @@ async def list_recommendations(
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid status: {status}. Use 'pending', 'accepted', or 'dismissed'."
+                detail=f"Invalid status: {status}. Use 'pending', 'accepted', or 'dismissed'.",
             )
 
     # Parse log sources
@@ -180,16 +180,20 @@ async def get_catalog_info(user: OrgUserDep):
         "version": catalog.get("version"),
         "last_updated": catalog.get("last_updated"),
         "total_rules": len(catalog.get("rules", [])),
-        "log_sources": list(set(
-            source
-            for rule in catalog.get("rules", [])
-            for source in rule.get("log_sources", [])
-        )),
-        "mitre_tactics": list(set(
-            rule.get("mitre_tactic")
-            for rule in catalog.get("rules", [])
-            if rule.get("mitre_tactic")
-        )),
+        "log_sources": list(
+            set(
+                source
+                for rule in catalog.get("rules", [])
+                for source in rule.get("log_sources", [])
+            )
+        ),
+        "mitre_tactics": list(
+            set(
+                rule.get("mitre_tactic")
+                for rule in catalog.get("rules", [])
+                if rule.get("mitre_tactic")
+            )
+        ),
     }
 
 

@@ -3,30 +3,30 @@ Shift Handoff API
 
 Allows SOC analysts to document and transfer context between shifts.
 """
+
 from datetime import datetime
-from typing import Optional, List
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, desc
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import Depends
 
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
-from app.db import get_db, ShiftHandoff
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import ShiftHandoff, get_db
 
 router = APIRouter()
 
 
 # ==================== Models ====================
 
+
 class OngoingInvestigation(BaseModel):
     alert_id: str
     title: str
     severity: str
     status: str
-    notes: Optional[str] = None
+    notes: str | None = None
 
 
 class PriorityItem(BaseModel):
@@ -39,27 +39,27 @@ class PriorityItem(BaseModel):
 
 class ShiftHandoffCreate(BaseModel):
     summary: str
-    ongoing_investigations: List[OngoingInvestigation] = []
-    priority_items: List[PriorityItem] = []
-    notes: Optional[str] = None
-    incoming_analyst: Optional[str] = None
+    ongoing_investigations: list[OngoingInvestigation] = []
+    priority_items: list[PriorityItem] = []
+    notes: str | None = None
+    incoming_analyst: str | None = None
 
 
 class ShiftHandoffResponse(BaseModel):
     id: str
     shift_date: str
     outgoing_analyst: str
-    incoming_analyst: Optional[str]
+    incoming_analyst: str | None
     summary: str
     ongoing_investigations: list
     priority_items: list
-    notes: Optional[str]
+    notes: str | None
     open_alerts_count: int
     open_cases_count: int
     critical_alerts_count: int
     is_acknowledged: bool
-    acknowledged_at: Optional[str]
-    acknowledged_by: Optional[str]
+    acknowledged_at: str | None
+    acknowledged_by: str | None
     created_at: str
 
     class Config:
@@ -88,7 +88,8 @@ def serialize_handoff(h: ShiftHandoff) -> ShiftHandoffResponse:
 
 # ==================== Endpoints ====================
 
-@router.get("", response_model=List[ShiftHandoffResponse])
+
+@router.get("", response_model=list[ShiftHandoffResponse])
 async def list_handoffs(
     user: OrgUserDep,
     org_id: OrgIdDep,
@@ -105,7 +106,7 @@ async def list_handoffs(
     )
 
     if not include_acknowledged:
-        query = query.where(ShiftHandoff.is_acknowledged == False)
+        query = query.where(ShiftHandoff.is_acknowledged.is_(False))
 
     result = await db.execute(query)
     handoffs = result.scalars().all()
@@ -113,7 +114,7 @@ async def list_handoffs(
     return [serialize_handoff(h) for h in handoffs]
 
 
-@router.get("/latest", response_model=Optional[ShiftHandoffResponse])
+@router.get("/latest", response_model=ShiftHandoffResponse | None)
 async def get_latest_handoff(
     user: OrgUserDep,
     org_id: OrgIdDep,
@@ -123,7 +124,7 @@ async def get_latest_handoff(
     result = await db.execute(
         select(ShiftHandoff)
         .where(ShiftHandoff.organization_id == org_id)
-        .where(ShiftHandoff.is_acknowledged == False)
+        .where(ShiftHandoff.is_acknowledged.is_(False))
         .order_by(desc(ShiftHandoff.shift_date))
         .limit(1)
     )
@@ -165,8 +166,12 @@ async def create_handoff(
 ):
     """Create a new shift handoff."""
     # Get alert/case counts (simplified - in production would query actual counts)
-    open_alerts = len([i for i in request.ongoing_investigations if i.status not in ['resolved', 'closed']])
-    critical_alerts = len([i for i in request.ongoing_investigations if i.severity.lower() == 'critical'])
+    open_alerts = len(
+        [i for i in request.ongoing_investigations if i.status not in ["resolved", "closed"]]
+    )
+    critical_alerts = len(
+        [i for i in request.ongoing_investigations if i.severity.lower() == "critical"]
+    )
 
     handoff = ShiftHandoff(
         organization_id=org_id,

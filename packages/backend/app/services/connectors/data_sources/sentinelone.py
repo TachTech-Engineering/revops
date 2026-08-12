@@ -7,15 +7,15 @@ Integrates with SentinelOne to fetch and normalize endpoint threats and alerts.
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
 
 
@@ -67,7 +67,14 @@ class SentinelOneConnector(DataSourceConnector):
                         "description": "Only fetch threats with these statuses",
                         "items": {
                             "type": "string",
-                            "enum": ["active", "mitigated", "blocked", "suspicious", "pending", "suspicious_resolved"],
+                            "enum": [
+                                "active",
+                                "mitigated",
+                                "blocked",
+                                "suspicious",
+                                "pending",
+                                "suspicious_resolved",
+                            ],
                         },
                         "default": ["active", "suspicious"],
                     },
@@ -164,8 +171,8 @@ class SentinelOneConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch threats from SentinelOne."""
         try:
             base_url = self._get_base_url()
@@ -204,7 +211,9 @@ class SentinelOneConnector(DataSourceConnector):
                 )
 
                 if response.status_code != 200:
-                    raise Exception(f"Failed to fetch threats: {response.status_code} - {response.text}")
+                    raise Exception(
+                        f"Failed to fetch threats: {response.status_code} - {response.text}"
+                    )
 
                 data = response.json()
 
@@ -226,7 +235,9 @@ class SentinelOneConnector(DataSourceConnector):
     def normalize_alert(self, raw_alert: dict[str, Any]) -> NormalizedAlert:
         """Normalize a SentinelOne threat to the unified schema."""
         threat_info = raw_alert.get("threatInfo", {})
-        agent_info = raw_alert.get("agentRealtimeInfo", {}) or raw_alert.get("agentDetectionInfo", {})
+        agent_info = raw_alert.get("agentRealtimeInfo", {}) or raw_alert.get(
+            "agentDetectionInfo", {}
+        )
 
         # Parse timestamps
         created_at = datetime.utcnow()
@@ -314,7 +325,9 @@ class SentinelOneConnector(DataSourceConnector):
             created_at_source=created_at,
             updated_at_source=updated_at,
             rule_id=threat_info.get("detectionType"),
-            rule_name=f"{classification}: {threat_info.get('detectionType', 'Unknown')}" if classification else threat_info.get("detectionType"),
+            rule_name=f"{classification}: {threat_info.get('detectionType', 'Unknown')}"
+            if classification
+            else threat_info.get("detectionType"),
             tags=tags[:20],
             mitre_tactics=list(set(mitre_tactics)),
             mitre_techniques=list(set(mitre_techniques)),

@@ -21,10 +21,10 @@ Example:
 """
 
 from .splunk import (
-    SPLToPantherConverter,
-    convert_spl,
     GeneratedRule,
     SPLConversionError,
+    SPLToPantherConverter,
+    convert_spl,
 )
 
 __all__ = [

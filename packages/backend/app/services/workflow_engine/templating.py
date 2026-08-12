@@ -11,8 +11,8 @@ Syntax:
 - {{loop.index}} - Current loop index
 """
 
-import re
 import json
+import re
 from typing import Any
 
 
@@ -22,7 +22,7 @@ class TemplateResolver:
     """
 
     # Pattern to match {{variable.path}} with optional filters
-    TEMPLATE_PATTERN = re.compile(r'\{\{\s*([^}|]+?)(?:\s*\|\s*(\w+))?\s*\}\}')
+    TEMPLATE_PATTERN = re.compile(r"\{\{\s*([^}|]+?)(?:\s*\|\s*(\w+))?\s*\}\}")
 
     def __init__(self, context: dict[str, Any]):
         """
@@ -83,7 +83,7 @@ class TemplateResolver:
         - "trigger.alert.severity" -> context["trigger"]["alert"]["severity"]
         - "steps.step_1.output.body" -> context["steps"]["step_1"]["body"]
         """
-        parts = path.split('.')
+        parts = path.split(".")
         value = self.context
 
         for part in parts:
@@ -108,20 +108,20 @@ class TemplateResolver:
     def _apply_filter(self, value: Any, filter_name: str) -> Any:
         """Apply a filter transformation to a value."""
         filters = {
-            'json': lambda v: json.dumps(v) if not isinstance(v, str) else v,
-            'upper': lambda v: str(v).upper(),
-            'lower': lambda v: str(v).lower(),
-            'strip': lambda v: str(v).strip(),
-            'int': lambda v: int(v) if v is not None else 0,
-            'float': lambda v: float(v) if v is not None else 0.0,
-            'bool': lambda v: bool(v),
-            'str': lambda v: str(v) if v is not None else '',
-            'len': lambda v: len(v) if hasattr(v, '__len__') else 0,
-            'keys': lambda v: list(v.keys()) if isinstance(v, dict) else [],
-            'values': lambda v: list(v.values()) if isinstance(v, dict) else [],
-            'first': lambda v: v[0] if v and hasattr(v, '__getitem__') else None,
-            'last': lambda v: v[-1] if v and hasattr(v, '__getitem__') else None,
-            'default': lambda v: v if v is not None else '',
+            "json": lambda v: json.dumps(v) if not isinstance(v, str) else v,
+            "upper": lambda v: str(v).upper(),
+            "lower": lambda v: str(v).lower(),
+            "strip": lambda v: str(v).strip(),
+            "int": lambda v: int(v) if v is not None else 0,
+            "float": lambda v: float(v) if v is not None else 0.0,
+            "bool": lambda v: bool(v),
+            "str": lambda v: str(v) if v is not None else "",
+            "len": lambda v: len(v) if hasattr(v, "__len__") else 0,
+            "keys": lambda v: list(v.keys()) if isinstance(v, dict) else [],
+            "values": lambda v: list(v.values()) if isinstance(v, dict) else [],
+            "first": lambda v: v[0] if v and hasattr(v, "__getitem__") else None,
+            "last": lambda v: v[-1] if v and hasattr(v, "__getitem__") else None,
+            "default": lambda v: v if v is not None else "",
         }
 
         filter_func = filters.get(filter_name)
@@ -135,11 +135,11 @@ class TemplateResolver:
     def _to_string(self, value: Any) -> str:
         """Convert a value to string for template substitution."""
         if value is None:
-            return ''
+            return ""
         elif isinstance(value, (dict, list)):
             return json.dumps(value)
         elif isinstance(value, bool):
-            return 'true' if value else 'false'
+            return "true" if value else "false"
         else:
             return str(value)
 

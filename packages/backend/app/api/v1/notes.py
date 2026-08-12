@@ -1,15 +1,14 @@
 import re
-from typing import Annotated, Optional
+from typing import Annotated
 from uuid import UUID
-from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, Note, NoteResourceType, Notification, NotificationType
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import Note, NoteResourceType, Notification, NotificationType, get_db
 
 router = APIRouter()
 
@@ -18,7 +17,7 @@ class NoteCreate(BaseModel):
     resource_type: NoteResourceType
     resource_id: str
     content: str
-    parent_id: Optional[UUID] = None
+    parent_id: UUID | None = None
 
 
 class NoteUpdate(BaseModel):
@@ -32,7 +31,7 @@ class NoteResponse(BaseModel):
     content: str
     mentions: list[str]
     is_edited: bool
-    parent_id: Optional[UUID]
+    parent_id: UUID | None
     created_by: str
     created_at: str
     updated_at: str
@@ -45,7 +44,7 @@ class NoteResponse(BaseModel):
 def extract_mentions(content: str) -> list[str]:
     """Extract @mentions from content."""
     # Match @email or @username patterns
-    pattern = r'@([a-zA-Z0-9._-]+(?:@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})?)'
+    pattern = r"@([a-zA-Z0-9._-]+(?:@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})?)"
     matches = re.findall(pattern, content)
     # Filter out duplicates and normalize
     return list(set(m.lower() for m in matches))
@@ -74,7 +73,10 @@ async def create_mention_notifications(
             user_email=email,
             notification_type=NotificationType.MENTION,
             title=f"You were mentioned in a {resource_label.get(note.resource_type, 'note')}",
-            message=f"{created_by} mentioned you: {note.content[:100]}{'...' if len(note.content) > 100 else ''}",
+            message=(
+                f"{created_by} mentioned you: {note.content[:100]}"
+                f"{'...' if len(note.content) > 100 else ''}"
+            ),
             resource_type=note.resource_type.value,
             resource_id=note.resource_id,
             created_by=created_by,
@@ -184,12 +186,14 @@ async def get_note_replies(
 ) -> list[NoteResponse]:
     """Get replies to a note."""
     result = await db.execute(
-        select(Note).where(
+        select(Note)
+        .where(
             and_(
                 Note.organization_id == org_id,
                 Note.parent_id == note_id,
             )
-        ).order_by(Note.created_at.asc())
+        )
+        .order_by(Note.created_at.asc())
     )
     notes = result.scalars().all()
 
@@ -249,7 +253,9 @@ async def create_note(
 
     # Create notifications for mentions
     if mentions:
-        await create_mention_notifications(db, note, mentions, analyst.email, analyst.organization_id)
+        await create_mention_notifications(
+            db, note, mentions, analyst.email, analyst.organization_id
+        )
 
     # If this is a reply, notify the parent note author
     if note_data.parent_id and parent.created_by.lower() != analyst.email.lower():
@@ -257,7 +263,10 @@ async def create_note(
             user_email=parent.created_by,
             notification_type=NotificationType.COMMENT_REPLY,
             title="Someone replied to your note",
-            message=f"{analyst.email} replied: {note.content[:100]}{'...' if len(note.content) > 100 else ''}",
+            message=(
+                f"{analyst.email} replied: {note.content[:100]}"
+                f"{'...' if len(note.content) > 100 else ''}"
+            ),
             resource_type=note.resource_type.value,
             resource_id=note.resource_id,
             created_by=analyst.email,
@@ -316,7 +325,9 @@ async def update_note(
     # Notify newly mentioned users
     added_mentions = new_mentions - old_mentions
     if added_mentions:
-        await create_mention_notifications(db, note, list(added_mentions), analyst.email, analyst.organization_id)
+        await create_mention_notifications(
+            db, note, list(added_mentions), analyst.email, analyst.organization_id
+        )
 
     return NoteResponse(
         id=note.id,

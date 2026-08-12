@@ -2,8 +2,8 @@
 AlienVault OTX (Open Threat Exchange) integration.
 Free tier with API key registration.
 """
+
 import httpx
-from typing import Optional
 
 from app.config import settings
 
@@ -24,7 +24,7 @@ class OTXConnector:
         "email": "email",
     }
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: str | None = None):
         self.api_key = api_key or settings.otx_api_key
 
     @property
@@ -140,9 +140,7 @@ class OTXConnector:
                         "tags": p.get("tags", [])[:5],
                         "targeted_countries": p.get("targeted_countries", []),
                         "malware_families": p.get("malware_families", []),
-                        "attack_ids": [
-                            a.get("id") for a in p.get("attack_ids", [])
-                        ][:5],
+                        "attack_ids": [a.get("id") for a in p.get("attack_ids", [])][:5],
                         "references": p.get("references", [])[:3],
                     }
                     for p in pulses[:10]  # Limit to 10 pulses
@@ -173,26 +171,32 @@ class OTXConnector:
 
         # Extract additional data based on type
         if indicator_type == "ip_address":
-            result.update({
-                "asn": data.get("asn"),
-                "country_code": data.get("country_code"),
-                "country_name": data.get("country_name"),
-                "city": data.get("city"),
-                "region": data.get("region"),
-                "latitude": data.get("latitude"),
-                "longitude": data.get("longitude"),
-            })
+            result.update(
+                {
+                    "asn": data.get("asn"),
+                    "country_code": data.get("country_code"),
+                    "country_name": data.get("country_name"),
+                    "city": data.get("city"),
+                    "region": data.get("region"),
+                    "latitude": data.get("latitude"),
+                    "longitude": data.get("longitude"),
+                }
+            )
         elif indicator_type == "domain":
-            result.update({
-                "alexa": data.get("alexa"),
-                "whois": data.get("whois"),
-            })
+            result.update(
+                {
+                    "alexa": data.get("alexa"),
+                    "whois": data.get("whois"),
+                }
+            )
         elif indicator_type.startswith("file_hash"):
-            result.update({
-                "file_type": data.get("type_title"),
-                "file_class": data.get("file_class"),
-                "file_size": data.get("filesize"),
-            })
+            result.update(
+                {
+                    "file_type": data.get("type_title"),
+                    "file_class": data.get("file_class"),
+                    "file_size": data.get("filesize"),
+                }
+            )
 
         # Aggregate tags and malware families from pulses
         all_tags = set()

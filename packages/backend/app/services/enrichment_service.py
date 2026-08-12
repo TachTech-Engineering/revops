@@ -1,17 +1,16 @@
 import hashlib
 import os
 from datetime import datetime, timedelta
-from typing import Optional
 from uuid import UUID
 
 import httpx
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import (
-    EnrichmentPipeline,
-    EnrichmentCache,
     AlertEnrichment,
+    EnrichmentCache,
+    EnrichmentPipeline,
     EnrichmentType,
 )
 
@@ -25,7 +24,7 @@ async def get_cached_enrichment(
     db: AsyncSession,
     pipeline_id: UUID,
     input_value: str,
-) -> Optional[dict]:
+) -> dict | None:
     """Check if we have a valid cached enrichment result."""
     input_hash = await get_cache_key(input_value)
 
@@ -52,7 +51,7 @@ async def store_cached_enrichment(
     input_value: str,
     result: dict,
     ttl_minutes: int,
-    error_message: Optional[str] = None,
+    error_message: str | None = None,
 ) -> EnrichmentCache:
     """Store an enrichment result in the cache."""
     input_hash = await get_cache_key(input_value)
@@ -195,7 +194,7 @@ async def enrich_custom_api(
     value: str,
     api_endpoint: str,
     api_headers: dict,
-    api_key_env: Optional[str] = None,
+    api_key_env: str | None = None,
 ) -> dict:
     """Call a custom API for enrichment."""
     headers = dict(api_headers)
@@ -272,18 +271,18 @@ async def enrich_alert(
     alert_id: str,
     alert_data: dict,
     user_email: str,
-    pipeline_ids: Optional[list[UUID]] = None,
+    pipeline_ids: list[UUID] | None = None,
 ) -> list[dict]:
     """Enrich an alert using all active pipelines or specified pipelines."""
     if pipeline_ids:
         query = select(EnrichmentPipeline).where(
             and_(
                 EnrichmentPipeline.id.in_(pipeline_ids),
-                EnrichmentPipeline.is_active == True,
+                EnrichmentPipeline.is_active.is_(True),
             )
         )
     else:
-        query = select(EnrichmentPipeline).where(EnrichmentPipeline.is_active == True)
+        query = select(EnrichmentPipeline).where(EnrichmentPipeline.is_active.is_(True))
 
     result = await db.execute(query)
     pipelines = result.scalars().all()
@@ -318,15 +317,17 @@ async def enrich_alert(
         )
         db.add(alert_enrichment)
 
-        enrichments.append({
-            "pipeline_id": str(pipeline.id),
-            "pipeline_name": pipeline.name,
-            "source_field": pipeline.source_field,
-            "source_value": str(value),
-            "target_field": pipeline.target_field,
-            "source": enrichment_result.get("source"),
-            "data": enrichment_result.get("data", {}),
-        })
+        enrichments.append(
+            {
+                "pipeline_id": str(pipeline.id),
+                "pipeline_name": pipeline.name,
+                "source_field": pipeline.source_field,
+                "source_value": str(value),
+                "target_field": pipeline.target_field,
+                "source": enrichment_result.get("source"),
+                "data": enrichment_result.get("data", {}),
+            }
+        )
 
     await db.flush()
     return enrichments
@@ -346,17 +347,19 @@ async def get_alert_enrichments(
 
     enrichments = []
     for enrichment, pipeline in result.all():
-        enrichments.append({
-            "id": str(enrichment.id),
-            "pipeline_id": str(pipeline.id),
-            "pipeline_name": pipeline.name,
-            "enrichment_type": pipeline.enrichment_type.value,
-            "source_field": enrichment.source_field,
-            "source_value": enrichment.source_value,
-            "target_field": pipeline.target_field,
-            "data": enrichment.enrichment_data,
-            "enriched_by": enrichment.enriched_by,
-            "created_at": enrichment.created_at.isoformat(),
-        })
+        enrichments.append(
+            {
+                "id": str(enrichment.id),
+                "pipeline_id": str(pipeline.id),
+                "pipeline_name": pipeline.name,
+                "enrichment_type": pipeline.enrichment_type.value,
+                "source_field": enrichment.source_field,
+                "source_value": enrichment.source_value,
+                "target_field": pipeline.target_field,
+                "data": enrichment.enrichment_data,
+                "enriched_by": enrichment.enriched_by,
+                "created_at": enrichment.created_at.isoformat(),
+            }
+        )
 
     return enrichments

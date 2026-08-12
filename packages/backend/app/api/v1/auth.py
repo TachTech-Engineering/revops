@@ -1,53 +1,50 @@
 """
 Authentication API endpoints.
 """
-from typing import Optional
+
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, UserRoleType, SSOProvider
+from app.config import settings
+from app.db import SSOProvider, UserRoleType, get_db
 from app.services.auth_service import (
     AuthError,
     authenticate_user,
-    create_user,
     create_organization,
+    create_password_reset_token,
     create_refresh_token,
+    create_user,
+    decode_access_token,
+    generate_token_response,
+    get_user_by_email,
+    get_user_by_id,
+    reset_user_password,
+    revoke_refresh_token,
     store_refresh_token,
     validate_refresh_token,
-    revoke_refresh_token,
-    decode_access_token,
-    get_user_by_id,
-    get_user_by_email,
-    generate_token_response,
-    create_password_reset_token,
-    validate_password_reset_token,
-    reset_user_password,
 )
 from app.services.sso_service import (
-    get_global_providers,
-    is_global_provider_configured,
-    get_available_providers_for_org,
-    get_sso_config_by_id,
-    get_org_by_slug,
-    get_org_by_email_domain,
-    initiate_sso_flow,
     complete_sso_flow,
-    org_has_sso_enabled,
+    generate_sp_metadata,
+    get_available_providers_for_org,
+    get_global_providers,
+    get_org_by_email_domain,
+    get_org_by_slug,
     get_org_sso_provider_names,
+    get_sso_config_by_id,
     # SAML-specific functions
     initiate_saml_flow,
-    process_saml_response,
-    process_saml_logout,
-    generate_sp_metadata,
+    initiate_sso_flow,
+    org_has_sso_enabled,
     prepare_saml_request,
+    process_saml_logout,
+    process_saml_response,
 )
-from app.db.models import SSOProvider
-from app.config import settings
 
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
@@ -57,9 +54,9 @@ security = HTTPBearer(auto_error=False)
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
-    name: Optional[str] = None
-    organization_name: Optional[str] = None
-    organization_slug: Optional[str] = None
+    name: str | None = None
+    organization_name: str | None = None
+    organization_slug: str | None = None
 
 
 class LoginRequest(BaseModel):
@@ -81,11 +78,11 @@ class TokenResponse(BaseModel):
 class UserResponse(BaseModel):
     id: str
     email: str
-    name: Optional[str]
+    name: str | None
     role: str
     is_active: bool
-    organization_id: Optional[str]
-    organization_name: Optional[str]
+    organization_id: str | None
+    organization_name: str | None
 
     class Config:
         from_attributes = True
@@ -108,7 +105,7 @@ class ForgotPasswordResponse(BaseModel):
     message: str
     # In production, don't return the token - send via email
     # This is for development/testing only
-    reset_token: Optional[str] = None
+    reset_token: str | None = None
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
@@ -180,7 +177,10 @@ async def login(
             provider_list = ", ".join(providers) if providers else "SSO"
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Password login is disabled for your organization. Please sign in using {provider_list}.",
+                detail=(
+                    "Password login is disabled for your organization. "
+                    f"Please sign in using {provider_list}."
+                ),
             )
 
     # Proceed with normal authentication
@@ -344,9 +344,10 @@ async def reset_password(
 # ==================== SSO Endpoints ====================
 # Supports per-organization SSO configuration
 
+
 class SSOProviderResponse(BaseModel):
     id: str
-    provider: Optional[str] = None
+    provider: str | None = None
     name: str
     icon: str
 
@@ -357,9 +358,9 @@ class SSOProvidersResponse(BaseModel):
 
 @router.get("/sso/providers", response_model=SSOProvidersResponse)
 async def list_sso_providers(
-    organization_id: Optional[UUID] = None,
-    organization_slug: Optional[str] = None,
-    email: Optional[str] = None,
+    organization_id: UUID | None = None,
+    organization_slug: str | None = None,
+    email: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -390,34 +391,38 @@ async def list_sso_providers(
     # Get per-org providers
     if org_id:
         providers = await get_available_providers_for_org(db, org_id)
-        return SSOProvidersResponse(providers=[
+        return SSOProvidersResponse(
+            providers=[
+                SSOProviderResponse(
+                    id=p["id"],
+                    provider=p["provider"],
+                    name=p["name"],
+                    icon=p["icon"],
+                )
+                for p in providers
+            ]
+        )
+
+    # Fall back to global providers
+    global_providers = get_global_providers()
+    return SSOProvidersResponse(
+        providers=[
             SSOProviderResponse(
                 id=p["id"],
                 provider=p["provider"],
                 name=p["name"],
                 icon=p["icon"],
             )
-            for p in providers
-        ])
-
-    # Fall back to global providers
-    global_providers = get_global_providers()
-    return SSOProvidersResponse(providers=[
-        SSOProviderResponse(
-            id=p["id"],
-            provider=p["provider"],
-            name=p["name"],
-            icon=p["icon"],
-        )
-        for p in global_providers
-    ])
+            for p in global_providers
+        ]
+    )
 
 
 @router.get("/sso/{config_id}/authorize")
 async def sso_authorize(
     config_id: str,
     request: Request,
-    redirect_uri: Optional[str] = None,
+    redirect_uri: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -441,7 +446,9 @@ async def sso_authorize(
 
     # Build callback URL - use public base URL if configured (for behind proxies/load balancers)
     if settings.public_base_url:
-        callback_url = f"{settings.public_base_url.rstrip('/')}/api/v1/auth/sso/{config_id}/callback"
+        callback_url = (
+            f"{settings.public_base_url.rstrip('/')}/api/v1/auth/sso/{config_id}/callback"
+        )
     else:
         callback_url = str(request.url_for("sso_callback", config_id=config_id))
 
@@ -454,6 +461,7 @@ async def sso_authorize(
         )
     except Exception as e:
         import logging
+
         logging.error(f"SSO authorize error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -513,6 +521,7 @@ async def sso_callback(
         )
     except Exception as e:
         import logging
+
         logging.error(f"SSO callback error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -543,7 +552,7 @@ async def detect_sso_for_email(
                 "provider": sso_config.provider.value,
                 "name": sso_config.display_name or sso_config.provider.value.title(),
                 "icon": sso_config.provider.value,
-            }
+            },
         }
 
     return {"sso_available": False}
@@ -592,21 +601,21 @@ async def saml_metadata(
         metadata_xml = generate_sp_metadata(sso_config, request_data)
 
         from fastapi.responses import Response
+
         return Response(
             content=metadata_xml,
             media_type="application/xml",
-            headers={
-                "Content-Disposition": f'attachment; filename="sp_metadata_{config_id}.xml"'
-            }
+            headers={"Content-Disposition": f'attachment; filename="sp_metadata_{config_id}.xml"'},
         )
 
-    except ImportError as e:
+    except ImportError:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="SAML support requires python3-saml library",
         )
     except Exception as e:
         import logging
+
         logging.error(f"SAML metadata generation error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -618,7 +627,7 @@ async def saml_metadata(
 async def saml_login(
     config_id: str,
     request: Request,
-    return_to: Optional[str] = None,
+    return_to: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -647,7 +656,7 @@ async def saml_login(
         redirect_url = await initiate_saml_flow(request, db, config_uuid, return_to)
         return RedirectResponse(url=redirect_url)
 
-    except ImportError as e:
+    except ImportError:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="SAML support requires python3-saml library",
@@ -659,6 +668,7 @@ async def saml_login(
         )
     except Exception as e:
         import logging
+
         logging.error(f"SAML login initiation error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -721,13 +731,14 @@ async def saml_acs(
 
         return RedirectResponse(url=redirect_url, status_code=303)
 
-    except ImportError as e:
+    except ImportError:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="SAML support requires python3-saml library",
         )
     except ValueError as e:
         import logging
+
         logging.error(f"SAML ACS validation error: {e}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -735,6 +746,7 @@ async def saml_acs(
         )
     except Exception as e:
         import logging
+
         logging.error(f"SAML ACS error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -772,7 +784,7 @@ async def saml_sls(
         # Default redirect after logout
         return RedirectResponse(url="http://localhost:3000/login")
 
-    except ImportError as e:
+    except ImportError:
         raise HTTPException(
             status_code=status.HTTP_501_NOT_IMPLEMENTED,
             detail="SAML support requires python3-saml library",
@@ -784,6 +796,7 @@ async def saml_sls(
         )
     except Exception as e:
         import logging
+
         logging.error(f"SAML SLS error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

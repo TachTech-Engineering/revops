@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator
 
 from ...exceptions import NotFoundError
 from ...models import User, UserInvite, UserListParams, UserSummary, UserUpdate
@@ -44,9 +44,7 @@ class UsersResource(PaginatedResource):
             pageSize=page_size,
         ).model_dump(by_alias=True, exclude_none=True)
 
-        for item in self._paginate(
-            self._client, self._path, params, page_size, max_items
-        ):
+        for item in self._paginate(self._client, self._path, params, page_size, max_items):
             yield UserSummary.model_validate(item)
 
     async def alist(
@@ -65,9 +63,7 @@ class UsersResource(PaginatedResource):
             pageSize=page_size,
         ).model_dump(by_alias=True, exclude_none=True)
 
-        async for item in self._apaginate(
-            self._client, self._path, params, page_size, max_items
-        ):
+        async for item in self._apaginate(self._client, self._path, params, page_size, max_items):
             yield UserSummary.model_validate(item)
 
     def get(self, user_id: str) -> User:

@@ -4,21 +4,20 @@ Email/SMTP Action Connector
 Sends email notifications via SMTP servers (Gmail, Office 365, custom SMTP).
 """
 
-import time
 import smtplib
 import ssl
-from email.mime.text import MIMEText
+import time
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Any
 
 from app.db.models import ConnectorCategory
 from app.services.connectors.base import (
     ActionConnector,
-    ConnectorMetadata,
-    ConnectionTestResult,
     ActionResult,
+    ConnectionTestResult,
+    ConnectorMetadata,
 )
-
 
 # Common SMTP server configurations
 SMTP_PRESETS = {

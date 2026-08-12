@@ -1,10 +1,9 @@
 import logging
-from typing import Optional
 
 import httpx
 
-from app.services.integrations.base import ActionConnector, ActionResult
 from app.config import settings
+from app.services.integrations.base import ActionConnector, ActionResult
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +12,7 @@ class CrowdStrikeConnector(ActionConnector):
     """Connector for CrowdStrike host isolation."""
 
     def __init__(self):
-        self._access_token: Optional[str] = None
+        self._access_token: str | None = None
 
     async def execute(self, config: dict, alert_data: dict) -> ActionResult:
         client_id = config.get("client_id") or settings.crowdstrike_client_id
@@ -73,14 +72,16 @@ class CrowdStrikeConnector(ActionConnector):
             logger.error(f"CrowdStrike error: {e}")
             return ActionResult(success=False, message="CrowdStrike request failed", error=str(e))
 
-    def validate_config(self, config: dict) -> tuple[bool, Optional[str]]:
+    def validate_config(self, config: dict) -> tuple[bool, str | None]:
         if not (config.get("client_id") or settings.crowdstrike_client_id):
             return False, "CrowdStrike client_id is required"
         if not (config.get("client_secret") or settings.crowdstrike_client_secret):
             return False, "CrowdStrike client_secret is required"
         return True, None
 
-    async def _get_access_token(self, base_url: str, client_id: str, client_secret: str) -> Optional[str]:
+    async def _get_access_token(
+        self, base_url: str, client_id: str, client_secret: str
+    ) -> str | None:
         """Get OAuth2 access token from CrowdStrike."""
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -95,7 +96,7 @@ class CrowdStrikeConnector(ActionConnector):
             logger.error(f"Failed to get CrowdStrike token: {e}")
             return None
 
-    def _extract_host_id(self, alert_data: dict) -> Optional[str]:
+    def _extract_host_id(self, alert_data: dict) -> str | None:
         """Try to extract host identifier from alert data."""
         # Look in common fields
         for field in ["device_id", "host_id", "aid", "hostname"]:

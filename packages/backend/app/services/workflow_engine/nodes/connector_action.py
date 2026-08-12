@@ -10,11 +10,11 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.workflow_engine.nodes.base import NodeExecutor, NodeResult
-from app.services.workflow_engine.context import ExecutionContext
 from app.db.models import Connector, ConnectorCategory, ConnectorStatus
-from app.services.encryption import get_encryption_service
 from app.services.connectors.base import get_connector_registry
+from app.services.encryption import get_encryption_service
+from app.services.workflow_engine.context import ExecutionContext
+from app.services.workflow_engine.nodes.base import NodeExecutor, NodeResult
 
 
 class ConnectorActionExecutor(NodeExecutor):
@@ -42,7 +42,9 @@ class ConnectorActionExecutor(NodeExecutor):
 
             # Parse UUID
             try:
-                connector_uuid = UUID(connector_id) if isinstance(connector_id, str) else connector_id
+                connector_uuid = (
+                    UUID(connector_id) if isinstance(connector_id, str) else connector_id
+                )
             except ValueError:
                 return NodeResult(
                     success=False,
@@ -50,9 +52,7 @@ class ConnectorActionExecutor(NodeExecutor):
                 )
 
             # Get connector from database
-            result = await self.db.execute(
-                select(Connector).where(Connector.id == connector_uuid)
-            )
+            result = await self.db.execute(select(Connector).where(Connector.id == connector_uuid))
             connector = result.scalar_one_or_none()
 
             if not connector:
@@ -70,7 +70,10 @@ class ConnectorActionExecutor(NodeExecutor):
             if connector.status != ConnectorStatus.CONNECTED:
                 return NodeResult(
                     success=False,
-                    error=f"Connector {connector_id} is not connected (status: {connector.status.value})",
+                    error=(
+                        f"Connector {connector_id} is not connected "
+                        f"(status: {connector.status.value})"
+                    ),
                 )
 
             # Decrypt credentials

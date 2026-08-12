@@ -12,9 +12,9 @@ import httpx
 from app.db.models import ConnectorCategory
 from app.services.connectors.base import (
     ActionConnector,
-    ConnectorMetadata,
-    ConnectionTestResult,
     ActionResult,
+    ConnectionTestResult,
+    ConnectorMetadata,
 )
 
 
@@ -69,7 +69,12 @@ class PagerDutyActionConnector(ActionConnector):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["create_incident", "trigger_event", "resolve_incident", "acknowledge_incident"],
+                    "enum": [
+                        "create_incident",
+                        "trigger_event",
+                        "resolve_incident",
+                        "acknowledge_incident",
+                    ],
                     "title": "Action",
                     "description": "Action to perform",
                     "default": "trigger_event",
@@ -250,7 +255,9 @@ class PagerDutyActionConnector(ActionConnector):
                 error=response.text,
             )
 
-    async def _create_incident(self, config: dict[str, Any], context: dict[str, Any]) -> ActionResult:
+    async def _create_incident(
+        self, config: dict[str, Any], context: dict[str, Any]
+    ) -> ActionResult:
         """Create a PagerDuty incident via REST API."""
         service_id = config.get("service_id") or self.config.get("default_service_id")
         if not service_id:
@@ -298,7 +305,9 @@ class PagerDutyActionConnector(ActionConnector):
                 error=response.text,
             )
 
-    async def _resolve_incident(self, config: dict[str, Any], context: dict[str, Any]) -> ActionResult:
+    async def _resolve_incident(
+        self, config: dict[str, Any], context: dict[str, Any]
+    ) -> ActionResult:
         """Resolve a PagerDuty incident."""
         incident_id = config.get("incident_id")
         if not incident_id:
@@ -328,7 +337,9 @@ class PagerDutyActionConnector(ActionConnector):
                 error=response.text,
             )
 
-    async def _acknowledge_incident(self, config: dict[str, Any], context: dict[str, Any]) -> ActionResult:
+    async def _acknowledge_incident(
+        self, config: dict[str, Any], context: dict[str, Any]
+    ) -> ActionResult:
         """Acknowledge a PagerDuty incident."""
         incident_id = config.get("incident_id")
         if not incident_id:

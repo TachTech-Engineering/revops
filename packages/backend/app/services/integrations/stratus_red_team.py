@@ -2,7 +2,6 @@
 Stratus Red Team integration for cloud attack simulation.
 https://github.com/DataDog/stratus-red-team
 """
-from typing import Optional
 
 from app.config import settings
 
@@ -95,7 +94,6 @@ class StratusRedTeamConnector:
             "description": "Creates an IAM role with trust relationship to external account.",
             "detection": "CloudTrail: CreateRole with external trust",
         },
-
         # Azure Techniques
         {
             "id": "azure.credential-access.steal-sp-credentials",
@@ -124,7 +122,6 @@ class StratusRedTeamConnector:
             "description": "Creates a backdoor user in Azure AD with elevated privileges.",
             "detection": "Azure AD Audit logs: Add user, Add member to role",
         },
-
         # GCP Techniques
         {
             "id": "gcp.credential-access.steal-service-account-key",
@@ -164,13 +161,13 @@ class StratusRedTeamConnector:
         },
     ]
 
-    def __init__(self, base_path: Optional[str] = None):
+    def __init__(self, base_path: str | None = None):
         self.base_path = base_path or settings.stratus_red_team_path
 
     async def list_attack_techniques(
         self,
-        cloud: Optional[str] = None,
-        tactic: Optional[str] = None,
+        cloud: str | None = None,
+        tactic: str | None = None,
     ) -> list[dict]:
         """
         List available Stratus Red Team attack techniques.
@@ -192,7 +189,7 @@ class StratusRedTeamConnector:
 
         return techniques
 
-    async def get_technique(self, technique_id: str) -> Optional[dict]:
+    async def get_technique(self, technique_id: str) -> dict | None:
         """
         Get details for a specific technique.
 
@@ -211,7 +208,7 @@ class StratusRedTeamConnector:
         self,
         technique_id: str,
         cloud: str,
-        parameters: Optional[dict] = None,
+        parameters: dict | None = None,
     ) -> dict:
         """
         Detonate a Stratus Red Team technique.
@@ -246,7 +243,9 @@ class StratusRedTeamConnector:
             "technique_name": technique["name"],
             "cloud": cloud,
             "status": "simulated",
-            "message": "Detonation simulated - requires Stratus Red Team CLI with cloud credentials",
+            "message": (
+                "Detonation simulated - requires Stratus Red Team CLI with cloud credentials"
+            ),
             "detection_guidance": technique.get("detection"),
             "parameters": parameters,
         }

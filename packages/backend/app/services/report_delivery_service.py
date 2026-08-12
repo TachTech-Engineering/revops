@@ -1,6 +1,5 @@
-import logging
 import base64
-from typing import Optional
+import logging
 
 import httpx
 
@@ -16,15 +15,18 @@ class ReportDeliveryService:
         report_name: str,
         summary: dict,
         period: str,
-        file_content: Optional[bytes] = None,
-        filename: Optional[str] = None,
+        file_content: bytes | None = None,
+        filename: str | None = None,
     ) -> bool:
         """Deliver report to Slack via webhook."""
         try:
             blocks = [
                 {
                     "type": "header",
-                    "text": {"type": "plain_text", "text": f":chart_with_upwards_trend: {report_name}"},
+                    "text": {
+                        "type": "plain_text",
+                        "text": f":chart_with_upwards_trend: {report_name}",
+                    },
                 },
                 {
                     "type": "section",
@@ -34,10 +36,25 @@ class ReportDeliveryService:
                 {
                     "type": "section",
                     "fields": [
-                        {"type": "mrkdwn", "text": f"*Total Alerts:*\n{summary.get('total_alerts', 0)}"},
-                        {"type": "mrkdwn", "text": f"*Critical:*\n{summary.get('by_severity', {}).get('CRITICAL', 0)}"},
-                        {"type": "mrkdwn", "text": f"*High:*\n{summary.get('by_severity', {}).get('HIGH', 0)}"},
-                        {"type": "mrkdwn", "text": f"*Open:*\n{summary.get('by_status', {}).get('OPEN', 0)}"},
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Total Alerts:*\n{summary.get('total_alerts', 0)}",
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": (
+                                "*Critical:*\n"
+                                f"{summary.get('by_severity', {}).get('CRITICAL', 0)}"
+                            ),
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*High:*\n{summary.get('by_severity', {}).get('HIGH', 0)}",
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": f"*Open:*\n{summary.get('by_status', {}).get('OPEN', 0)}",
+                        },
                     ],
                 },
             ]
@@ -64,8 +81,8 @@ class ReportDeliveryService:
         report_name: str,
         summary: dict,
         period: str,
-        file_content: Optional[bytes] = None,
-        filename: Optional[str] = None,
+        file_content: bytes | None = None,
+        filename: str | None = None,
     ) -> bool:
         """Deliver report to Microsoft Teams via webhook."""
         try:
@@ -79,10 +96,19 @@ class ReportDeliveryService:
                         "activityTitle": report_name,
                         "activitySubtitle": f"Period: {period}",
                         "facts": [
-                            {"name": "Total Alerts", "value": str(summary.get('total_alerts', 0))},
-                            {"name": "Critical", "value": str(summary.get('by_severity', {}).get('CRITICAL', 0))},
-                            {"name": "High", "value": str(summary.get('by_severity', {}).get('HIGH', 0))},
-                            {"name": "Open", "value": str(summary.get('by_status', {}).get('OPEN', 0))},
+                            {"name": "Total Alerts", "value": str(summary.get("total_alerts", 0))},
+                            {
+                                "name": "Critical",
+                                "value": str(summary.get("by_severity", {}).get("CRITICAL", 0)),
+                            },
+                            {
+                                "name": "High",
+                                "value": str(summary.get("by_severity", {}).get("HIGH", 0)),
+                            },
+                            {
+                                "name": "Open",
+                                "value": str(summary.get("by_status", {}).get("OPEN", 0)),
+                            },
                         ],
                         "markdown": True,
                     }
@@ -109,8 +135,8 @@ class ReportDeliveryService:
         report_name: str,
         summary: dict,
         period: str,
-        file_content: Optional[bytes] = None,
-        filename: Optional[str] = None,
+        file_content: bytes | None = None,
+        filename: str | None = None,
     ) -> bool:
         """Deliver report to a generic webhook."""
         try:
@@ -124,7 +150,7 @@ class ReportDeliveryService:
             if file_content and filename:
                 payload["attachment"] = {
                     "filename": filename,
-                    "content_base64": base64.b64encode(file_content).decode('utf-8'),
+                    "content_base64": base64.b64encode(file_content).decode("utf-8"),
                 }
 
             async with httpx.AsyncClient(timeout=30.0) as client:
@@ -148,15 +174,15 @@ class ReportDeliveryService:
         report_name: str,
         summary: dict,
         period: str,
-        file_content: Optional[bytes] = None,
-        filename: Optional[str] = None,
+        file_content: bytes | None = None,
+        filename: str | None = None,
     ) -> bool:
         """Deliver report based on type."""
-        if delivery_type == 'slack':
+        if delivery_type == "slack":
             return await self.deliver_to_slack(
                 webhook_url, report_name, summary, period, file_content, filename
             )
-        elif delivery_type == 'teams':
+        elif delivery_type == "teams":
             return await self.deliver_to_teams(
                 webhook_url, report_name, summary, period, file_content, filename
             )

@@ -2,24 +2,31 @@
 Escalation Policies API - Feature 7
 Time-based escalation chains for unacknowledged alerts.
 """
-from datetime import datetime, timedelta
-from typing import Optional
+
+from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep, OrgAdminDep
-from app.db import get_db, EscalationPolicy, EscalationStep, AlertEscalation, EscalationStatus, EscalationNotificationType
-from fastapi import Depends
+from app.api.v1.deps import OrgAdminDep, OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import (
+    AlertEscalation,
+    EscalationNotificationType,
+    EscalationPolicy,
+    EscalationStatus,
+    EscalationStep,
+    get_db,
+)
 
 router = APIRouter()
 
 
 # ==================== Response Models ====================
+
 
 class EscalationStepResponse(BaseModel):
     id: str
@@ -28,7 +35,7 @@ class EscalationStepResponse(BaseModel):
     notification_type: str
     targets: list
     use_oncall_schedule: bool
-    oncall_schedule_id: Optional[str]
+    oncall_schedule_id: str | None
 
     class Config:
         from_attributes = True
@@ -37,13 +44,13 @@ class EscalationStepResponse(BaseModel):
 class EscalationPolicyResponse(BaseModel):
     id: str
     name: str
-    description: Optional[str]
+    description: str | None
     severity_filter: list
     rule_filter: list
     is_active: bool
     steps: list[EscalationStepResponse]
-    call_message_template: Optional[str]
-    sms_message_template: Optional[str]
+    call_message_template: str | None
+    sms_message_template: str | None
     created_by: str
     created_at: str
 
@@ -58,9 +65,9 @@ class AlertEscalationResponse(BaseModel):
     status: str
     current_step: int
     started_at: str
-    next_escalation_at: Optional[str]
-    acknowledged_at: Optional[str]
-    acknowledged_by: Optional[str]
+    next_escalation_at: str | None
+    acknowledged_at: str | None
+    acknowledged_by: str | None
     notification_history: list
 
     class Config:
@@ -69,35 +76,39 @@ class AlertEscalationResponse(BaseModel):
 
 # ==================== Request Models ====================
 
+
 class EscalationStepCreate(BaseModel):
     step_order: int
     delay_minutes: int
     notification_type: str  # email, slack, pagerduty, teams, webhook
     targets: list[str]
     use_oncall_schedule: bool = False
-    oncall_schedule_id: Optional[str] = None
+    oncall_schedule_id: str | None = None
 
 
 class EscalationPolicyCreate(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     severity_filter: list[str] = []
     rule_filter: list[str] = []
     is_active: bool = True
     steps: list[EscalationStepCreate] = []
-    # Custom message templates - supports: {title}, {severity}, {id}, {description}, {rule}, {time}, {source}
-    call_message_template: Optional[str] = "Alert from {source}: {title}. Severity: {severity}. {description}"
-    sms_message_template: Optional[str] = "[{source}] {severity} Alert: {title}. ID: {id}"
+    # Custom message templates - supports: {title}, {severity}, {id}, {description},
+    # {rule}, {time}, {source}
+    call_message_template: str | None = (
+        "Alert from {source}: {title}. Severity: {severity}. {description}"
+    )
+    sms_message_template: str | None = "[{source}] {severity} Alert: {title}. ID: {id}"
 
 
 class EscalationPolicyUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    severity_filter: Optional[list[str]] = None
-    rule_filter: Optional[list[str]] = None
-    is_active: Optional[bool] = None
-    call_message_template: Optional[str] = None
-    sms_message_template: Optional[str] = None
+    name: str | None = None
+    description: str | None = None
+    severity_filter: list[str] | None = None
+    rule_filter: list[str] | None = None
+    is_active: bool | None = None
+    call_message_template: str | None = None
+    sms_message_template: str | None = None
 
 
 def serialize_step(step: EscalationStep) -> EscalationStepResponse:
@@ -130,12 +141,13 @@ def serialize_policy(policy: EscalationPolicy) -> EscalationPolicyResponse:
 
 # ==================== Escalation Policies ====================
 
+
 @router.get("", response_model=list[EscalationPolicyResponse])
 async def list_escalation_policies(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: AsyncSession = Depends(get_db),
-    is_active: Optional[bool] = Query(None),
+    is_active: bool | None = Query(None),
 ):
     """List all escalation policies."""
     query = (
@@ -154,6 +166,7 @@ async def list_escalation_policies(
 
 
 # ==================== Active Escalations (must be before /{policy_id}) ====================
+
 
 @router.get("/active", response_model=list["AlertEscalationResponse"])
 async def list_active_escalations(
@@ -240,7 +253,9 @@ async def create_escalation_policy(
             notification_type=EscalationNotificationType(step_data.notification_type),
             targets=step_data.targets,
             use_oncall_schedule=step_data.use_oncall_schedule,
-            oncall_schedule_id=UUID(step_data.oncall_schedule_id) if step_data.oncall_schedule_id else None,
+            oncall_schedule_id=UUID(step_data.oncall_schedule_id)
+            if step_data.oncall_schedule_id
+            else None,
         )
         db.add(step)
 
@@ -310,6 +325,7 @@ async def delete_escalation_policy(
 
 
 # ==================== Escalation Steps ====================
+
 
 @router.post("/{policy_id}/steps", status_code=201, response_model=EscalationStepResponse)
 async def add_escalation_step(
@@ -403,7 +419,7 @@ async def acknowledge_alert_escalation(
     }
 
 
-@router.get("/alerts/{alert_id}/escalation", response_model=Optional[AlertEscalationResponse])
+@router.get("/alerts/{alert_id}/escalation", response_model=AlertEscalationResponse | None)
 async def get_alert_escalation(
     alert_id: str,
     user: OrgUserDep,
@@ -430,8 +446,12 @@ async def get_alert_escalation(
         status=escalation.status.value,
         current_step=escalation.current_step,
         started_at=escalation.started_at.isoformat(),
-        next_escalation_at=escalation.next_escalation_at.isoformat() if escalation.next_escalation_at else None,
-        acknowledged_at=escalation.acknowledged_at.isoformat() if escalation.acknowledged_at else None,
+        next_escalation_at=escalation.next_escalation_at.isoformat()
+        if escalation.next_escalation_at
+        else None,
+        acknowledged_at=escalation.acknowledged_at.isoformat()
+        if escalation.acknowledged_at
+        else None,
         acknowledged_by=escalation.acknowledged_by,
         notification_history=escalation.notification_history,
     )
@@ -441,11 +461,11 @@ class TriggerEscalationRequest(BaseModel):
     alert_id: str
     alert_title: str
     alert_severity: str = "HIGH"
-    alert_description: Optional[str] = ""
-    rule_name: Optional[str] = ""
+    alert_description: str | None = ""
+    rule_name: str | None = ""
 
 
-@router.post("/trigger", response_model=Optional[AlertEscalationResponse])
+@router.post("/trigger", response_model=AlertEscalationResponse | None)
 async def trigger_escalation(
     request: TriggerEscalationRequest,
     user: OrgAnalystDep,
@@ -472,7 +492,7 @@ async def trigger_escalation(
     if not escalation:
         raise HTTPException(
             status_code=400,
-            detail="No matching escalation policy found or alert already has active escalation"
+            detail="No matching escalation policy found or alert already has active escalation",
         )
 
     return AlertEscalationResponse(
@@ -482,8 +502,12 @@ async def trigger_escalation(
         status=escalation.status.value,
         current_step=escalation.current_step,
         started_at=escalation.started_at.isoformat(),
-        next_escalation_at=escalation.next_escalation_at.isoformat() if escalation.next_escalation_at else None,
-        acknowledged_at=escalation.acknowledged_at.isoformat() if escalation.acknowledged_at else None,
+        next_escalation_at=escalation.next_escalation_at.isoformat()
+        if escalation.next_escalation_at
+        else None,
+        acknowledged_at=escalation.acknowledged_at.isoformat()
+        if escalation.acknowledged_at
+        else None,
         acknowledged_by=escalation.acknowledged_by,
         notification_history=escalation.notification_history,
     )

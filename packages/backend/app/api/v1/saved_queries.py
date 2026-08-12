@@ -1,13 +1,13 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, SavedQuery
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import SavedQuery, get_db
 
 router = APIRouter()
 
@@ -107,7 +107,9 @@ async def get_saved_query(
 ) -> SavedQueryResponse:
     """Get a saved query by ID."""
     result = await db.execute(
-        select(SavedQuery).where(and_(SavedQuery.id == query_id, SavedQuery.organization_id == org_id))
+        select(SavedQuery).where(
+            and_(SavedQuery.id == query_id, SavedQuery.organization_id == org_id)
+        )
     )
     query = result.scalar_one_or_none()
     if not query:
@@ -133,7 +135,9 @@ async def update_saved_query(
 ) -> SavedQueryResponse:
     """Update a saved query. Requires analyst role."""
     result = await db.execute(
-        select(SavedQuery).where(and_(SavedQuery.id == query_id, SavedQuery.organization_id == analyst.organization_id))
+        select(SavedQuery).where(
+            and_(SavedQuery.id == query_id, SavedQuery.organization_id == analyst.organization_id)
+        )
     )
     query = result.scalar_one_or_none()
     if not query:
@@ -170,7 +174,9 @@ async def delete_saved_query(
 ) -> dict[str, str]:
     """Delete a saved query. Requires analyst role."""
     result = await db.execute(
-        select(SavedQuery).where(and_(SavedQuery.id == query_id, SavedQuery.organization_id == analyst.organization_id))
+        select(SavedQuery).where(
+            and_(SavedQuery.id == query_id, SavedQuery.organization_id == analyst.organization_id)
+        )
     )
     query = result.scalar_one_or_none()
     if not query:

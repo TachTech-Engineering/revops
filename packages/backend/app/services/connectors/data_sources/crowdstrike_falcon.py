@@ -8,15 +8,15 @@ Uses the new Alerts API v2 (the old detects API was decommissioned).
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
 
 
@@ -28,7 +28,7 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
     and normalizes them to the unified alert schema.
     """
 
-    _access_token: Optional[str] = None
+    _access_token: str | None = None
     _token_expires_at: float = 0
 
     @classmethod
@@ -167,8 +167,8 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch alerts from CrowdStrike Falcon using Alerts API v2."""
         try:
             token = await self._get_access_token()

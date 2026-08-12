@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Iterator
 
 from .exceptions import SPLLexerError
 
@@ -193,9 +192,7 @@ class SPLLexer:
                 self.tokens.append(token)
 
         # Add EOF token
-        self.tokens.append(
-            Token(TokenType.EOF, "", self.position, self.line, self.column)
-        )
+        self.tokens.append(Token(TokenType.EOF, "", self.position, self.line, self.column))
 
         return self.tokens
 
@@ -257,18 +254,14 @@ class SPLLexer:
             self._advance()
             if self._current() == "=":
                 self._advance()
-                return Token(
-                    TokenType.LESS_THAN_EQ, "<=", start_pos, start_line, start_col
-                )
+                return Token(TokenType.LESS_THAN_EQ, "<=", start_pos, start_line, start_col)
             return Token(TokenType.LESS_THAN, "<", start_pos, start_line, start_col)
 
         if char == ">":
             self._advance()
             if self._current() == "=":
                 self._advance()
-                return Token(
-                    TokenType.GREATER_THAN_EQ, ">=", start_pos, start_line, start_col
-                )
+                return Token(TokenType.GREATER_THAN_EQ, ">=", start_pos, start_line, start_col)
             return Token(TokenType.GREATER_THAN, ">", start_pos, start_line, start_col)
 
         if char == "=":
@@ -285,9 +278,7 @@ class SPLLexer:
 
         if char in single_char_tokens:
             self._advance()
-            return Token(
-                single_char_tokens[char], char, start_pos, start_line, start_col
-            )
+            return Token(single_char_tokens[char], char, start_pos, start_line, start_col)
 
         # Quoted strings
         if char in ('"', "'"):

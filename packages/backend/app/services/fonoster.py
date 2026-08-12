@@ -7,11 +7,12 @@ Supports:
 - Twilio (production - recommended)
 - Plivo (production - alternative)
 """
-import os
+
 import logging
-import httpx
-from typing import Optional
+import os
 from dataclasses import dataclass
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ def render_message_template(
 @dataclass
 class TelephonyConfig:
     """Telephony connection configuration."""
+
     provider: str  # mock, twilio, plivo
     api_endpoint: str  # For mock server
     account_sid: str  # Twilio Account SID / Plivo Auth ID
@@ -82,7 +84,7 @@ FonosterConfig = TelephonyConfig
 class TelephonyService:
     """Service for making voice calls and sending SMS."""
 
-    def __init__(self, config: Optional[TelephonyConfig] = None):
+    def __init__(self, config: TelephonyConfig | None = None):
         self.config = config or self._load_config_from_env()
         self._twilio_client = None
 
@@ -110,10 +112,8 @@ class TelephonyService:
         if self._twilio_client is None:
             try:
                 from twilio.rest import Client
-                self._twilio_client = Client(
-                    self.config.account_sid,
-                    self.config.auth_token
-                )
+
+                self._twilio_client = Client(self.config.account_sid, self.config.auth_token)
             except ImportError:
                 logger.error("Twilio package not installed. Run: pip install twilio")
                 raise
@@ -123,12 +123,12 @@ class TelephonyService:
         self,
         to_number: str,
         message: str,
-        caller_id: Optional[str] = None,
-        alert_id: Optional[str] = None,
-        alert_title: Optional[str] = None,
-        alert_severity: Optional[str] = None,
-        escalation_id: Optional[str] = None,
-        webhook_base_url: Optional[str] = None,
+        caller_id: str | None = None,
+        alert_id: str | None = None,
+        alert_title: str | None = None,
+        alert_severity: str | None = None,
+        escalation_id: str | None = None,
+        webhook_base_url: str | None = None,
     ) -> dict:
         """
         Make a voice call with text-to-speech message.
@@ -154,7 +154,9 @@ class TelephonyService:
 
         if self.config.provider == PROVIDER_TWILIO:
             return await self._make_twilio_call(
-                to_number, message, caller,
+                to_number,
+                message,
+                caller,
                 alert_id=alert_id,
                 alert_title=alert_title,
                 alert_severity=alert_severity,
@@ -169,11 +171,11 @@ class TelephonyService:
         to_number: str,
         message: str,
         caller: str,
-        alert_id: Optional[str] = None,
-        alert_title: Optional[str] = None,
-        alert_severity: Optional[str] = None,
-        escalation_id: Optional[str] = None,
-        webhook_base_url: Optional[str] = None,
+        alert_id: str | None = None,
+        alert_title: str | None = None,
+        alert_severity: str | None = None,
+        escalation_id: str | None = None,
+        webhook_base_url: str | None = None,
     ) -> dict:
         """Make a call using Twilio."""
         try:
@@ -183,12 +185,15 @@ class TelephonyService:
             if webhook_base_url:
                 # Use webhook for interactive response (press 1 to ack, etc.)
                 import urllib.parse
-                params = urllib.parse.urlencode({
-                    "alert_id": alert_id or "",
-                    "alert_title": alert_title or message[:100],
-                    "alert_severity": alert_severity or "HIGH",
-                    "escalation_id": escalation_id or "",
-                })
+
+                params = urllib.parse.urlencode(
+                    {
+                        "alert_id": alert_id or "",
+                        "alert_title": alert_title or message[:100],
+                        "alert_severity": alert_severity or "HIGH",
+                        "escalation_id": escalation_id or "",
+                    }
+                )
                 webhook_url = f"{webhook_base_url}/api/v1/twilio/voice/alert?{params}"
 
                 call = client.calls.create(
@@ -200,11 +205,7 @@ class TelephonyService:
             else:
                 # Simple TwiML mode - just speaks the message
                 twiml = f'<Response><Say voice="{self.config.tts_voice}">{message}</Say></Response>'
-                call = client.calls.create(
-                    to=to_number,
-                    from_=caller,
-                    twiml=twiml
-                )
+                call = client.calls.create(to=to_number, from_=caller, twiml=twiml)
 
             logger.info(f"Twilio call initiated: {to_number}, sid: {call.sid}")
             return {
@@ -232,7 +233,7 @@ class TelephonyService:
                         "from_number": caller,
                         "message": message,
                         "tts_voice": self.config.tts_voice,
-                    }
+                    },
                 )
                 response.raise_for_status()
                 result = response.json()
@@ -241,7 +242,7 @@ class TelephonyService:
             return result
 
         except httpx.ConnectError:
-            logger.error(f"Cannot connect to mock telephony service")
+            logger.error("Cannot connect to mock telephony service")
             return {"success": False, "error": "Cannot connect to telephony service"}
         except Exception as e:
             logger.error(f"Failed to make call to {to_number}: {e}")
@@ -251,7 +252,7 @@ class TelephonyService:
         self,
         to_number: str,
         message: str,
-        sender_id: Optional[str] = None,
+        sender_id: str | None = None,
     ) -> dict:
         """
         Send an SMS message.
@@ -280,11 +281,7 @@ class TelephonyService:
         try:
             client = self._get_twilio_client()
 
-            sms = client.messages.create(
-                to=to_number,
-                from_=sender,
-                body=message
-            )
+            sms = client.messages.create(to=to_number, from_=sender, body=message)
 
             logger.info(f"Twilio SMS sent: {to_number}, sid: {sms.sid}")
             return {
@@ -311,7 +308,7 @@ class TelephonyService:
                         "to": to_number,
                         "from_number": sender,
                         "message": message,
-                    }
+                    },
                 )
                 response.raise_for_status()
                 result = response.json()
@@ -320,7 +317,7 @@ class TelephonyService:
             return result
 
         except httpx.ConnectError:
-            logger.error(f"Cannot connect to mock telephony service")
+            logger.error("Cannot connect to mock telephony service")
             return {"success": False, "error": "Cannot connect to telephony service"}
         except Exception as e:
             logger.error(f"Failed to send SMS to {to_number}: {e}")
@@ -388,7 +385,7 @@ class TelephonyService:
 FonosterService = TelephonyService
 
 # Global service instance
-_telephony_service: Optional[TelephonyService] = None
+_telephony_service: TelephonyService | None = None
 
 
 def get_fonoster_service() -> TelephonyService:
@@ -412,9 +409,9 @@ async def send_escalation_call(
     rule_name: str = "",
     alert_time: str = "",
     log_source: str = "",
-    message_template: Optional[str] = None,
-    escalation_id: Optional[str] = None,
-    webhook_base_url: Optional[str] = None,
+    message_template: str | None = None,
+    escalation_id: str | None = None,
+    webhook_base_url: str | None = None,
 ) -> dict:
     """
     Send an escalation voice call for an alert.
@@ -469,7 +466,7 @@ async def send_escalation_sms(
     rule_name: str = "",
     alert_time: str = "",
     log_source: str = "",
-    message_template: Optional[str] = None,
+    message_template: str | None = None,
 ) -> dict:
     """
     Send an escalation SMS for an alert.

@@ -4,20 +4,19 @@ Service for syncing attack techniques from Atomic Red Team and Stratus Red Team.
 Fetches technique definitions from GitHub and stores them in the database
 for use in attack simulations.
 """
+
 import asyncio
 import logging
 import re
-import yaml
-import json
 from datetime import datetime, timedelta
-from typing import Optional
 from pathlib import Path
 
 import httpx
-from sqlalchemy import select, delete
+import yaml
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import SimulationTemplate, SimulationFramework
+from app.db.models import SimulationFramework, SimulationTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,9 @@ logger = logging.getLogger(__name__)
 ATOMIC_RT_API = "https://api.github.com/repos/redcanaryco/atomic-red-team/contents/atomics"
 ATOMIC_RT_RAW = "https://raw.githubusercontent.com/redcanaryco/atomic-red-team/master/atomics"
 
-STRATUS_RT_API = "https://api.github.com/repos/DataDog/stratus-red-team/contents/docs/attack-techniques"
+STRATUS_RT_API = (
+    "https://api.github.com/repos/DataDog/stratus-red-team/contents/docs/attack-techniques"
+)
 STRATUS_RT_RAW = "https://raw.githubusercontent.com/DataDog/stratus-red-team/main"
 
 # Cache directory for downloaded techniques
@@ -36,16 +37,15 @@ class TechniqueSyncService:
     """Syncs attack techniques from external repositories."""
 
     def __init__(self):
-        self.http_client: Optional[httpx.AsyncClient] = None
-        self._last_sync: Optional[datetime] = None
+        self.http_client: httpx.AsyncClient | None = None
+        self._last_sync: datetime | None = None
         self._sync_interval = timedelta(hours=24)
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create HTTP client."""
         if self.http_client is None or self.http_client.is_closed:
             self.http_client = httpx.AsyncClient(
-                timeout=30.0,
-                headers={"Accept": "application/vnd.github.v3+json"}
+                timeout=30.0, headers={"Accept": "application/vnd.github.v3+json"}
             )
         return self.http_client
 
@@ -218,7 +218,10 @@ class TechniqueSyncService:
 
                     try:
                         # Fetch the markdown file
-                        md_url = f"{STRATUS_RT_RAW}/docs/attack-techniques/{provider}/{file_info['name']}"
+                        md_url = (
+                            f"{STRATUS_RT_RAW}/docs/attack-techniques/"
+                            f"{provider}/{file_info['name']}"
+                        )
                         md_response = await client.get(md_url)
 
                         if md_response.status_code != 200:
@@ -226,9 +229,7 @@ class TechniqueSyncService:
 
                         # Parse technique info from markdown
                         technique_data = self._parse_stratus_markdown(
-                            md_response.text,
-                            technique_name,
-                            provider
+                            md_response.text, technique_name, provider
                         )
 
                         if not technique_data:
@@ -286,7 +287,7 @@ class TechniqueSyncService:
 
         return result
 
-    def _parse_stratus_markdown(self, content: str, name: str, provider: str) -> Optional[dict]:
+    def _parse_stratus_markdown(self, content: str, name: str, provider: str) -> dict | None:
         """Parse Stratus technique info from markdown documentation."""
         try:
             result = {
@@ -299,33 +300,39 @@ class TechniqueSyncService:
             }
 
             # Extract title
-            title_match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+            title_match = re.search(r"^#\s+(.+)$", content, re.MULTILINE)
             if title_match:
                 result["name"] = title_match.group(1).strip()
 
             # Extract MITRE ATT&CK ID
-            mitre_match = re.search(r'\[([T\d.]+)\]', content)
+            mitre_match = re.search(r"\[([T\d.]+)\]", content)
             if mitre_match:
                 result["mitre_id"] = mitre_match.group(1)
 
             # Extract description (first paragraph after title)
-            desc_match = re.search(r'^#.+\n\n(.+?)(?=\n\n|\n##)', content, re.MULTILINE | re.DOTALL)
+            desc_match = re.search(r"^#.+\n\n(.+?)(?=\n\n|\n##)", content, re.MULTILINE | re.DOTALL)
             if desc_match:
                 result["description"] = desc_match.group(1).strip()
 
             # Extract tactic
-            tactic_match = re.search(r'MITRE ATT&CK Tactic[s]?[:\s]+\*?\*?([^*\n]+)', content, re.IGNORECASE)
+            tactic_match = re.search(
+                r"MITRE ATT&CK Tactic[s]?[:\s]+\*?\*?([^*\n]+)", content, re.IGNORECASE
+            )
             if tactic_match:
                 result["tactic"] = tactic_match.group(1).strip()
 
             # Extract required permissions
-            perm_match = re.search(r'Required.*?Permissions?[:\s]+(.+?)(?=\n\n|\n##)', content, re.IGNORECASE | re.DOTALL)
+            perm_match = re.search(
+                r"Required.*?Permissions?[:\s]+(.+?)(?=\n\n|\n##)",
+                content,
+                re.IGNORECASE | re.DOTALL,
+            )
             if perm_match:
-                perms = re.findall(r'`([^`]+)`', perm_match.group(1))
+                perms = re.findall(r"`([^`]+)`", perm_match.group(1))
                 result["permissions"] = perms
 
             # Extract detonation instructions
-            det_match = re.search(r'## Detonation\n\n```[^\n]*\n(.+?)```', content, re.DOTALL)
+            det_match = re.search(r"## Detonation\n\n```[^\n]*\n(.+?)```", content, re.DOTALL)
             if det_match:
                 result["detonation"] = det_match.group(1).strip()
 
@@ -339,16 +346,82 @@ class TechniqueSyncService:
         """Map MITRE technique ID to tactic (simplified mapping)."""
         # This is a simplified mapping - in production you'd want the full MITRE data
         tactic_ranges = {
-            "Initial Access": ["T1189", "T1190", "T1133", "T1200", "T1566", "T1091", "T1195", "T1199", "T1078"],
-            "Execution": ["T1059", "T1203", "T1559", "T1106", "T1053", "T1129", "T1072", "T1569", "T1204"],
-            "Persistence": ["T1098", "T1197", "T1547", "T1037", "T1136", "T1543", "T1546", "T1133", "T1574"],
-            "Privilege Escalation": ["T1548", "T1134", "T1547", "T1037", "T1543", "T1484", "T1546", "T1068"],
-            "Defense Evasion": ["T1548", "T1134", "T1197", "T1140", "T1480", "T1211", "T1222", "T1564"],
-            "Credential Access": ["T1110", "T1555", "T1212", "T1187", "T1606", "T1056", "T1557", "T1003"],
+            "Initial Access": [
+                "T1189",
+                "T1190",
+                "T1133",
+                "T1200",
+                "T1566",
+                "T1091",
+                "T1195",
+                "T1199",
+                "T1078",
+            ],
+            "Execution": [
+                "T1059",
+                "T1203",
+                "T1559",
+                "T1106",
+                "T1053",
+                "T1129",
+                "T1072",
+                "T1569",
+                "T1204",
+            ],
+            "Persistence": [
+                "T1098",
+                "T1197",
+                "T1547",
+                "T1037",
+                "T1136",
+                "T1543",
+                "T1546",
+                "T1133",
+                "T1574",
+            ],
+            "Privilege Escalation": [
+                "T1548",
+                "T1134",
+                "T1547",
+                "T1037",
+                "T1543",
+                "T1484",
+                "T1546",
+                "T1068",
+            ],
+            "Defense Evasion": [
+                "T1548",
+                "T1134",
+                "T1197",
+                "T1140",
+                "T1480",
+                "T1211",
+                "T1222",
+                "T1564",
+            ],
+            "Credential Access": [
+                "T1110",
+                "T1555",
+                "T1212",
+                "T1187",
+                "T1606",
+                "T1056",
+                "T1557",
+                "T1003",
+            ],
             "Discovery": ["T1087", "T1010", "T1217", "T1580", "T1538", "T1526", "T1619", "T1613"],
             "Lateral Movement": ["T1210", "T1534", "T1570", "T1563", "T1021", "T1091", "T1080"],
             "Collection": ["T1560", "T1123", "T1119", "T1115", "T1530", "T1602", "T1213", "T1005"],
-            "Exfiltration": ["T1020", "T1030", "T1048", "T1041", "T1011", "T1052", "T1567", "T1537"],
+            "Exfiltration": [
+                "T1020",
+                "T1030",
+                "T1048",
+                "T1041",
+                "T1011",
+                "T1052",
+                "T1567",
+                "T1537",
+            ],
             "Impact": ["T1531", "T1485", "T1486", "T1565", "T1491", "T1561", "T1499", "T1498"],
         }
 
@@ -377,7 +450,9 @@ class TechniqueSyncService:
             "last_sync": self._last_sync.isoformat() if self._last_sync else None,
             "atomic_red_team_count": len(atomic_count.scalars().all()),
             "stratus_red_team_count": len(stratus_count.scalars().all()),
-            "next_sync": (self._last_sync + self._sync_interval).isoformat() if self._last_sync else "Not synced",
+            "next_sync": (self._last_sync + self._sync_interval).isoformat()
+            if self._last_sync
+            else "Not synced",
         }
 
     async def close(self):

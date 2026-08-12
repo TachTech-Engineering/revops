@@ -1,10 +1,9 @@
 import logging
-from typing import Optional
 
 import httpx
 
-from app.services.integrations.base import ActionConnector, ActionResult
 from app.config import settings
+from app.services.integrations.base import ActionConnector, ActionResult
 
 logger = logging.getLogger(__name__)
 
@@ -65,14 +64,14 @@ class SentinelOneConnector(ActionConnector):
             logger.error(f"SentinelOne error: {e}")
             return ActionResult(success=False, message="SentinelOne request failed", error=str(e))
 
-    def validate_config(self, config: dict) -> tuple[bool, Optional[str]]:
+    def validate_config(self, config: dict) -> tuple[bool, str | None]:
         if not (config.get("url") or settings.sentinelone_url):
             return False, "SentinelOne URL is required"
         if not (config.get("api_token") or settings.sentinelone_api_token):
             return False, "SentinelOne API token is required"
         return True, None
 
-    def _extract_agent_id(self, alert_data: dict) -> Optional[str]:
+    def _extract_agent_id(self, alert_data: dict) -> str | None:
         """Try to extract agent identifier from alert data."""
         for field in ["agent_id", "sentinelone_agent_id", "endpoint_id"]:
             if field in alert_data:

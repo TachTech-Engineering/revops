@@ -2,18 +2,14 @@
 Rule Version History API - Feature 1
 Track rule changes with diff and rollback capability.
 """
-from datetime import datetime
-from typing import Optional
-from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
-from app.db import get_db, RuleVersion, RuleChangeType
-from fastapi import Depends
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import RuleChangeType, RuleVersion, get_db
 
 router = APIRouter()
 
@@ -25,7 +21,7 @@ class RuleVersionResponse(BaseModel):
     change_type: str
     rule_snapshot: dict
     changed_fields: list
-    change_summary: Optional[str]
+    change_summary: str | None
     changed_by: str
     created_at: str
 
@@ -43,7 +39,7 @@ class DiffResponse(BaseModel):
     from_version: int
     to_version: int
     changes: dict
-    summary: Optional[str]
+    summary: str | None
 
 
 class CreateVersionRequest(BaseModel):
@@ -51,7 +47,7 @@ class CreateVersionRequest(BaseModel):
     change_type: str
     rule_snapshot: dict
     changed_fields: list = []
-    change_summary: Optional[str] = None
+    change_summary: str | None = None
 
 
 @router.get("/{rule_id}/versions", response_model=RuleVersionListResponse)

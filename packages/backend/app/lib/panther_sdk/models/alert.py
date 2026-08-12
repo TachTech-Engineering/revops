@@ -74,9 +74,7 @@ class Alert(BaseModelConfig):
     context: dict | None = None  # Panther includes context data
 
     # Destinations
-    delivery_responses: list[AlertDelivery] = Field(
-        default_factory=list, alias="deliveryResponses"
-    )
+    delivery_responses: list[AlertDelivery] = Field(default_factory=list, alias="deliveryResponses")
 
     class Config:
         extra = "allow"  # Allow extra fields

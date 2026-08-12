@@ -1,4 +1,3 @@
-from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import AuditLog
@@ -13,10 +12,10 @@ class AuditService:
         user_email: str,
         action: str,
         resource_type: str,
-        resource_id: Optional[str] = None,
-        details: Optional[dict] = None,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        resource_id: str | None = None,
+        details: dict | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> AuditLog:
         """Log an audit event."""
         log_entry = AuditLog(

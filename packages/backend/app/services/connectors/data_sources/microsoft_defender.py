@@ -7,16 +7,16 @@ and normalize security alerts and incidents.
 
 import time
 import uuid
-from datetime import datetime, timedelta
-from typing import Any, Optional
+from datetime import datetime
+from typing import Any
 
 import httpx
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
 
 
@@ -34,7 +34,7 @@ class MicrosoftDefenderConnector(DataSourceConnector):
     Uses Microsoft Graph Security API.
     """
 
-    _access_token: Optional[str] = None
+    _access_token: str | None = None
     _token_expires_at: float = 0
 
     @classmethod
@@ -43,7 +43,10 @@ class MicrosoftDefenderConnector(DataSourceConnector):
             connector_type="microsoft_defender",
             category=ConnectorCategory.DATA_SOURCE,
             display_name="Microsoft Defender XDR",
-            description="Microsoft Defender XDR - Unified security across endpoints, email, identity, and cloud apps",
+            description=(
+                "Microsoft Defender XDR - Unified security across endpoints, "
+                "email, identity, and cloud apps"
+            ),
             icon="microsoft",
             config_schema={
                 "type": "object",
@@ -189,8 +192,8 @@ class MicrosoftDefenderConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch alerts from Microsoft Defender XDR."""
         try:
             token = await self._get_access_token()
@@ -208,7 +211,9 @@ class MicrosoftDefenderConnector(DataSourceConnector):
             # Add service source filter
             service_filter = self.config.get("service_source_filter", [])
             if service_filter:
-                svc_conditions = " or ".join([f"serviceSource eq '{svc}'" for svc in service_filter])
+                svc_conditions = " or ".join(
+                    [f"serviceSource eq '{svc}'" for svc in service_filter]
+                )
                 filter_parts.append(f"({svc_conditions})")
 
             odata_filter = " and ".join(filter_parts)
@@ -229,7 +234,9 @@ class MicrosoftDefenderConnector(DataSourceConnector):
                 )
 
                 if response.status_code != 200:
-                    raise Exception(f"Failed to fetch alerts: {response.status_code} - {response.text}")
+                    raise Exception(
+                        f"Failed to fetch alerts: {response.status_code} - {response.text}"
+                    )
 
                 data = response.json()
 
@@ -253,14 +260,18 @@ class MicrosoftDefenderConnector(DataSourceConnector):
         created_at = datetime.utcnow()
         if raw_alert.get("createdDateTime"):
             try:
-                created_at = datetime.fromisoformat(raw_alert["createdDateTime"].replace("Z", "+00:00"))
+                created_at = datetime.fromisoformat(
+                    raw_alert["createdDateTime"].replace("Z", "+00:00")
+                )
             except (ValueError, TypeError):
                 pass
 
         updated_at = None
         if raw_alert.get("lastUpdateDateTime"):
             try:
-                updated_at = datetime.fromisoformat(raw_alert["lastUpdateDateTime"].replace("Z", "+00:00"))
+                updated_at = datetime.fromisoformat(
+                    raw_alert["lastUpdateDateTime"].replace("Z", "+00:00")
+                )
             except (ValueError, TypeError):
                 pass
 

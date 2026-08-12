@@ -5,12 +5,12 @@ Aggregates results from multiple free-tier providers:
 - AlienVault OTX (multi-indicator)
 - Abuse.ch (malware/URL)
 """
-import asyncio
-from typing import Optional
 
+import asyncio
+
+from app.services.integrations.abusech import abusech_connector
 from app.services.integrations.abuseipdb import abuseipdb_connector
 from app.services.integrations.otx import otx_connector
-from app.services.integrations.abusech import abusech_connector
 
 
 class ThreatIntelService:
@@ -19,7 +19,14 @@ class ThreatIntelService:
     # IOC type mappings for each provider
     PROVIDER_SUPPORT = {
         "abuseipdb": ["ip_address"],
-        "otx": ["ip_address", "domain", "url", "file_hash_md5", "file_hash_sha1", "file_hash_sha256"],
+        "otx": [
+            "ip_address",
+            "domain",
+            "url",
+            "file_hash_md5",
+            "file_hash_sha1",
+            "file_hash_sha256",
+        ],
         "abusech": ["url", "file_hash_md5", "file_hash_sha1", "file_hash_sha256", "ip_address"],
     }
 
@@ -85,8 +92,8 @@ class ThreatIntelService:
             results["total_providers_checked"] = len(tasks)
 
         # Calculate aggregate risk
-        results["aggregate_risk_level"], results["aggregate_score"] = self._calculate_aggregate_risk(
-            results["providers"]
+        results["aggregate_risk_level"], results["aggregate_score"] = (
+            self._calculate_aggregate_risk(results["providers"])
         )
 
         return results
@@ -168,7 +175,7 @@ class ThreatIntelService:
 
         return risk_level, int(avg_score)
 
-    def _risk_level_to_score(self, risk_level: str) -> Optional[int]:
+    def _risk_level_to_score(self, risk_level: str) -> int | None:
         """Convert risk level string to numeric score."""
         mapping = {
             "critical": 95,

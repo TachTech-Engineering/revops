@@ -3,16 +3,14 @@ Fonoster Integration API
 
 Endpoints for configuring and testing Fonoster telephony integration.
 """
-from typing import Optional
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.api.v1.deps import OrgAdminDep, OrgIdDep
 from app.services.fonoster import (
-    get_fonoster_service,
     FonosterConfig,
-    send_escalation_call,
-    send_escalation_sms,
+    get_fonoster_service,
 )
 
 router = APIRouter()
@@ -37,12 +35,12 @@ class FonosterConfigResponse(BaseModel):
 
 class TestCallRequest(BaseModel):
     phone_number: str
-    message: Optional[str] = "This is a test call from Panther Security Dashboard."
+    message: str | None = "This is a test call from Panther Security Dashboard."
 
 
 class TestSmsRequest(BaseModel):
     phone_number: str
-    message: Optional[str] = "[PANTHER TEST] This is a test SMS from Panther Security."
+    message: str | None = "[PANTHER TEST] This is a test SMS from Panther Security."
 
 
 @router.get("/config", response_model=FonosterConfigResponse)

@@ -1,21 +1,21 @@
-from typing import Annotated, Optional
-from uuid import UUID
 from datetime import datetime, timedelta
+from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, func, and_
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, SLAPolicy, SLAMetric, SLAStatus
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import SLAMetric, SLAPolicy, SLAStatus, get_db
 
 router = APIRouter()
 
 
 class SLAPolicyCreate(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     ack_time_critical: int = 15
     ack_time_high: int = 60
     ack_time_medium: int = 240
@@ -30,25 +30,25 @@ class SLAPolicyCreate(BaseModel):
 
 
 class SLAPolicyUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    ack_time_critical: Optional[int] = None
-    ack_time_high: Optional[int] = None
-    ack_time_medium: Optional[int] = None
-    ack_time_low: Optional[int] = None
-    resolve_time_critical: Optional[int] = None
-    resolve_time_high: Optional[int] = None
-    resolve_time_medium: Optional[int] = None
-    resolve_time_low: Optional[int] = None
-    is_default: Optional[bool] = None
-    is_active: Optional[bool] = None
-    rule_ids: Optional[list[str]] = None
+    name: str | None = None
+    description: str | None = None
+    ack_time_critical: int | None = None
+    ack_time_high: int | None = None
+    ack_time_medium: int | None = None
+    ack_time_low: int | None = None
+    resolve_time_critical: int | None = None
+    resolve_time_high: int | None = None
+    resolve_time_medium: int | None = None
+    resolve_time_low: int | None = None
+    is_default: bool | None = None
+    is_active: bool | None = None
+    rule_ids: list[str] | None = None
 
 
 class SLAPolicyResponse(BaseModel):
     id: UUID
     name: str
-    description: Optional[str]
+    description: str | None
     ack_time_critical: int
     ack_time_high: int
     ack_time_medium: int
@@ -74,14 +74,14 @@ class SLAMetricResponse(BaseModel):
     policy_id: UUID
     severity: str
     alert_created_at: str
-    acknowledged_at: Optional[str]
-    resolved_at: Optional[str]
+    acknowledged_at: str | None
+    resolved_at: str | None
     ack_target_minutes: int
     resolve_target_minutes: int
     ack_status: SLAStatus
     resolve_status: SLAStatus
-    ack_time_minutes: Optional[int]
-    resolve_time_minutes: Optional[int]
+    ack_time_minutes: int | None
+    resolve_time_minutes: int | None
     created_at: str
     updated_at: str
 
@@ -94,8 +94,8 @@ class SLASummary(BaseModel):
     on_track: int
     at_risk: int
     breached: int
-    avg_ack_time_minutes: Optional[float]
-    avg_resolve_time_minutes: Optional[float]
+    avg_ack_time_minutes: float | None
+    avg_resolve_time_minutes: float | None
     ack_compliance_rate: float
     resolve_compliance_rate: float
 
@@ -156,10 +156,14 @@ async def list_policies(
     active_only: bool = False,
 ) -> list[SLAPolicyResponse]:
     """List all SLA policies."""
-    query = select(SLAPolicy).where(SLAPolicy.organization_id == org_id).order_by(SLAPolicy.is_default.desc(), SLAPolicy.name)
+    query = (
+        select(SLAPolicy)
+        .where(SLAPolicy.organization_id == org_id)
+        .order_by(SLAPolicy.is_default.desc(), SLAPolicy.name)
+    )
 
     if active_only:
-        query = query.where(SLAPolicy.is_active == True)
+        query = query.where(SLAPolicy.is_active.is_(True))
 
     result = await db.execute(query)
     policies = result.scalars().all()
@@ -176,7 +180,9 @@ async def get_policy(
 ) -> SLAPolicyResponse:
     """Get a specific SLA policy."""
     result = await db.execute(
-        select(SLAPolicy).where(and_(SLAPolicy.id == policy_id, SLAPolicy.organization_id == org_id))
+        select(SLAPolicy).where(
+            and_(SLAPolicy.id == policy_id, SLAPolicy.organization_id == org_id)
+        )
     )
     policy = result.scalar_one_or_none()
     if not policy:
@@ -195,9 +201,21 @@ async def create_policy(
     # If setting as default, unset other defaults
     if policy.is_default:
         await db.execute(
-            select(SLAPolicy).where(and_(SLAPolicy.is_default == True, SLAPolicy.organization_id == analyst.organization_id))
+            select(SLAPolicy).where(
+                and_(
+                    SLAPolicy.is_default.is_(True),
+                    SLAPolicy.organization_id == analyst.organization_id,
+                )
+            )
         )
-        result = await db.execute(select(SLAPolicy).where(and_(SLAPolicy.is_default == True, SLAPolicy.organization_id == analyst.organization_id)))
+        result = await db.execute(
+            select(SLAPolicy).where(
+                and_(
+                    SLAPolicy.is_default.is_(True),
+                    SLAPolicy.organization_id == analyst.organization_id,
+                )
+            )
+        )
         for existing in result.scalars():
             existing.is_default = False
 
@@ -234,7 +252,9 @@ async def update_policy(
 ) -> SLAPolicyResponse:
     """Update an SLA policy. Requires analyst role."""
     result = await db.execute(
-        select(SLAPolicy).where(and_(SLAPolicy.id == policy_id, SLAPolicy.organization_id == analyst.organization_id))
+        select(SLAPolicy).where(
+            and_(SLAPolicy.id == policy_id, SLAPolicy.organization_id == analyst.organization_id)
+        )
     )
     policy = result.scalar_one_or_none()
     if not policy:
@@ -244,7 +264,11 @@ async def update_policy(
     if update.is_default:
         result = await db.execute(
             select(SLAPolicy).where(
-                and_(SLAPolicy.is_default == True, SLAPolicy.id != policy_id, SLAPolicy.organization_id == analyst.organization_id)
+                and_(
+                    SLAPolicy.is_default.is_(True),
+                    SLAPolicy.id != policy_id,
+                    SLAPolicy.organization_id == analyst.organization_id,
+                )
             )
         )
         for existing in result.scalars():
@@ -267,7 +291,9 @@ async def delete_policy(
 ) -> dict[str, str]:
     """Delete an SLA policy. Requires analyst role."""
     result = await db.execute(
-        select(SLAPolicy).where(and_(SLAPolicy.id == policy_id, SLAPolicy.organization_id == analyst.organization_id))
+        select(SLAPolicy).where(
+            and_(SLAPolicy.id == policy_id, SLAPolicy.organization_id == analyst.organization_id)
+        )
     )
     policy = result.scalar_one_or_none()
     if not policy:
@@ -285,8 +311,8 @@ async def list_metrics(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    severity: Optional[str] = None,
-    status: Optional[SLAStatus] = None,
+    severity: str | None = None,
+    status: SLAStatus | None = None,
     days: int = 7,
     page: int = 1,
     page_size: int = 50,
@@ -294,15 +320,15 @@ async def list_metrics(
     """List SLA metrics with filtering."""
     since = datetime.utcnow() - timedelta(days=days)
 
-    query = select(SLAMetric).where(and_(SLAMetric.created_at >= since, SLAMetric.organization_id == org_id))
+    query = select(SLAMetric).where(
+        and_(SLAMetric.created_at >= since, SLAMetric.organization_id == org_id)
+    )
 
     if severity:
         query = query.where(SLAMetric.severity == severity.upper())
 
     if status:
-        query = query.where(
-            (SLAMetric.ack_status == status) | (SLAMetric.resolve_status == status)
-        )
+        query = query.where((SLAMetric.ack_status == status) | (SLAMetric.resolve_status == status))
 
     # Get total count
     count_query = select(func.count()).select_from(query.subquery())
@@ -333,7 +359,9 @@ async def get_alert_metric(
 ) -> SLAMetricResponse:
     """Get SLA metric for a specific alert."""
     result = await db.execute(
-        select(SLAMetric).where(and_(SLAMetric.alert_id == alert_id, SLAMetric.organization_id == org_id))
+        select(SLAMetric).where(
+            and_(SLAMetric.alert_id == alert_id, SLAMetric.organization_id == org_id)
+        )
     )
     metric = result.scalar_one_or_none()
     if not metric:
@@ -358,7 +386,11 @@ async def track_alert_sla(
     if rule_id:
         result = await db.execute(
             select(SLAPolicy).where(
-                and_(SLAPolicy.is_active == True, SLAPolicy.rule_ids.contains([rule_id]), SLAPolicy.organization_id == analyst.organization_id)
+                and_(
+                    SLAPolicy.is_active.is_(True),
+                    SLAPolicy.rule_ids.contains([rule_id]),
+                    SLAPolicy.organization_id == analyst.organization_id,
+                )
             )
         )
         policy = result.scalar_one_or_none()
@@ -369,7 +401,11 @@ async def track_alert_sla(
     if not policy:
         result = await db.execute(
             select(SLAPolicy).where(
-                and_(SLAPolicy.is_active == True, SLAPolicy.is_default == True, SLAPolicy.organization_id == analyst.organization_id)
+                and_(
+                    SLAPolicy.is_active.is_(True),
+                    SLAPolicy.is_default.is_(True),
+                    SLAPolicy.organization_id == analyst.organization_id,
+                )
             )
         )
         policy = result.scalar_one_or_none()
@@ -384,7 +420,11 @@ async def track_alert_sla(
 
     # Check if metric already exists
     result = await db.execute(
-        select(SLAMetric).where(and_(SLAMetric.alert_id == alert_id, SLAMetric.organization_id == analyst.organization_id))
+        select(SLAMetric).where(
+            and_(
+                SLAMetric.alert_id == alert_id, SLAMetric.organization_id == analyst.organization_id
+            )
+        )
     )
     metric = result.scalar_one_or_none()
 
@@ -420,7 +460,11 @@ async def acknowledge_alert(
 ) -> SLAMetricResponse:
     """Record acknowledgment time for an alert."""
     result = await db.execute(
-        select(SLAMetric).where(and_(SLAMetric.alert_id == alert_id, SLAMetric.organization_id == analyst.organization_id))
+        select(SLAMetric).where(
+            and_(
+                SLAMetric.alert_id == alert_id, SLAMetric.organization_id == analyst.organization_id
+            )
+        )
     )
     metric = result.scalar_one_or_none()
     if not metric:
@@ -456,7 +500,11 @@ async def resolve_alert(
 ) -> SLAMetricResponse:
     """Record resolution time for an alert."""
     result = await db.execute(
-        select(SLAMetric).where(and_(SLAMetric.alert_id == alert_id, SLAMetric.organization_id == analyst.organization_id))
+        select(SLAMetric).where(
+            and_(
+                SLAMetric.alert_id == alert_id, SLAMetric.organization_id == analyst.organization_id
+            )
+        )
     )
     metric = result.scalar_one_or_none()
     if not metric:
@@ -496,7 +544,9 @@ async def get_sla_dashboard(
 
     # Get all metrics in the time range
     result = await db.execute(
-        select(SLAMetric).where(and_(SLAMetric.created_at >= since, SLAMetric.organization_id == org_id))
+        select(SLAMetric).where(
+            and_(SLAMetric.created_at >= since, SLAMetric.organization_id == org_id)
+        )
     )
     metrics = result.scalars().all()
 
@@ -514,12 +564,26 @@ async def get_sla_dashboard(
             )
 
         total = len(metric_list)
-        on_track = sum(1 for m in metric_list if m.ack_status == SLAStatus.ON_TRACK and m.resolve_status == SLAStatus.ON_TRACK)
-        at_risk = sum(1 for m in metric_list if m.ack_status == SLAStatus.AT_RISK or m.resolve_status == SLAStatus.AT_RISK)
-        breached = sum(1 for m in metric_list if m.ack_status == SLAStatus.BREACHED or m.resolve_status == SLAStatus.BREACHED)
+        on_track = sum(
+            1
+            for m in metric_list
+            if m.ack_status == SLAStatus.ON_TRACK and m.resolve_status == SLAStatus.ON_TRACK
+        )
+        at_risk = sum(
+            1
+            for m in metric_list
+            if m.ack_status == SLAStatus.AT_RISK or m.resolve_status == SLAStatus.AT_RISK
+        )
+        breached = sum(
+            1
+            for m in metric_list
+            if m.ack_status == SLAStatus.BREACHED or m.resolve_status == SLAStatus.BREACHED
+        )
 
         ack_times = [m.ack_time_minutes for m in metric_list if m.ack_time_minutes is not None]
-        resolve_times = [m.resolve_time_minutes for m in metric_list if m.resolve_time_minutes is not None]
+        resolve_times = [
+            m.resolve_time_minutes for m in metric_list if m.resolve_time_minutes is not None
+        ]
 
         avg_ack = sum(ack_times) / len(ack_times) if ack_times else None
         avg_resolve = sum(resolve_times) / len(resolve_times) if resolve_times else None
@@ -535,7 +599,9 @@ async def get_sla_dashboard(
             avg_ack_time_minutes=round(avg_ack, 1) if avg_ack else None,
             avg_resolve_time_minutes=round(avg_resolve, 1) if avg_resolve else None,
             ack_compliance_rate=round((ack_compliant / total) * 100, 1) if total > 0 else 100.0,
-            resolve_compliance_rate=round((resolve_compliant / total) * 100, 1) if total > 0 else 100.0,
+            resolve_compliance_rate=round((resolve_compliant / total) * 100, 1)
+            if total > 0
+            else 100.0,
         )
 
     # Calculate overall summary
@@ -548,7 +614,11 @@ async def get_sla_dashboard(
         by_severity[severity] = calculate_summary(severity_metrics)
 
     # Get recent breaches
-    breached_metrics = [m for m in metrics if m.ack_status == SLAStatus.BREACHED or m.resolve_status == SLAStatus.BREACHED]
+    breached_metrics = [
+        m
+        for m in metrics
+        if m.ack_status == SLAStatus.BREACHED or m.resolve_status == SLAStatus.BREACHED
+    ]
     breached_metrics.sort(key=lambda m: m.created_at, reverse=True)
     recent_breaches = [format_metric(m) for m in breached_metrics[:10]]
 
@@ -569,7 +639,12 @@ async def update_sla_statuses(
 
     # Get all unresolved metrics for this organization
     result = await db.execute(
-        select(SLAMetric).where(and_(SLAMetric.resolved_at.is_(None), SLAMetric.organization_id == analyst.organization_id))
+        select(SLAMetric).where(
+            and_(
+                SLAMetric.resolved_at.is_(None),
+                SLAMetric.organization_id == analyst.organization_id,
+            )
+        )
     )
     metrics = result.scalars().all()
 

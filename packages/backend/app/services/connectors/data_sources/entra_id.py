@@ -8,15 +8,15 @@ protection alerts and risky user/sign-in detections.
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
 
 
@@ -33,7 +33,7 @@ class EntraIDConnector(DataSourceConnector):
     Uses Microsoft Graph Identity Protection API.
     """
 
-    _access_token: Optional[str] = None
+    _access_token: str | None = None
     _token_expires_at: float = 0
 
     @classmethod
@@ -176,8 +176,8 @@ class EntraIDConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch risk detections from Microsoft Entra ID."""
         try:
             token = await self._get_access_token()
@@ -200,7 +200,11 @@ class EntraIDConnector(DataSourceConnector):
                 "$orderby": "detectedDateTime asc",
             }
 
-            url = cursor if cursor else "https://graph.microsoft.com/v1.0/identityProtection/riskDetections"
+            url = (
+                cursor
+                if cursor
+                else "https://graph.microsoft.com/v1.0/identityProtection/riskDetections"
+            )
 
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.get(
@@ -210,7 +214,9 @@ class EntraIDConnector(DataSourceConnector):
                 )
 
                 if response.status_code != 200:
-                    raise Exception(f"Failed to fetch risk detections: {response.status_code} - {response.text}")
+                    raise Exception(
+                        f"Failed to fetch risk detections: {response.status_code} - {response.text}"
+                    )
 
                 data = response.json()
 
@@ -234,14 +240,18 @@ class EntraIDConnector(DataSourceConnector):
         created_at = datetime.utcnow()
         if raw_alert.get("detectedDateTime"):
             try:
-                created_at = datetime.fromisoformat(raw_alert["detectedDateTime"].replace("Z", "+00:00"))
+                created_at = datetime.fromisoformat(
+                    raw_alert["detectedDateTime"].replace("Z", "+00:00")
+                )
             except (ValueError, TypeError):
                 pass
 
         last_updated = None
         if raw_alert.get("lastUpdatedDateTime"):
             try:
-                last_updated = datetime.fromisoformat(raw_alert["lastUpdatedDateTime"].replace("Z", "+00:00"))
+                last_updated = datetime.fromisoformat(
+                    raw_alert["lastUpdatedDateTime"].replace("Z", "+00:00")
+                )
             except (ValueError, TypeError):
                 pass
 
@@ -263,7 +273,10 @@ class EntraIDConnector(DataSourceConnector):
 
         location = raw_alert.get("location", {})
         if location:
-            loc_str = f"{location.get('city', '')}, {location.get('state', '')}, {location.get('countryOrRegion', '')}".strip(", ")
+            loc_str = (
+                f"{location.get('city', '')}, {location.get('state', '')}, "
+                f"{location.get('countryOrRegion', '')}"
+            ).strip(", ")
             if loc_str:
                 description_parts.append(f"Location: {loc_str}")
 
@@ -337,16 +350,25 @@ class EntraIDConnector(DataSourceConnector):
             "unfamiliarFeatures": (["TA0001"], ["T1078"]),  # Initial Access, Valid Accounts
             "malwareInfectedIPAddress": (["TA0001"], ["T1078"]),
             "suspiciousIPAddress": (["TA0001"], ["T1078"]),
-            "leakedCredentials": (["TA0006"], ["T1552"]),  # Credential Access, Unsecured Credentials
+            "leakedCredentials": (
+                ["TA0006"],
+                ["T1552"],
+            ),  # Credential Access, Unsecured Credentials
             "passwordSpray": (["TA0006"], ["T1110.003"]),  # Credential Access, Password Spraying
             "impossibleTravel": (["TA0001"], ["T1078"]),  # Initial Access, Valid Accounts
             "newCountry": (["TA0001"], ["T1078"]),
-            "anomalousToken": (["TA0006"], ["T1528"]),  # Credential Access, Steal Application Access Token
+            "anomalousToken": (
+                ["TA0006"],
+                ["T1528"],
+            ),  # Credential Access, Steal Application Access Token
             "tokenIssuerAnomaly": (["TA0006"], ["T1606"]),  # Forge Web Credentials
             "suspiciousBrowser": (["TA0005"], ["T1036"]),  # Defense Evasion, Masquerading
             "riskyIPAddress": (["TA0001"], ["T1078"]),
             "mcasImpossibleTravel": (["TA0001"], ["T1078"]),
-            "mcasSuspiciousInboxManipulationRules": (["TA0003"], ["T1137"]),  # Persistence, Office Application Startup
+            "mcasSuspiciousInboxManipulationRules": (
+                ["TA0003"],
+                ["T1137"],
+            ),  # Persistence, Office Application Startup
         }
 
         return mitre_map.get(risk_type, ([], []))

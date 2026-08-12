@@ -1,10 +1,9 @@
 import logging
-from typing import Optional
 
 import httpx
 
-from app.services.integrations.base import ActionConnector, ActionResult
 from app.config import settings
+from app.services.integrations.base import ActionConnector, ActionResult
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,9 @@ class FirewallConnector(ActionConnector):
 
         action = config.get("action", "block")  # block or unblock
         duration = config.get("duration", 3600)  # Default 1 hour
-        comment = config.get("comment", f"Blocked by Panther alert: {alert_data.get('id', 'unknown')}")
+        comment = config.get(
+            "comment", f"Blocked by Panther alert: {alert_data.get('id', 'unknown')}"
+        )
 
         try:
             payload = {
@@ -71,14 +72,14 @@ class FirewallConnector(ActionConnector):
             logger.error(f"Firewall error: {e}")
             return ActionResult(success=False, message="Firewall request failed", error=str(e))
 
-    def validate_config(self, config: dict) -> tuple[bool, Optional[str]]:
+    def validate_config(self, config: dict) -> tuple[bool, str | None]:
         if not (config.get("url") or settings.firewall_api_url):
             return False, "Firewall API URL is required"
         if not (config.get("api_token") or settings.firewall_api_token):
             return False, "Firewall API token is required"
         return True, None
 
-    def _extract_ip(self, alert_data: dict) -> Optional[str]:
+    def _extract_ip(self, alert_data: dict) -> str | None:
         """Try to extract IP address from alert data."""
         for field in ["ip_address", "source_ip", "src_ip", "attacker_ip", "remote_ip"]:
             if field in alert_data:

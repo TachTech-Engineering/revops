@@ -12,9 +12,9 @@ import httpx
 from app.db.models import ConnectorCategory
 from app.services.connectors.base import (
     ActionConnector,
-    ConnectorMetadata,
-    ConnectionTestResult,
     ActionResult,
+    ConnectionTestResult,
+    ConnectorMetadata,
 )
 
 
@@ -207,7 +207,9 @@ class TeamsActionConnector(ActionConnector):
                 error=response.text,
             )
 
-    async def _send_adaptive_card(self, config: dict[str, Any], context: dict[str, Any]) -> ActionResult:
+    async def _send_adaptive_card(
+        self, config: dict[str, Any], context: dict[str, Any]
+    ) -> ActionResult:
         """Send an adaptive card to Teams."""
         webhook_url = self.config.get("webhook_url")
         if not webhook_url:

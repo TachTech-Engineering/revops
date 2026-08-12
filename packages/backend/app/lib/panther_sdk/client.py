@@ -17,7 +17,7 @@ from .api.rest import (
     RulesResource,
     UsersResource,
 )
-from .config import PantherConfig, load_config
+from .config import load_config
 
 
 class PantherClient:
@@ -97,7 +97,7 @@ class PantherClient:
         self._log_sources: LogSourcesResource | None = None
         self._globals: GlobalsResource | None = None
 
-    def __enter__(self) -> "PantherClient":
+    def __enter__(self) -> PantherClient:
         """Enter context manager."""
         return self
 
@@ -105,7 +105,7 @@ class PantherClient:
         """Exit context manager and close connections."""
         self.close()
 
-    async def __aenter__(self) -> "PantherClient":
+    async def __aenter__(self) -> PantherClient:
         """Enter async context manager."""
         return self
 

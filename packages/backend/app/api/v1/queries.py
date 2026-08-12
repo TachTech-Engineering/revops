@@ -1,6 +1,6 @@
-from typing import Any, Optional
+from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.api.v1.deps import PantherServiceDep
@@ -10,7 +10,7 @@ router = APIRouter()
 
 class QueryRequest(BaseModel):
     sql: str
-    database: Optional[str] = None
+    database: str | None = None
     timeout: float = 300.0
 
 
@@ -20,9 +20,9 @@ class QueryResponse(BaseModel):
     sql: str
     results: list[dict[str, Any]] = []
     columns: list[dict[str, str]] = []
-    rowsScanned: Optional[int] = None
-    bytesScanned: Optional[int] = None
-    errorMessage: Optional[str] = None
+    rowsScanned: int | None = None
+    bytesScanned: int | None = None
+    errorMessage: str | None = None
 
 
 @router.post("/execute")

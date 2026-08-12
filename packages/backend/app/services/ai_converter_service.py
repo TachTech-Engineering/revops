@@ -5,22 +5,23 @@ understanding context, handling edge cases, and generating accurate code.
 """
 
 import logging
-from typing import Optional
-from enum import Enum
+from enum import StrEnum
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-class LLMProvider(str, Enum):
+class LLMProvider(StrEnum):
     """Supported LLM providers."""
+
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
 
 
-class ConversionFormat(str, Enum):
+class ConversionFormat(StrEnum):
     """Supported conversion formats."""
+
     SIGMA = "sigma"
     SPL = "spl"
     YARAL = "yaral"
@@ -45,7 +46,8 @@ FORMAT_DESCRIPTIONS = {
 }
 
 
-CONVERSION_SYSTEM_PROMPT = """You are an expert security detection engineer specializing in converting detection rules between different SIEM platforms.
+CONVERSION_SYSTEM_PROMPT = """You are an expert security detection engineer specializing in
+converting detection rules between different SIEM platforms.
 
 Your task is to convert detection rules accurately while:
 1. Preserving the detection logic and intent
@@ -88,7 +90,8 @@ class AIConverterService:
         """Lazy initialization of Anthropic client."""
         if self._anthropic_client is None:
             import anthropic
-            api_key = getattr(settings, 'anthropic_api_key', None)
+
+            api_key = getattr(settings, "anthropic_api_key", None)
             if not api_key:
                 raise ValueError("ANTHROPIC_API_KEY not configured")
             self._anthropic_client = anthropic.Anthropic(api_key=api_key)
@@ -98,13 +101,16 @@ class AIConverterService:
         """Lazy initialization of OpenAI client."""
         if self._openai_client is None:
             import openai
-            api_key = getattr(settings, 'openai_api_key', None)
+
+            api_key = getattr(settings, "openai_api_key", None)
             if not api_key:
                 raise ValueError("OPENAI_API_KEY not configured")
             self._openai_client = openai.OpenAI(api_key=api_key)
         return self._openai_client
 
-    def get_available_providers(self, org_has_anthropic: bool = False, org_has_openai: bool = False) -> list[dict]:
+    def get_available_providers(
+        self, org_has_anthropic: bool = False, org_has_openai: bool = False
+    ) -> list[dict]:
         """Get list of available LLM providers based on configured API keys.
 
         Args:
@@ -112,20 +118,24 @@ class AIConverterService:
             org_has_openai: Whether the organization has configured an OpenAI key
         """
         providers = []
-        if getattr(settings, 'anthropic_api_key', None) or org_has_anthropic:
-            providers.append({
-                "id": LLMProvider.ANTHROPIC.value,
-                "name": "Anthropic",
-                "model": ANTHROPIC_MODEL,
-                "description": "Anthropic Sonnet 4 - excellent at code generation",
-            })
-        if getattr(settings, 'openai_api_key', None) or org_has_openai:
-            providers.append({
-                "id": LLMProvider.OPENAI.value,
-                "name": "OpenAI",
-                "model": OPENAI_MODEL,
-                "description": "OpenAI GPT-4o - fast and capable",
-            })
+        if getattr(settings, "anthropic_api_key", None) or org_has_anthropic:
+            providers.append(
+                {
+                    "id": LLMProvider.ANTHROPIC.value,
+                    "name": "Anthropic",
+                    "model": ANTHROPIC_MODEL,
+                    "description": "Anthropic Sonnet 4 - excellent at code generation",
+                }
+            )
+        if getattr(settings, "openai_api_key", None) or org_has_openai:
+            providers.append(
+                {
+                    "id": LLMProvider.OPENAI.value,
+                    "name": "OpenAI",
+                    "model": OPENAI_MODEL,
+                    "description": "OpenAI GPT-4o - fast and capable",
+                }
+            )
         return providers
 
     def _call_llm(
@@ -134,9 +144,9 @@ class AIConverterService:
         system_prompt: str,
         user_prompt: str,
         max_tokens: int = 4096,
-        messages: Optional[list[dict]] = None,
-        api_key: Optional[str] = None,
-        model_override: Optional[str] = None,
+        messages: list[dict] | None = None,
+        api_key: str | None = None,
+        model_override: str | None = None,
     ) -> dict | str:
         """
         Call the specified LLM provider.
@@ -156,6 +166,7 @@ class AIConverterService:
         """
         if provider == LLMProvider.ANTHROPIC:
             import anthropic
+
             try:
                 # Use provided API key or fall back to cached client
                 if api_key:
@@ -172,10 +183,7 @@ class AIConverterService:
                     msg_list = [{"role": "user", "content": user_prompt}]
 
                 response = client.messages.create(
-                    model=model,
-                    max_tokens=max_tokens,
-                    system=system_prompt,
-                    messages=msg_list
+                    model=model, max_tokens=max_tokens, system=system_prompt, messages=msg_list
                 )
                 content = response.content[0].text.strip()
 
@@ -190,6 +198,7 @@ class AIConverterService:
 
         elif provider == LLMProvider.OPENAI:
             import openai
+
             try:
                 # Use provided API key or fall back to cached client
                 if api_key:
@@ -205,13 +214,11 @@ class AIConverterService:
                 else:
                     msg_list = [
                         {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
+                        {"role": "user", "content": user_prompt},
                     ]
 
                 response = client.chat.completions.create(
-                    model=model,
-                    max_tokens=max_tokens,
-                    messages=msg_list
+                    model=model, max_tokens=max_tokens, messages=msg_list
                 )
                 content = response.choices[0].message.content.strip()
 
@@ -232,10 +239,10 @@ class AIConverterService:
         source_code: str,
         source_format: ConversionFormat,
         target_format: ConversionFormat,
-        context: Optional[str] = None,
+        context: str | None = None,
         provider: LLMProvider = LLMProvider.ANTHROPIC,
-        api_key: Optional[str] = None,
-        model_override: Optional[str] = None,
+        api_key: str | None = None,
+        model_override: str | None = None,
     ) -> dict:
         """
         Convert a detection rule using AI.
@@ -259,7 +266,9 @@ class AIConverterService:
             source_code, source_format, target_format, source_desc, target_desc, context
         )
 
-        model = model_override or (ANTHROPIC_MODEL if provider == LLMProvider.ANTHROPIC else OPENAI_MODEL)
+        model = model_override or (
+            ANTHROPIC_MODEL if provider == LLMProvider.ANTHROPIC else OPENAI_MODEL
+        )
 
         try:
             converted_code = self._call_llm(
@@ -307,7 +316,7 @@ class AIConverterService:
         target_format: ConversionFormat,
         source_desc: str,
         target_desc: str,
-        context: Optional[str],
+        context: str | None,
     ) -> str:
         """Build the conversion prompt."""
         prompt = f"""Convert the following detection rule:
@@ -389,8 +398,8 @@ class AIConverterService:
         source_code: str,
         source_format: ConversionFormat,
         provider: LLMProvider = LLMProvider.ANTHROPIC,
-        api_key: Optional[str] = None,
-        model_override: Optional[str] = None,
+        api_key: str | None = None,
+        model_override: str | None = None,
     ) -> dict:
         """Get an explanation of what a detection rule does."""
         source_desc = FORMAT_DESCRIPTIONS.get(source_format, source_format.value)
@@ -410,12 +419,16 @@ Include:
 
 Provide a concise but complete explanation."""
 
-        model = model_override or (ANTHROPIC_MODEL if provider == LLMProvider.ANTHROPIC else OPENAI_MODEL)
+        model = model_override or (
+            ANTHROPIC_MODEL if provider == LLMProvider.ANTHROPIC else OPENAI_MODEL
+        )
 
         try:
             explanation = self._call_llm(
                 provider=provider,
-                system_prompt="You are a security detection expert who explains detection rules clearly.",
+                system_prompt=(
+                    "You are a security detection expert who explains detection rules clearly."
+                ),
                 user_prompt=prompt,
                 api_key=api_key,
                 model_override=model_override,
@@ -442,8 +455,8 @@ Provide a concise but complete explanation."""
         source_code: str,
         source_format: ConversionFormat,
         provider: LLMProvider = LLMProvider.ANTHROPIC,
-        api_key: Optional[str] = None,
-        model_override: Optional[str] = None,
+        api_key: str | None = None,
+        model_override: str | None = None,
     ) -> dict:
         """Suggest improvements for a detection rule."""
         source_desc = FORMAT_DESCRIPTIONS.get(source_format, source_format.value)
@@ -464,12 +477,17 @@ Provide suggestions for:
 
 Be specific and actionable."""
 
-        model = model_override or (ANTHROPIC_MODEL if provider == LLMProvider.ANTHROPIC else OPENAI_MODEL)
+        model = model_override or (
+            ANTHROPIC_MODEL if provider == LLMProvider.ANTHROPIC else OPENAI_MODEL
+        )
 
         try:
             suggestions = self._call_llm(
                 provider=provider,
-                system_prompt="You are a security detection expert who provides actionable improvement suggestions.",
+                system_prompt=(
+                    "You are a security detection expert "
+                    "who provides actionable improvement suggestions."
+                ),
                 api_key=api_key,
                 model_override=model_override,
                 user_prompt=prompt,

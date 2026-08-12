@@ -9,18 +9,18 @@ import logging
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
-logger = logging.getLogger(__name__)
-
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CloudflareConnector(DataSourceConnector):
@@ -43,7 +43,8 @@ class CloudflareConnector(DataSourceConnector):
             connector_type="cloudflare",
             category=ConnectorCategory.DATA_SOURCE,
             display_name="Cloudflare",
-            description="Cloudflare - WAF, Bot Management, DDoS Protection, and Zero Trust security events",
+            description="Cloudflare - WAF, Bot Management, DDoS Protection, "
+            "and Zero Trust security events",
             icon="cloudflare",
             config_schema={
                 "type": "object",
@@ -81,7 +82,14 @@ class CloudflareConnector(DataSourceConnector):
                         "description": "Only fetch events with these actions",
                         "items": {
                             "type": "string",
-                            "enum": ["block", "challenge", "js_challenge", "managed_challenge", "log", "bypass"],
+                            "enum": [
+                                "block",
+                                "challenge",
+                                "js_challenge",
+                                "managed_challenge",
+                                "log",
+                                "bypass",
+                            ],
                         },
                         "default": ["block", "challenge", "js_challenge", "managed_challenge"],
                     },
@@ -94,7 +102,8 @@ class CloudflareConnector(DataSourceConnector):
                     "api_token": {
                         "type": "string",
                         "title": "API Token",
-                        "description": "Cloudflare API token with Analytics and Firewall read permissions",
+                        "description": "Cloudflare API token with Analytics and Firewall "
+                        "read permissions",
                         "format": "password",
                     },
                 },
@@ -118,15 +127,22 @@ class CloudflareConnector(DataSourceConnector):
 
             # Debug logging
             logger.info(f"Cloudflare test_connection: account_id={account_id}")
-            logger.info(f"Cloudflare test_connection: credentials keys={list(self.credentials.keys())}")
-            logger.info(f"Cloudflare test_connection: api_token present={bool(api_token)}, length={len(api_token) if api_token else 0}")
+            logger.info(
+                f"Cloudflare test_connection: credentials keys={list(self.credentials.keys())}"
+            )
+            logger.info(
+                f"Cloudflare test_connection: api_token present={bool(api_token)}, "
+                f"length={len(api_token) if api_token else 0}"
+            )
             if api_token:
                 # Log masked token for debugging (first 4 and last 4 chars)
                 masked = f"{api_token[:4]}...{api_token[-4:]}" if len(api_token) > 8 else "***"
                 logger.info(f"Cloudflare test_connection: api_token masked={masked}")
                 # Check for whitespace issues
                 if api_token != api_token.strip():
-                    logger.warning("Cloudflare test_connection: api_token has leading/trailing whitespace!")
+                    logger.warning(
+                        "Cloudflare test_connection: api_token has leading/trailing whitespace!"
+                    )
                     api_token = api_token.strip()
 
             if not api_token:
@@ -139,8 +155,15 @@ class CloudflareConnector(DataSourceConnector):
                 # Test by verifying token - use account-specific endpoint
                 headers = self._get_headers()
                 # Log sanitized headers
-                logger.info(f"Cloudflare request headers (sanitized): Authorization=Bearer {'*' * 20}, Content-Type={headers.get('Content-Type')}")
-                verify_url = f"{self.BASE_URL}/accounts/{account_id}/tokens/verify" if account_id else f"{self.BASE_URL}/user/tokens/verify"
+                logger.info(
+                    f"Cloudflare request headers (sanitized): Authorization=Bearer {'*' * 20}, "
+                    f"Content-Type={headers.get('Content-Type')}"
+                )
+                verify_url = (
+                    f"{self.BASE_URL}/accounts/{account_id}/tokens/verify"
+                    if account_id
+                    else f"{self.BASE_URL}/user/tokens/verify"
+                )
                 logger.info(f"Cloudflare verify URL: {verify_url}")
                 response = await client.get(
                     verify_url,
@@ -200,13 +223,15 @@ class CloudflareConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch security events from Cloudflare using GraphQL Analytics API."""
         try:
             account_id = self.config.get("account_id")
-            zone_ids = self.config.get("zone_ids", [])
-            action_filter = self.config.get("action_filter", ["block", "challenge", "js_challenge", "managed_challenge"])
+            self.config.get("zone_ids", [])
+            action_filter = self.config.get(
+                "action_filter", ["block", "challenge", "js_challenge", "managed_challenge"]
+            )
 
             # Build GraphQL query for firewall events
             since_str = since.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -262,7 +287,9 @@ class CloudflareConnector(DataSourceConnector):
                 )
 
                 if response.status_code != 200:
-                    raise Exception(f"GraphQL request failed: {response.status_code} - {response.text}")
+                    raise Exception(
+                        f"GraphQL request failed: {response.status_code} - {response.text}"
+                    )
 
                 data = response.json()
 
@@ -313,9 +340,14 @@ class CloudflareConnector(DataSourceConnector):
         description_parts.append(f"Source: {source}")
 
         if raw_alert.get("ruleName"):
-            description_parts.append(f"Rule: {raw_alert['ruleName']} ({raw_alert.get('ruleId', 'N/A')})")
+            description_parts.append(
+                f"Rule: {raw_alert['ruleName']} ({raw_alert.get('ruleId', 'N/A')})"
+            )
 
-        description_parts.append(f"\nRequest: {raw_alert.get('clientRequestHTTPMethodName', 'GET')} {raw_alert.get('clientRequestPath', '/')}")
+        description_parts.append(
+            f"\nRequest: {raw_alert.get('clientRequestHTTPMethodName', 'GET')} "
+            f"{raw_alert.get('clientRequestPath', '/')}"
+        )
         if raw_alert.get("clientRequestQuery"):
             description_parts.append(f"Query: {raw_alert['clientRequestQuery'][:200]}")
 
@@ -392,7 +424,10 @@ class CloudflareConnector(DataSourceConnector):
         source_lower = source.lower()
 
         if "waf" in source_lower or "firewall" in source_lower:
-            return (["TA0001", "TA0043"], ["T1190", "T1595"])  # Initial Access, Recon; Exploit Public-Facing, Active Scanning
+            return (
+                ["TA0001", "TA0043"],
+                ["T1190", "T1595"],
+            )  # Initial Access, Recon; Exploit Public-Facing, Active Scanning
 
         if "bot" in source_lower:
             return (["TA0043"], ["T1595.002"])  # Reconnaissance, Vulnerability Scanning

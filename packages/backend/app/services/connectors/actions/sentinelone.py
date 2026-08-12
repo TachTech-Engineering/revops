@@ -12,9 +12,9 @@ import httpx
 from app.db.models import ConnectorCategory
 from app.services.connectors.base import (
     ActionConnector,
-    ConnectorMetadata,
-    ConnectionTestResult,
     ActionResult,
+    ConnectionTestResult,
+    ConnectorMetadata,
 )
 
 
@@ -228,7 +228,10 @@ class SentinelOneActionConnector(ActionConnector):
             data = response.json()
             return ActionResult(
                 success=True,
-                message=f"Disconnected {data.get('data', {}).get('affected', 0)} agent(s) from network",
+                message=(
+                    f"Disconnected {data.get('data', {}).get('affected', 0)} "
+                    "agent(s) from network"
+                ),
                 output={"agent_ids": agent_ids, "affected": data.get("data", {}).get("affected")},
             )
         else:
@@ -253,7 +256,10 @@ class SentinelOneActionConnector(ActionConnector):
             data = response.json()
             return ActionResult(
                 success=True,
-                message=f"Reconnected {data.get('data', {}).get('affected', 0)} agent(s) to network",
+                message=(
+                    f"Reconnected {data.get('data', {}).get('affected', 0)} "
+                    "agent(s) to network"
+                ),
                 output={"agent_ids": agent_ids, "affected": data.get("data", {}).get("affected")},
             )
         else:
@@ -336,7 +342,10 @@ class SentinelOneActionConnector(ActionConnector):
             data = response.json()
             return ActionResult(
                 success=True,
-                message=f"Mitigated {data.get('data', {}).get('affected', 0)} threat(s) with action: {mitigation_action}",
+                message=(
+                    f"Mitigated {data.get('data', {}).get('affected', 0)} "
+                    f"threat(s) with action: {mitigation_action}"
+                ),
                 output={
                     "threat_ids": threat_ids,
                     "action": mitigation_action,

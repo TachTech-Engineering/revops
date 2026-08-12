@@ -2,19 +2,19 @@
 LLM Service for AI-powered alert and incident summarization.
 Supports both OpenAI and Anthropic providers.
 """
+
 import json
-from datetime import datetime, timedelta
-from typing import Optional
+import logging
 import uuid
+from datetime import datetime, timedelta
 
 import httpx
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db.models import AISummaryCache, LLMProvider, OrganizationAPIKeys
+from app.db.models import AISummaryCache, LLMProvider
 from app.services.encryption_service import decrypt_credential
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,8 @@ class LLMService:
     """Service for LLM-powered summarization."""
 
     # Prompt templates
-    ALERT_SUMMARY_PROMPT = """Analyze the following security alert and provide a concise summary for a security analyst.
+    ALERT_SUMMARY_PROMPT = """Analyze the following security alert and provide a concise
+summary for a security analyst.
 
 Alert Data:
 {alert_data}
@@ -36,7 +37,8 @@ Please provide:
 
 Keep the response focused and actionable. Use bullet points where appropriate."""
 
-    INCIDENT_SUMMARY_PROMPT = """Analyze the following security incident containing multiple related alerts and provide an executive summary.
+    INCIDENT_SUMMARY_PROMPT = """Analyze the following security incident containing multiple
+related alerts and provide an executive summary.
 
 Incident Data:
 {incident_data}
@@ -56,7 +58,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
         db: AsyncSession,
         alert_id: str,
         alert_data: dict,
-        provider: Optional[LLMProvider] = None,
+        provider: LLMProvider | None = None,
         force_refresh: bool = False,
     ) -> dict:
         """
@@ -122,7 +124,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
         db: AsyncSession,
         incident_id: str,
         incident_data: dict,
-        provider: Optional[LLMProvider] = None,
+        provider: LLMProvider | None = None,
         force_refresh: bool = False,
     ) -> dict:
         """
@@ -207,7 +209,11 @@ Be concise but thorough. This summary should enable quick decision-making."""
                 json={
                     "model": settings.openai_model,
                     "messages": [
-                        {"role": "system", "content": "You are a security analyst assistant that helps analyze and summarize security alerts and incidents."},
+                        {
+                            "role": "system",
+                            "content": "You are a security analyst assistant that helps "
+                            "analyze and summarize security alerts and incidents.",
+                        },
                         {"role": "user", "content": prompt},
                     ],
                     "max_tokens": 2000,
@@ -250,7 +256,8 @@ Be concise but thorough. This summary should enable quick decision-making."""
                     "messages": [
                         {"role": "user", "content": prompt},
                     ],
-                    "system": "You are a security analyst assistant that helps analyze and summarize security alerts and incidents.",
+                    "system": "You are a security analyst assistant that helps analyze "
+                    "and summarize security alerts and incidents.",
                 },
                 timeout=60.0,
             )
@@ -275,7 +282,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
         db: AsyncSession,
         resource_type: str,
         resource_id: str,
-    ) -> Optional[AISummaryCache]:
+    ) -> AISummaryCache | None:
         """Get a cached summary if it exists and hasn't expired."""
         result = await db.execute(
             select(AISummaryCache).where(
@@ -334,9 +341,19 @@ Be concise but thorough. This summary should enable quick decision-making."""
         """Remove sensitive or unnecessary fields from alert data."""
         # Fields to include in the summary
         include_fields = [
-            "id", "title", "severity", "status", "rule", "createdAt",
-            "description", "detection", "reference", "logTypes",
-            "firstEventMatch", "lastEventMatch", "alertCount",
+            "id",
+            "title",
+            "severity",
+            "status",
+            "rule",
+            "createdAt",
+            "description",
+            "detection",
+            "reference",
+            "logTypes",
+            "firstEventMatch",
+            "lastEventMatch",
+            "alertCount",
         ]
 
         sanitized = {}
@@ -350,7 +367,8 @@ Be concise but thorough. This summary should enable quick decision-making."""
             first_event = data["events"][0] if isinstance(data["events"], list) else data["events"]
             if isinstance(first_event, dict):
                 sanitized["sample_event"] = {
-                    k: v for k, v in list(first_event.items())[:20]  # Limit to 20 fields
+                    k: v
+                    for k, v in list(first_event.items())[:20]  # Limit to 20 fields
                 }
 
         return sanitized
@@ -374,7 +392,9 @@ Be concise but thorough. This summary should enable quick decision-making."""
                 {
                     "title": a.get("title"),
                     "severity": a.get("severity"),
-                    "rule": a.get("rule", {}).get("name") if isinstance(a.get("rule"), dict) else a.get("rule"),
+                    "rule": a.get("rule", {}).get("name")
+                    if isinstance(a.get("rule"), dict)
+                    else a.get("rule"),
                     "createdAt": a.get("createdAt"),
                 }
                 for a in alerts
@@ -382,14 +402,20 @@ Be concise but thorough. This summary should enable quick decision-making."""
 
         return sanitized
 
-    async def cluster_alerts(self, db: AsyncSession, organization_id: uuid.UUID, alerts: list[dict]) -> dict:
+    async def cluster_alerts(
+        self, db: AsyncSession, organization_id: uuid.UUID, alerts: list[dict]
+    ) -> dict:
         """
         Generate a name and narrative summary for a cluster of alerts using org-specific keys.
         """
         import logging
+
         logger = logging.getLogger(__name__)
-        logger.info(f"Generating AI narrative for cluster with {len(alerts)} alerts for org {organization_id}")
-        
+        logger.info(
+            f"Generating AI narrative for cluster with {len(alerts)} alerts "
+            f"for org {organization_id}"
+        )
+
         prompt = f"""Analyze this cluster of related security alerts and provide exactly two lines:
 NAME: [A concise professional name for this cluster, max 6 words]
 STORY: [A one-sentence narrative connecting these events]
@@ -397,11 +423,16 @@ STORY: [A one-sentence narrative connecting these events]
 Alerts:
 {json.dumps(alerts[:10], indent=2)}
 """
-        
+
         try:
             key_data = await self._get_org_api_key(db, organization_id)
             if key_data:
-                result = await self._call_llm_with_key(prompt, LLMProvider(key_data["provider"]), key_data["api_key"], key_data.get("model"))
+                result = await self._call_llm_with_key(
+                    prompt,
+                    LLMProvider(key_data["provider"]),
+                    key_data["api_key"],
+                    key_data.get("model"),
+                )
             else:
                 # Fallback to system key, but check which one is actually configured
                 if settings.anthropic_api_key:
@@ -410,56 +441,53 @@ Alerts:
                     provider = LLMProvider.OPENAI
                 else:
                     raise ValueError("No LLM keys configured (system or org)")
-                
+
                 result = await self._call_llm(prompt, provider)
-            
+
             text = result["summary"].strip()
-            lines = text.split('\n')
-            
+            lines = text.split("\n")
+
             cluster_name = f"Cluster: {alerts[0].get('title')}"
             narrative = f"Automated cluster of {len(alerts)} alerts."
-            
+
             for line in lines:
                 if line.startswith("NAME:"):
                     cluster_name = line.replace("NAME:", "").strip()
                 elif line.startswith("STORY:"):
                     narrative = line.replace("STORY:", "").strip()
-            
+
             return {"name": cluster_name, "narrative": narrative}
         except Exception as e:
             logger.error(f"AI Narrative generation failed: {str(e)}", exc_info=True)
             return {
                 "name": f"Cluster: {alerts[0].get('title', 'Security Events')}",
-                "narrative": f"Automated cluster of {len(alerts)} alerts based on shared entities."
+                "narrative": f"Automated cluster of {len(alerts)} alerts based on shared entities.",
             }
 
-    async def _get_org_api_key(self, db: AsyncSession, organization_id: uuid.UUID) -> Optional[dict]:
+    async def _get_org_api_key(self, db: AsyncSession, organization_id: uuid.UUID) -> dict | None:
         """Fetch and decrypt an active API key for the organization."""
         from app.db import OrganizationAPIKeys
-        from app.services.encryption_service import decrypt_credential
-        
+
         result = await db.execute(
             select(OrganizationAPIKeys).where(
                 and_(
                     OrganizationAPIKeys.organization_id == organization_id,
-                    OrganizationAPIKeys.is_active == True
+                    OrganizationAPIKeys.is_active.is_(True),
                 )
             )
         )
         key_record = result.scalar_one_or_none()
         if not key_record:
             return None
-            
+
         decrypted = decrypt_credential(key_record.api_key_encrypted)
         logger.info(f"Retrieved key for {key_record.provider}. Key starts with: {decrypted[:8]}...")
-        
-        return {
-            "provider": key_record.provider,
-            "api_key": decrypted,
-            "model": key_record.model
-        }
 
-    async def _call_llm_with_key(self, prompt: str, provider: LLMProvider, api_key: str, model: Optional[str] = None) -> dict:
+        return {"provider": key_record.provider, "api_key": decrypted, "model": key_record.model}
+
+    async def _call_llm_with_key(
+        self, prompt: str, provider: LLMProvider, api_key: str, model: str | None = None
+    ) -> dict:
         """Call LLM provider with a specific key."""
         if provider == LLMProvider.OPENAI:
             return await self._call_openai_with_key(prompt, api_key, model)
@@ -505,7 +533,7 @@ Alerts:
         self,
         provider: LLMProvider,
         api_key: str,
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> dict:
         """Test connection to an LLM provider using a custom API key."""
         test_prompt = "Respond with 'Connection successful' if you can read this message."
@@ -535,7 +563,7 @@ Alerts:
         self,
         prompt: str,
         api_key: str,
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> dict:
         """Call OpenAI API with a custom API key."""
         model_to_use = model or settings.openai_model
@@ -580,7 +608,7 @@ Alerts:
         self,
         prompt: str,
         api_key: str,
-        model: Optional[str] = None,
+        model: str | None = None,
     ) -> dict:
         """Call Anthropic API with a custom API key."""
         model_to_use = model or settings.anthropic_model
@@ -609,7 +637,11 @@ Alerts:
 
         # Fallback logic for 404 Model Not Found
         if response.status_code == 404:
-            fallbacks = ["claude-3-5-sonnet-20240620", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"]
+            fallbacks = [
+                "claude-3-5-sonnet-20240620",
+                "claude-3-sonnet-20240229",
+                "claude-3-haiku-20240307",
+            ]
             logger.warning(f"Model {model_to_use} not found. Trying fallbacks: {fallbacks}")
             for fallback_model in fallbacks:
                 if fallback_model == model_to_use:

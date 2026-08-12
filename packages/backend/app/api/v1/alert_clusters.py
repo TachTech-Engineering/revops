@@ -2,19 +2,18 @@
 AI Alert Clustering API - Feature 5
 Group similar alerts to reduce analyst fatigue.
 """
+
 from datetime import datetime, timedelta
-from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc, update, and_
+from sqlalchemy import and_, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep, OrgAdminDep
-from app.db import get_db, AlertCluster, AlertClusterMember, AlertClusterStatus, NormalizedAlert
+from app.api.v1.deps import OrgAdminDep, OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import AlertCluster, AlertClusterMember, AlertClusterStatus, NormalizedAlert, get_db
 from app.services.llm_service import llm_service
-from fastapi import Depends
 
 router = APIRouter()
 
@@ -25,13 +24,13 @@ class AlertClusterResponse(BaseModel):
     summary: str
     severity: str
     status: str
-    primary_rule_id: Optional[str]
+    primary_rule_id: str | None
     cluster_type: str
     alert_count: int
     first_alert_at: str
     last_alert_at: str
     common_entities: dict
-    assignee: Optional[str]
+    assignee: str | None
     created_at: str
 
     class Config:
@@ -58,8 +57,8 @@ class GenerateClusterRequest(BaseModel):
 
 
 class UpdateClusterRequest(BaseModel):
-    status: Optional[str] = None
-    assignee: Optional[str] = None
+    status: str | None = None
+    assignee: str | None = None
 
 
 class MergeClustersRequest(BaseModel):
@@ -93,8 +92,8 @@ async def list_clusters(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: AsyncSession = Depends(get_db),
-    status: Optional[str] = Query(None),
-    severity: Optional[str] = Query(None),
+    status: str | None = Query(None),
+    severity: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -214,7 +213,7 @@ async def generate_clusters(
     """Trigger AI clustering of alerts."""
     # 1. Fetch recent alerts from the time window that aren't already clustered
     time_limit = datetime.utcnow() - timedelta(hours=request.time_window_hours)
-    
+
     # Get IDs of alerts that are already in a cluster
     clustered_alerts_query = select(AlertClusterMember.alert_id).where(
         AlertClusterMember.organization_id == org_id
@@ -224,51 +223,54 @@ async def generate_clusters(
 
     # Fetch alerts
     alerts_query = select(NormalizedAlert).where(
-        NormalizedAlert.organization_id == org_id,
-        NormalizedAlert.ingested_at >= time_limit
+        NormalizedAlert.organization_id == org_id, NormalizedAlert.ingested_at >= time_limit
     )
     alerts_result = await db.execute(alerts_query)
     all_alerts = alerts_result.scalars().all()
-    
+
     # Filter out already clustered alerts
     new_alerts = [a for a in all_alerts if str(a.id) not in clustered_ids]
 
     import logging
+
     logger = logging.getLogger(__name__)
-    logger.info(f"Found {len(new_alerts)} new alerts to cluster out of {len(all_alerts)} total recent alerts.")
+    logger.info(
+        f"Found {len(new_alerts)} new alerts to cluster "
+        f"out of {len(all_alerts)} total recent alerts."
+    )
 
     if not new_alerts:
         return {
             "status": "success",
             "clusters_created": 0,
-            "message": "No new alerts found to cluster in the specified time window."
+            "message": "No new alerts found to cluster in the specified time window.",
         }
 
     # 2. Group alerts (Cross-source logic: by common entities or rule_id)
     import re
-    
+
     groups = {}
-    
+
     # Simple regex for IPs and Emails
-    IP_REGEX = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
-    EMAIL_REGEX = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    ip_regex = r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+    email_regex = r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"
 
     for alert in new_alerts:
         # Collect possible group keys for this alert
         keys = []
         if alert.rule_id:
             keys.append(f"rule:{alert.rule_id}")
-        
+
         # Extract entities from title/description
         text_to_search = f"{alert.title} {alert.description or ''}"
-        ips = re.findall(IP_REGEX, text_to_search)
-        emails = re.findall(EMAIL_REGEX, text_to_search)
-        
+        ips = re.findall(ip_regex, text_to_search)
+        emails = re.findall(email_regex, text_to_search)
+
         for ip in ips:
             keys.append(f"ip:{ip}")
         for email in emails:
             keys.append(f"email:{email}")
-            
+
         # If no identifiers found, fall back to title
         if not keys:
             keys.append(f"title:{alert.title}")
@@ -280,11 +282,10 @@ async def generate_clusters(
             groups[key].append(alert)
 
     created_count = 0
-    
+
     # 3. Prepare clustering tasks
     # Track clustered alert IDs to avoid adding the same alert to multiple new clusters in one run
     already_added_in_this_run = set()
-    clustering_tasks = []
 
     # Filter groups that meet the minimum size first
     valid_groups = []
@@ -299,11 +300,13 @@ async def generate_clusters(
     # Define a helper function for the task
     async def create_cluster_with_ai(key, group_alerts):
         first_alert = min(group_alerts, key=lambda a: a.created_at_source)
-        
+
         # Determine severity
         severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
-        max_severity = max(group_alerts, key=lambda a: severity_rank.get(a.severity.lower(), 0)).severity
-        
+        max_severity = max(
+            group_alerts, key=lambda a: severity_rank.get(a.severity.lower(), 0)
+        ).severity
+
         # AI Narrative
         alerts_for_llm = [
             {
@@ -311,32 +314,39 @@ async def generate_clusters(
                 "description": a.description,
                 "severity": a.severity,
                 "source": a.source_type,
-            } for a in group_alerts[:15]
+            }
+            for a in group_alerts[:15]
         ]
-        
+
         ai_narrative = await llm_service.cluster_alerts(db, org_id, alerts_for_llm)
-        
+
         return {
             "name": ai_narrative["name"],
             "summary": ai_narrative["narrative"],
             "severity": max_severity,
             "primary_rule_id": group_alerts[0].rule_id,
-            "cluster_type": "entity_based" if (key.startswith("ip:") or key.startswith("email:")) else "rule_based",
+            "cluster_type": "entity_based"
+            if (key.startswith("ip:") or key.startswith("email:"))
+            else "rule_based",
             "alert_count": len(group_alerts),
             "first_alert_at": first_alert.created_at_source,
             "last_alert_at": first_alert.created_at_source,
-            "common_entities": {"identifier": key, "sources": list(set(a.source_type for a in group_alerts))},
-            "alerts": group_alerts
+            "common_entities": {
+                "identifier": key,
+                "sources": list(set(a.source_type for a in group_alerts)),
+            },
+            "alerts": group_alerts,
         }
 
     # Create tasks for all valid groups
     import asyncio
+
     tasks = [create_cluster_with_ai(key, group) for key, group in valid_groups]
-    
+
     if tasks:
         # Run all AI narrative generations in parallel
         cluster_results = await asyncio.gather(*tasks)
-        
+
         # 4. Save clusters to database
         for res in cluster_results:
             cluster = AlertCluster(
@@ -360,16 +370,16 @@ async def generate_clusters(
             for alert in res["alerts"]:
                 if alert.id in added_to_this_cluster:
                     continue
-                    
+
                 member = AlertClusterMember(
                     organization_id=org_id,
                     cluster_id=cluster.id,
                     alert_id=str(alert.id),
-                    similarity_score=1.0
+                    similarity_score=1.0,
                 )
                 db.add(member)
                 added_to_this_cluster.add(alert.id)
-            
+
             created_count += 1
 
     await db.commit()
@@ -488,13 +498,13 @@ async def bulk_delete_clusters(
 
     # Delete clusters (ensure they belong to the org)
     from sqlalchemy import delete
-    
+
     # Delete members first (if not handled by cascade)
     await db.execute(
         delete(AlertClusterMember).where(
             and_(
                 AlertClusterMember.cluster_id.in_(cluster_uuids),
-                AlertClusterMember.organization_id == org_id
+                AlertClusterMember.organization_id == org_id,
             )
         )
     )
@@ -502,17 +512,11 @@ async def bulk_delete_clusters(
     # Delete clusters
     result = await db.execute(
         delete(AlertCluster).where(
-            and_(
-                AlertCluster.id.in_(cluster_uuids),
-                AlertCluster.organization_id == org_id
-            )
+            and_(AlertCluster.id.in_(cluster_uuids), AlertCluster.organization_id == org_id)
         )
     )
-    
+
     deleted_count = result.rowcount
     await db.commit()
 
-    return {
-        "status": "success",
-        "deleted_count": deleted_count
-    }
+    return {"status": "success", "deleted_count": deleted_count}

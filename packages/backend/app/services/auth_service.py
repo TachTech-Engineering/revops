@@ -1,20 +1,20 @@
 """
 Authentication service for user management and JWT token handling.
 """
+
 import hashlib
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional
 from uuid import UUID
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
-from app.db import User, Organization, RefreshToken
+from app.db import Organization, RefreshToken, User, UserRoleType
 
 # Password hashing configuration
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -26,6 +26,7 @@ REFRESH_TOKEN_EXPIRE_DAYS = 7  # Refresh tokens last 7 days
 
 class AuthError(Exception):
     """Custom exception for authentication errors."""
+
     pass
 
 
@@ -44,7 +45,7 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """Create a JWT access token."""
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
@@ -57,7 +58,7 @@ def create_refresh_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def decode_access_token(token: str) -> Optional[dict]:
+def decode_access_token(token: str) -> dict | None:
     """Decode and validate a JWT access token."""
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
@@ -68,14 +69,12 @@ def decode_access_token(token: str) -> Optional[dict]:
         return None
 
 
-async def authenticate_user(
-    db: AsyncSession, email: str, password: str
-) -> Optional[User]:
+async def authenticate_user(db: AsyncSession, email: str, password: str) -> User | None:
     """Authenticate a user by email and password."""
     result = await db.execute(
         select(User)
         .options(selectinload(User.organization))
-        .where(and_(User.email == email.lower(), User.is_active == True))
+        .where(and_(User.email == email.lower(), User.is_active.is_(True)))
     )
     user = result.scalar_one_or_none()
 
@@ -95,12 +94,11 @@ async def create_user(
     db: AsyncSession,
     email: str,
     password: str,
-    name: Optional[str] = None,
-    organization_id: Optional[UUID] = None,
-    role: Optional["UserRoleType"] = None,
+    name: str | None = None,
+    organization_id: UUID | None = None,
+    role: UserRoleType | None = None,
 ) -> User:
     """Create a new user."""
-    from app.db import UserRoleType
 
     # Check if email already exists
     result = await db.execute(select(User).where(User.email == email.lower()))
@@ -145,29 +143,23 @@ async def create_organization(
     return org
 
 
-async def get_user_by_id(db: AsyncSession, user_id: UUID) -> Optional[User]:
+async def get_user_by_id(db: AsyncSession, user_id: UUID) -> User | None:
     """Get a user by their ID."""
     result = await db.execute(
-        select(User)
-        .options(selectinload(User.organization))
-        .where(User.id == user_id)
+        select(User).options(selectinload(User.organization)).where(User.id == user_id)
     )
     return result.scalar_one_or_none()
 
 
-async def get_user_by_email(db: AsyncSession, email: str) -> Optional[User]:
+async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
     """Get a user by their email."""
     result = await db.execute(
-        select(User)
-        .options(selectinload(User.organization))
-        .where(User.email == email.lower())
+        select(User).options(selectinload(User.organization)).where(User.email == email.lower())
     )
     return result.scalar_one_or_none()
 
 
-async def store_refresh_token(
-    db: AsyncSession, user_id: UUID, token: str
-) -> RefreshToken:
+async def store_refresh_token(db: AsyncSession, user_id: UUID, token: str) -> RefreshToken:
     """Store a refresh token for a user."""
     refresh_token = RefreshToken(
         user_id=user_id,
@@ -179,14 +171,11 @@ async def store_refresh_token(
     return refresh_token
 
 
-async def validate_refresh_token(
-    db: AsyncSession, token: str
-) -> Optional[User]:
+async def validate_refresh_token(db: AsyncSession, token: str) -> User | None:
     """Validate a refresh token and return the associated user."""
     token_hash = hash_token(token)
     result = await db.execute(
-        select(RefreshToken)
-        .where(
+        select(RefreshToken).where(
             and_(
                 RefreshToken.token_hash == token_hash,
                 RefreshToken.expires_at > datetime.utcnow(),
@@ -205,9 +194,7 @@ async def validate_refresh_token(
 async def revoke_refresh_token(db: AsyncSession, token: str) -> bool:
     """Revoke a refresh token."""
     token_hash = hash_token(token)
-    result = await db.execute(
-        select(RefreshToken).where(RefreshToken.token_hash == token_hash)
-    )
+    result = await db.execute(select(RefreshToken).where(RefreshToken.token_hash == token_hash))
     refresh_token = result.scalar_one_or_none()
 
     if not refresh_token:
@@ -275,7 +262,7 @@ async def create_password_reset_token(db: AsyncSession, user_id: UUID) -> str:
     return token
 
 
-async def validate_password_reset_token(token: str) -> Optional[UUID]:
+async def validate_password_reset_token(token: str) -> UUID | None:
     """Validate a password reset token and return the user ID if valid."""
     if token not in _password_reset_tokens:
         return None
@@ -290,9 +277,7 @@ async def validate_password_reset_token(token: str) -> Optional[UUID]:
     return user_id
 
 
-async def reset_user_password(
-    db: AsyncSession, token: str, new_password: str
-) -> bool:
+async def reset_user_password(db: AsyncSession, token: str, new_password: str) -> bool:
     """Reset a user's password using a valid reset token."""
     user_id = await validate_password_reset_token(token)
 

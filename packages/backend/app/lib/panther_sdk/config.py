@@ -106,7 +106,9 @@ def load_config(
         api_version=kwargs.get("api_version") or os.getenv("PANTHER_API_VERSION") or "v1",
         timeout=float(kwargs.get("timeout") or os.getenv("PANTHER_TIMEOUT") or 30.0),
         max_retries=int(kwargs.get("max_retries") or os.getenv("PANTHER_MAX_RETRIES") or 3),
-        verify_ssl=kwargs.get("verify_ssl", os.getenv("PANTHER_VERIFY_SSL", "true").lower() == "true"),
+        verify_ssl=kwargs.get(
+            "verify_ssl", os.getenv("PANTHER_VERIFY_SSL", "true").lower() == "true"
+        ),
         debug=kwargs.get("debug", os.getenv("PANTHER_DEBUG", "false").lower() == "true"),
         extra=kwargs.get("extra", {}),
     )

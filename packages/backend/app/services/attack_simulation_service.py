@@ -3,28 +3,32 @@ Attack Simulation Service.
 Orchestrates attack simulations using Atomic Red Team and Stratus Red Team.
 Supports manual mode (showing commands) and automated cloud execution.
 """
+
 import asyncio
+import logging
 import subprocess
 import uuid
-import logging
 from datetime import datetime
-from typing import Optional
-from enum import Enum
+from enum import StrEnum
 
-from sqlalchemy import select, and_, func, or_
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import (
-    SimulationTemplate, SimulationRun, SimulationResult,
-    SimulationFramework, SimulationStatus
-)
 from app.config import settings
+from app.db.models import (
+    SimulationFramework,
+    SimulationResult,
+    SimulationRun,
+    SimulationStatus,
+    SimulationTemplate,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class ExecutionMode(str, Enum):
+class ExecutionMode(StrEnum):
     """Execution modes for simulations."""
+
     MANUAL = "manual"  # Show commands to user
     AUTOMATED = "automated"  # Execute automatically (cloud only)
 
@@ -35,10 +39,10 @@ class AttackSimulationService:
     async def list_templates(
         self,
         db: AsyncSession,
-        framework: Optional[SimulationFramework] = None,
-        platform: Optional[str] = None,
-        tactic: Optional[str] = None,
-        search: Optional[str] = None,
+        framework: SimulationFramework | None = None,
+        platform: str | None = None,
+        tactic: str | None = None,
+        search: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[dict], int]:
@@ -47,21 +51,17 @@ class AttackSimulationService:
 
         Templates are synced from GitHub via technique_sync_service.
         """
-        conditions = [SimulationTemplate.is_enabled == True]
+        conditions = [SimulationTemplate.is_enabled.is_(True)]
 
         if framework:
             conditions.append(SimulationTemplate.framework == framework)
 
         if platform:
             # Check if platform is in the platforms array
-            conditions.append(
-                SimulationTemplate.platforms.contains([platform.lower()])
-            )
+            conditions.append(SimulationTemplate.platforms.contains([platform.lower()]))
 
         if tactic:
-            conditions.append(
-                func.lower(SimulationTemplate.mitre_tactic) == tactic.lower()
-            )
+            conditions.append(func.lower(SimulationTemplate.mitre_tactic) == tactic.lower())
 
         if search:
             search_term = f"%{search}%"
@@ -125,12 +125,10 @@ class AttackSimulationService:
         self,
         db: AsyncSession,
         template_id: str,
-    ) -> Optional[dict]:
+    ) -> dict | None:
         """Get a specific template by ID."""
         result = await db.execute(
-            select(SimulationTemplate).where(
-                SimulationTemplate.technique_id == template_id
-            )
+            select(SimulationTemplate).where(SimulationTemplate.technique_id == template_id)
         )
         t = result.scalar_one_or_none()
 
@@ -163,7 +161,7 @@ class AttackSimulationService:
         self,
         db: AsyncSession,
         template_id: str,
-        parameters: Optional[dict] = None,
+        parameters: dict | None = None,
     ) -> dict:
         """
         Get the manual execution commands for a template.
@@ -200,7 +198,9 @@ class AttackSimulationService:
         # For Stratus RT, use the detonation command
         if template.get("framework") == "stratus":
             command = detonation_command or f"stratus detonate {template_id}"
-            cleanup_command = template.get("cleanup_command", "") or f"stratus cleanup {template_id}"
+            cleanup_command = (
+                template.get("cleanup_command", "") or f"stratus cleanup {template_id}"
+            )
 
         return {
             "template_id": template_id,
@@ -225,7 +225,10 @@ class AttackSimulationService:
 
         if framework == "stratus":
             cloud = template.get("cloud_provider", "aws")
-            instructions.append(f"1. Ensure you have Stratus Red Team installed: `go install github.com/datadog/stratus-red-team/v2/cmd/stratus@latest`")
+            instructions.append(
+                "1. Ensure you have Stratus Red Team installed: "
+                "`go install github.com/datadog/stratus-red-team/v2/cmd/stratus@latest`"
+            )
             instructions.append(f"2. Configure {cloud.upper()} credentials in your environment")
             if template.get("cloud_permissions"):
                 perms = ", ".join(template.get("cloud_permissions", []))
@@ -236,7 +239,9 @@ class AttackSimulationService:
             executor_type = template.get("executor_type", "")
             if executor_type == "powershell":
                 instructions.append("1. Open PowerShell as Administrator")
-                instructions.append("2. Set execution policy if needed: `Set-ExecutionPolicy Bypass -Scope Process`")
+                instructions.append(
+                    "2. Set execution policy if needed: `Set-ExecutionPolicy Bypass -Scope Process`"
+                )
             elif executor_type == "command_prompt":
                 instructions.append("1. Open Command Prompt as Administrator")
             elif executor_type == "bash":
@@ -248,7 +253,9 @@ class AttackSimulationService:
                 instructions.append("2. Install dependencies if needed (see dependencies list)")
             instructions.append("3. Run the execution command below")
             if template.get("executor_cleanup"):
-                instructions.append("4. After testing, run the cleanup command to restore system state")
+                instructions.append(
+                    "4. After testing, run the cleanup command to restore system state"
+                )
 
         return instructions
 
@@ -259,7 +266,7 @@ class AttackSimulationService:
         targets: list[str],
         triggered_by: str,
         mode: ExecutionMode = ExecutionMode.MANUAL,
-        parameters: Optional[dict] = None,
+        parameters: dict | None = None,
     ) -> SimulationRun:
         """
         Record a simulation run.
@@ -269,9 +276,7 @@ class AttackSimulationService:
         """
         # Get template from database
         result = await db.execute(
-            select(SimulationTemplate).where(
-                SimulationTemplate.technique_id == template_id
-            )
+            select(SimulationTemplate).where(SimulationTemplate.technique_id == template_id)
         )
         template = result.scalar_one_or_none()
 
@@ -314,7 +319,9 @@ class AttackSimulationService:
 
         # Automated mode - only for Stratus RT with cloud execution
         if template.framework != SimulationFramework.STRATUS_RED_TEAM:
-            raise ValueError("Automated execution only supported for Stratus Red Team cloud techniques")
+            raise ValueError(
+                "Automated execution only supported for Stratus Red Team cloud techniques"
+            )
 
         run.status = SimulationStatus.RUNNING
         run.started_at = datetime.utcnow()
@@ -355,7 +362,7 @@ class AttackSimulationService:
         self,
         technique_id: str,
         cloud: str,
-        parameters: Optional[dict] = None,
+        parameters: dict | None = None,
     ) -> dict:
         """
         Execute a Stratus Red Team technique.
@@ -378,7 +385,8 @@ class AttackSimulationService:
             "AWS_REGION": settings.aws_region,
         }
 
-        # Extract just the technique name from full ID (e.g., stratus-aws-technique -> aws.technique)
+        # Extract just the technique name from full ID
+        # (e.g., stratus-aws-technique -> aws.technique)
         stratus_id = technique_id
         if stratus_id.startswith("stratus-"):
             stratus_id = stratus_id.replace("stratus-", "").replace("-", ".", 1)
@@ -411,7 +419,10 @@ class AttackSimulationService:
             return {
                 "success": False,
                 "output": "",
-                "error": "stratus-red-team CLI not found. Install with: go install github.com/datadog/stratus-red-team/v2/cmd/stratus@latest",
+                "error": (
+                    "stratus-red-team CLI not found. Install with: "
+                    "go install github.com/datadog/stratus-red-team/v2/cmd/stratus@latest"
+                ),
             }
         except Exception as e:
             return {
@@ -476,17 +487,15 @@ class AttackSimulationService:
         self,
         db: AsyncSession,
         run_id: uuid.UUID,
-    ) -> Optional[SimulationRun]:
+    ) -> SimulationRun | None:
         """Get a simulation run by ID."""
-        result = await db.execute(
-            select(SimulationRun).where(SimulationRun.id == run_id)
-        )
+        result = await db.execute(select(SimulationRun).where(SimulationRun.id == run_id))
         return result.scalar_one_or_none()
 
     async def list_runs(
         self,
         db: AsyncSession,
-        status: Optional[SimulationStatus] = None,
+        status: SimulationStatus | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[SimulationRun], int]:
@@ -522,9 +531,7 @@ class AttackSimulationService:
         run_id: uuid.UUID,
     ) -> list[SimulationResult]:
         """Get results for a simulation run."""
-        result = await db.execute(
-            select(SimulationResult).where(SimulationResult.run_id == run_id)
-        )
+        result = await db.execute(select(SimulationResult).where(SimulationResult.run_id == run_id))
         return list(result.scalars().all())
 
     async def verify_detection(
@@ -570,17 +577,19 @@ class AttackSimulationService:
                 technique_name = template.name.lower() if template.name else ""
 
                 if (
-                    technique_id in str(alert_tags).lower() or
-                    technique_id in alert_title or
-                    technique_name in alert_title
+                    technique_id in str(alert_tags).lower()
+                    or technique_id in alert_title
+                    or technique_name in alert_title
                 ):
                     detection_found = True
-                    detection_details.append({
-                        "alert_id": alert_node.get("id"),
-                        "title": alert_node.get("title"),
-                        "severity": alert_node.get("severity"),
-                        "created_at": alert_node.get("createdAt"),
-                    })
+                    detection_details.append(
+                        {
+                            "alert_id": alert_node.get("id"),
+                            "title": alert_node.get("title"),
+                            "severity": alert_node.get("severity"),
+                            "created_at": alert_node.get("createdAt"),
+                        }
+                    )
 
         except Exception as e:
             return {
@@ -607,7 +616,12 @@ class AttackSimulationService:
             "detection_count": len(detection_details),
             "detections": detection_details,
             "time_to_detect": (
-                (datetime.fromisoformat(detection_details[0]["created_at"].replace("Z", "+00:00")).replace(tzinfo=None) - run.started_at).total_seconds()
+                (
+                    datetime.fromisoformat(
+                        detection_details[0]["created_at"].replace("Z", "+00:00")
+                    ).replace(tzinfo=None)
+                    - run.started_at
+                ).total_seconds()
                 if detection_details and run.started_at
                 else None
             ),
@@ -635,26 +649,24 @@ class AttackSimulationService:
     async def get_stats(self, db: AsyncSession) -> dict:
         """Get simulation statistics."""
         # Total runs
-        total_result = await db.execute(
-            select(func.count()).select_from(SimulationRun)
-        )
+        total_result = await db.execute(select(func.count()).select_from(SimulationRun))
         total = total_result.scalar() or 0
 
         # By status
         status_counts = {}
         for status in SimulationStatus:
             result = await db.execute(
-                select(func.count()).select_from(SimulationRun).where(
-                    SimulationRun.status == status
-                )
+                select(func.count())
+                .select_from(SimulationRun)
+                .where(SimulationRun.status == status)
             )
             status_counts[status.value] = result.scalar() or 0
 
         # Detection rate
         detected_result = await db.execute(
-            select(func.count()).select_from(SimulationRun).where(
-                SimulationRun.detection_found == True
-            )
+            select(func.count())
+            .select_from(SimulationRun)
+            .where(SimulationRun.detection_found.is_(True))
         )
         detected = detected_result.scalar() or 0
 
@@ -663,14 +675,14 @@ class AttackSimulationService:
 
         # Template counts
         atomic_count = await db.execute(
-            select(func.count()).select_from(SimulationTemplate).where(
-                SimulationTemplate.framework == SimulationFramework.ATOMIC_RED_TEAM
-            )
+            select(func.count())
+            .select_from(SimulationTemplate)
+            .where(SimulationTemplate.framework == SimulationFramework.ATOMIC_RED_TEAM)
         )
         stratus_count = await db.execute(
-            select(func.count()).select_from(SimulationTemplate).where(
-                SimulationTemplate.framework == SimulationFramework.STRATUS_RED_TEAM
-            )
+            select(func.count())
+            .select_from(SimulationTemplate)
+            .where(SimulationTemplate.framework == SimulationFramework.STRATUS_RED_TEAM)
         )
 
         return {

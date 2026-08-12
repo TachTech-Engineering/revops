@@ -7,15 +7,15 @@ Integrates with Elastic Security to fetch and normalize detection alerts.
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
 
 
@@ -46,7 +46,9 @@ class ElasticConnector(DataSourceConnector):
                     "kibana_url": {
                         "type": "string",
                         "title": "Kibana URL",
-                        "description": "Kibana URL for Security API (optional, defaults to base_url)",
+                        "description": (
+                            "Kibana URL for Security API (optional, defaults to base_url)"
+                        ),
                     },
                     "verify_ssl": {
                         "type": "boolean",
@@ -175,8 +177,8 @@ class ElasticConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch detection alerts from Elastic Security."""
         try:
             kibana_url = self._get_kibana_url()
@@ -262,7 +264,9 @@ class ElasticConnector(DataSourceConnector):
             external_id=raw_alert.get("_id", source.get("signal.group.id", "")),
             title=rule.get("name", source.get("signal.rule.name", "Elastic Security Alert")),
             description=rule.get("description", ""),
-            severity=self.normalize_severity(rule.get("severity", source.get("signal.rule.severity", "medium"))),
+            severity=self.normalize_severity(
+                rule.get("severity", source.get("signal.rule.severity", "medium"))
+            ),
             status=self.normalize_status(signal.get("status", source.get("signal.status", "open"))),
             created_at_source=created_at,
             updated_at_source=None,

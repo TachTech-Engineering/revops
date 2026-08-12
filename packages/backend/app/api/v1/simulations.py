@@ -1,21 +1,21 @@
 """
 Attack Simulation API endpoints.
 """
+
 import uuid
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.deps import OrgAdminDep, OrgAnalystDep, OrgIdDep, OrgUserDep, get_panther_service
+from app.db.models import SimulationFramework, SimulationStatus
 from app.db.session import get_db
-from app.db.models import SimulationFramework, SimulationStatus, SimulationRun
-from app.services.attack_simulation_service import attack_simulation_service, ExecutionMode
-from app.services.technique_sync_service import technique_sync_service
+from app.services.attack_simulation_service import ExecutionMode, attack_simulation_service
 from app.services.panther_service import PantherService
-from app.api.v1.deps import get_panther_service, OrgUserDep, OrgIdDep, OrgAnalystDep, OrgAdminDep
+from app.services.technique_sync_service import technique_sync_service
 
 router = APIRouter()
 
@@ -24,35 +24,35 @@ router = APIRouter()
 class RunSimulationRequest(BaseModel):
     template_id: str
     targets: list[str]
-    parameters: Optional[dict] = None
+    parameters: dict | None = None
     mode: Literal["manual", "automated"] = "manual"
 
 
 class GetCommandsRequest(BaseModel):
     template_id: str
-    parameters: Optional[dict] = None
+    parameters: dict | None = None
 
 
 class SimulationTemplateResponse(BaseModel):
     id: str
     framework: str
     technique_id: str
-    mitre_technique_id: Optional[str] = None
+    mitre_technique_id: str | None = None
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     mitre_tactic: str
-    mitre_technique: Optional[str] = None
+    mitre_technique: str | None = None
     platforms: list[str]
-    cloud_provider: Optional[str] = None
+    cloud_provider: str | None = None
     is_enabled: bool
-    executor_type: Optional[str] = None
-    executor_command: Optional[str] = None
-    executor_cleanup: Optional[str] = None
-    input_arguments: Optional[dict] = None
-    dependencies: Optional[list] = None
-    cloud_permissions: Optional[list] = None
-    detonation_command: Optional[str] = None
-    cleanup_command: Optional[str] = None
+    executor_type: str | None = None
+    executor_command: str | None = None
+    executor_cleanup: str | None = None
+    input_arguments: dict | None = None
+    dependencies: list | None = None
+    cloud_permissions: list | None = None
+    detonation_command: str | None = None
+    cleanup_command: str | None = None
 
 
 class TemplateListResponse(BaseModel):
@@ -66,9 +66,9 @@ class ManualCommandsResponse(BaseModel):
     template_id: str
     name: str
     framework: str
-    executor_type: Optional[str] = None
-    platform: Optional[str] = None
-    cloud_provider: Optional[str] = None
+    executor_type: str | None = None
+    platform: str | None = None
+    cloud_provider: str | None = None
     execution_command: str
     cleanup_command: str
     input_arguments: dict
@@ -83,13 +83,13 @@ class SimulationRunResponse(BaseModel):
     template_id: str
     status: str
     targets: list[str]
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     detection_expected: bool
     detection_found: bool
-    detection_rule_id: Optional[str] = None
+    detection_rule_id: str | None = None
     triggered_by: str
-    error_message: Optional[str] = None
+    error_message: str | None = None
     created_at: datetime
 
 
@@ -105,8 +105,8 @@ class SimulationResultResponse(BaseModel):
     run_id: str
     target: str
     success: bool
-    output: Optional[str] = None
-    detected_at: Optional[datetime] = None
+    output: str | None = None
+    detected_at: datetime | None = None
     detection_details: dict
     created_at: datetime
 
@@ -115,16 +115,16 @@ class VerifyDetectionResponse(BaseModel):
     run_id: str
     technique_id: str
     technique_name: str
-    mitre_technique_id: Optional[str] = None
+    mitre_technique_id: str | None = None
     status: str
     detection_found: bool
     detection_count: int
     detections: list[dict]
-    time_to_detect: Optional[float] = None
+    time_to_detect: float | None = None
 
 
 class SyncStatusResponse(BaseModel):
-    last_sync: Optional[str] = None
+    last_sync: str | None = None
     atomic_red_team_count: int
     stratus_red_team_count: int
     next_sync: str
@@ -200,10 +200,7 @@ async def sync_techniques(
     result = await technique_sync_service.sync_all(db, force=force)
 
     if result.get("skipped"):
-        raise HTTPException(
-            status_code=304,
-            detail=result.get("reason", "Recently synced")
-        )
+        raise HTTPException(status_code=304, detail=result.get("reason", "Recently synced"))
 
     return SyncResultResponse(**result)
 
@@ -212,10 +209,12 @@ async def sync_techniques(
 @router.get("/templates", response_model=TemplateListResponse)
 async def list_templates(
     user: OrgUserDep,
-    framework: Optional[str] = Query(None, description="Filter by framework: atomic, stratus"),
-    platform: Optional[str] = Query(None, description="Filter by platform: windows, linux, macos, aws, azure, gcp"),
-    tactic: Optional[str] = Query(None, description="Filter by MITRE tactic"),
-    search: Optional[str] = Query(None, description="Search by name, description, or technique ID"),
+    framework: str | None = Query(None, description="Filter by framework: atomic, stratus"),
+    platform: str | None = Query(
+        None, description="Filter by platform: windows, linux, macos, aws, azure, gcp"
+    ),
+    tactic: str | None = Query(None, description="Filter by MITRE tactic"),
+    search: str | None = Query(None, description="Search by name, description, or technique ID"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -230,7 +229,7 @@ async def list_templates(
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid framework: {framework}. Use 'atomic' or 'stratus'."
+                detail=f"Invalid framework: {framework}. Use 'atomic' or 'stratus'.",
             )
 
     templates, total = await attack_simulation_service.list_templates(
@@ -269,7 +268,7 @@ async def get_template(
 async def get_manual_commands(
     template_id: str,
     user: OrgUserDep,
-    parameters: Optional[dict] = None,
+    parameters: dict | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -278,9 +277,7 @@ async def get_manual_commands(
     Returns the commands to run on your target system, with parameters substituted.
     """
     try:
-        commands = await attack_simulation_service.get_manual_commands(
-            db, template_id, parameters
-        )
+        commands = await attack_simulation_service.get_manual_commands(db, template_id, parameters)
         return ManualCommandsResponse(**commands)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -323,7 +320,7 @@ async def run_simulation(
 async def list_runs(
     user: OrgUserDep,
     org_id: OrgIdDep,
-    status: Optional[str] = Query(None, description="Filter by status"),
+    status: str | None = Query(None, description="Filter by status"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -336,7 +333,10 @@ async def list_runs(
         except ValueError:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid status: {status}. Use 'pending', 'running', 'completed', or 'failed'."
+                detail=(
+                    f"Invalid status: {status}. "
+                    "Use 'pending', 'running', 'completed', or 'failed'."
+                ),
             )
 
     runs, total = await attack_simulation_service.list_runs(
@@ -421,7 +421,9 @@ async def verify_detection(
     started and matches them against the simulated technique.
     """
     try:
-        result = await attack_simulation_service.verify_detection(db, run_id, panther, organization_id=org_id)
+        result = await attack_simulation_service.verify_detection(
+            db, run_id, panther, organization_id=org_id
+        )
         return VerifyDetectionResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

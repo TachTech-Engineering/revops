@@ -1,5 +1,3 @@
-from typing import Optional
-
 from fastapi import APIRouter, Header, HTTPException
 
 from app.services.panther_service import PantherService
@@ -9,8 +7,8 @@ router = APIRouter()
 
 @router.get("/health")
 async def health_check(
-    x_panther_host: Optional[str] = Header(None),
-    x_panther_token: Optional[str] = Header(None),
+    x_panther_host: str | None = Header(None),
+    x_panther_token: str | None = Header(None),
 ) -> dict[str, str]:
     """
     Health check endpoint.

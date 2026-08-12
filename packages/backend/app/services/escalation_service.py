@@ -3,12 +3,13 @@ Escalation Service
 
 Handles automatic triggering and processing of escalation policies for alerts.
 """
+
 import hashlib
 import hmac
 import json
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Any
 from uuid import UUID
 
 import httpx
@@ -17,27 +18,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db import (
-    EscalationPolicy,
-    EscalationStep,
     AlertEscalation,
-    EscalationStatus,
     EscalationNotificationType,
+    EscalationPolicy,
+    EscalationStatus,
 )
+from app.services.email_service import email_service
 from app.services.fonoster import (
     send_escalation_call,
     send_escalation_sms,
 )
-from app.services.email_service import email_service
 
 logger = logging.getLogger(__name__)
 
 # Severity color mapping for Slack Block Kit
 SEVERITY_COLORS = {
     "critical": "#dc2626",  # Red
-    "high": "#ea580c",      # Orange
-    "medium": "#ca8a04",    # Yellow
-    "low": "#16a34a",       # Green
-    "info": "#2563eb",      # Blue
+    "high": "#ea580c",  # Orange
+    "medium": "#ca8a04",  # Yellow
+    "low": "#16a34a",  # Green
+    "info": "#2563eb",  # Blue
 }
 
 
@@ -57,7 +57,7 @@ class EscalationService:
         rule_name: str = "",
         alert_time: str = "",
         log_source: str = "",
-    ) -> Optional[AlertEscalation]:
+    ) -> AlertEscalation | None:
         """
         Check if an alert matches any escalation policy and trigger if so.
 
@@ -96,7 +96,9 @@ class EscalationService:
         # Calculate next escalation time based on first step
         if policy.steps:
             first_step = sorted(policy.steps, key=lambda s: s.step_order)[0]
-            escalation.next_escalation_at = datetime.utcnow() + timedelta(minutes=first_step.delay_minutes)
+            escalation.next_escalation_at = datetime.utcnow() + timedelta(
+                minutes=first_step.delay_minutes
+            )
 
         self.db.add(escalation)
         await self.db.commit()
@@ -122,12 +124,12 @@ class EscalationService:
         organization_id: UUID,
         alert_severity: str,
         rule_name: str = "",
-    ) -> Optional[EscalationPolicy]:
+    ) -> EscalationPolicy | None:
         """Find the first active escalation policy that matches the alert."""
         result = await self.db.execute(
             select(EscalationPolicy)
             .where(EscalationPolicy.organization_id == organization_id)
-            .where(EscalationPolicy.is_active == True)
+            .where(EscalationPolicy.is_active.is_(True))
             .options(selectinload(EscalationPolicy.steps))
         )
         policies = result.scalars().unique().all()
@@ -195,7 +197,10 @@ class EscalationService:
                 )
                 if result.get("success"):
                     success = True
-                    logger.info(f"Sent {step.notification_type.value} to {target} for alert {escalation.alert_id}")
+                    logger.info(
+                        f"Sent {step.notification_type.value} to {target} "
+                        f"for alert {escalation.alert_id}"
+                    )
             except Exception as e:
                 logger.error(f"Failed to send {step.notification_type.value} to {target}: {e}")
 
@@ -213,7 +218,9 @@ class EscalationService:
         # Calculate next escalation time
         if step_index + 1 < len(sorted_steps):
             next_step = sorted_steps[step_index + 1]
-            escalation.next_escalation_at = datetime.utcnow() + timedelta(minutes=next_step.delay_minutes)
+            escalation.next_escalation_at = datetime.utcnow() + timedelta(
+                minutes=next_step.delay_minutes
+            )
         else:
             escalation.next_escalation_at = None
 
@@ -232,10 +239,10 @@ class EscalationService:
         alert_time: str = "",
         log_source: str = "",
         escalation_id: str = "",
-        call_template: Optional[str] = None,
-        sms_template: Optional[str] = None,
-        policy: Optional[EscalationPolicy] = None,
-    ) -> Dict[str, Any]:
+        call_template: str | None = None,
+        sms_template: str | None = None,
+        policy: EscalationPolicy | None = None,
+    ) -> dict[str, Any]:
         """Send a notification based on type."""
         if notification_type == EscalationNotificationType.PHONE_CALL:
             return await send_escalation_call(
@@ -319,7 +326,7 @@ class EscalationService:
         alert_time: str = "",
         log_source: str = "",
         escalation_id: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Send email notification for escalation."""
         if not email_service.is_configured():
             logger.warning("Email service not configured, skipping email notification")
@@ -339,40 +346,82 @@ class EscalationService:
 
         body_html = f"""
         <html>
-        <body style="font-family: Arial, sans-serif; margin: 0; padding: 20px; background-color: #f3f4f6;">
-            <div style="max-width: 600px; margin: 0 auto; background-color: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+        <body style="font-family: Arial, sans-serif; margin: 0; padding: 20px;
+        background-color: #f3f4f6;">
+            <div style="max-width: 600px; margin: 0 auto; background-color: white;
+            border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
                 <div style="background-color: {severity_color}; color: white; padding: 20px;">
                     <h1 style="margin: 0; font-size: 20px;">⚠️ Alert Escalation</h1>
                 </div>
                 <div style="padding: 20px;">
                     <table style="width: 100%; border-collapse: collapse;">
                         <tr>
-                            <td style="padding: 8px 0; font-weight: bold; color: #374151;">Alert ID:</td>
+                            <td style="padding: 8px 0; font-weight: bold;
+                            color: #374151;">Alert ID:</td>
                             <td style="padding: 8px 0; color: #6b7280;">{alert_id}</td>
                         </tr>
                         <tr>
-                            <td style="padding: 8px 0; font-weight: bold; color: #374151;">Title:</td>
+                            <td style="padding: 8px 0; font-weight: bold;
+                            color: #374151;">Title:</td>
                             <td style="padding: 8px 0; color: #111827;">{alert_title}</td>
                         </tr>
                         <tr>
-                            <td style="padding: 8px 0; font-weight: bold; color: #374151;">Severity:</td>
+                            <td style="padding: 8px 0; font-weight: bold;
+                            color: #374151;">Severity:</td>
                             <td style="padding: 8px 0;">
-                                <span style="display: inline-block; padding: 4px 12px; background-color: {severity_color}; color: white; border-radius: 4px; font-size: 12px; text-transform: uppercase;">{alert_severity}</span>
+                                <span style="display: inline-block; padding: 4px 12px;
+                                background-color: {severity_color}; color: white;
+                                border-radius: 4px; font-size: 12px;
+                                text-transform: uppercase;">{alert_severity}</span>
                             </td>
                         </tr>
-                        {"<tr><td style='padding: 8px 0; font-weight: bold; color: #374151;'>Source:</td><td style='padding: 8px 0; color: #6b7280;'>" + log_source + "</td></tr>" if log_source else ""}
-                        {"<tr><td style='padding: 8px 0; font-weight: bold; color: #374151;'>Rule:</td><td style='padding: 8px 0; color: #6b7280;'>" + rule_name + "</td></tr>" if rule_name else ""}
-                        {"<tr><td style='padding: 8px 0; font-weight: bold; color: #374151;'>Time:</td><td style='padding: 8px 0; color: #6b7280;'>" + alert_time + "</td></tr>" if alert_time else ""}
+                        {
+                            "<tr><td style='padding: 8px 0; font-weight: bold; "
+                            "color: #374151;'>Source:</td>"
+                            "<td style='padding: 8px 0; color: #6b7280;'>"
+                            + log_source
+                            + "</td></tr>"
+                            if log_source
+                            else ""
+                        }
+                        {
+                            "<tr><td style='padding: 8px 0; font-weight: bold; "
+                            "color: #374151;'>Rule:</td>"
+                            "<td style='padding: 8px 0; color: #6b7280;'>"
+                            + rule_name
+                            + "</td></tr>"
+                            if rule_name
+                            else ""
+                        }
+                        {
+                            "<tr><td style='padding: 8px 0; font-weight: bold; "
+                            "color: #374151;'>Time:</td>"
+                            "<td style='padding: 8px 0; color: #6b7280;'>"
+                            + alert_time
+                            + "</td></tr>"
+                            if alert_time
+                            else ""
+                        }
                     </table>
-                    {"<div style='margin-top: 16px; padding: 12px; background-color: #f9fafb; border-radius: 4px;'><strong>Description:</strong><br/>" + alert_description + "</div>" if alert_description else ""}
-                    <div style="margin-top: 20px; padding-top: 20px; border-top: 1px solid #e5e7eb;">
+                    {
+                        "<div style='margin-top: 16px; padding: 12px; "
+                        "background-color: #f9fafb; border-radius: 4px;'>"
+                        "<strong>Description:</strong><br/>"
+                        + alert_description
+                        + "</div>"
+                        if alert_description
+                        else ""
+                    }
+                    <div style="margin-top: 20px; padding-top: 20px;
+                    border-top: 1px solid #e5e7eb;">
                         <p style="margin: 0; color: #6b7280; font-size: 14px;">
                             This alert has been escalated and requires immediate attention.
                             Please investigate and acknowledge the alert as soon as possible.
                         </p>
                     </div>
                 </div>
-                <div style="background-color: #f9fafb; padding: 12px 20px; border-top: 1px solid #e5e7eb;">
+                <div style="background-color: #f9fafb; padding: 12px 20px;
+                border-top: 1px solid #e5e7eb;">
                     <p style="margin: 0; color: #9ca3af; font-size: 12px; text-align: center;">
                         Escalation ID: {escalation_id}
                     </p>
@@ -427,7 +476,7 @@ Escalation ID: {escalation_id}
         alert_time: str = "",
         log_source: str = "",
         escalation_id: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Send Slack notification using Block Kit format.
 
@@ -461,115 +510,82 @@ Escalation ID: {escalation_id}
                 "text": {
                     "type": "plain_text",
                     "text": f"{severity_emoji} Alert Escalation",
-                    "emoji": True
-                }
+                    "emoji": True,
+                },
             },
-            {
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*{alert_title}*"
-                }
-            },
+            {"type": "section", "text": {"type": "mrkdwn", "text": f"*{alert_title}*"}},
             {
                 "type": "section",
                 "fields": [
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*Severity:*\n`{alert_severity.upper()}`"
-                    },
-                    {
-                        "type": "mrkdwn",
-                        "text": f"*Alert ID:*\n`{alert_id}`"
-                    }
-                ]
-            }
+                    {"type": "mrkdwn", "text": f"*Severity:*\n`{alert_severity.upper()}`"},
+                    {"type": "mrkdwn", "text": f"*Alert ID:*\n`{alert_id}`"},
+                ],
+            },
         ]
 
         # Add optional fields
         optional_fields = []
         if log_source:
-            optional_fields.append({
-                "type": "mrkdwn",
-                "text": f"*Source:*\n{log_source}"
-            })
+            optional_fields.append({"type": "mrkdwn", "text": f"*Source:*\n{log_source}"})
         if rule_name:
-            optional_fields.append({
-                "type": "mrkdwn",
-                "text": f"*Rule:*\n{rule_name}"
-            })
+            optional_fields.append({"type": "mrkdwn", "text": f"*Rule:*\n{rule_name}"})
         if alert_time:
-            optional_fields.append({
-                "type": "mrkdwn",
-                "text": f"*Time:*\n{alert_time}"
-            })
+            optional_fields.append({"type": "mrkdwn", "text": f"*Time:*\n{alert_time}"})
 
         if optional_fields:
-            blocks.append({
-                "type": "section",
-                "fields": optional_fields[:2]  # Slack limits to 2 fields per section
-            })
-            if len(optional_fields) > 2:
-                blocks.append({
+            blocks.append(
+                {
                     "type": "section",
-                    "fields": optional_fields[2:]
-                })
+                    "fields": optional_fields[:2],  # Slack limits to 2 fields per section
+                }
+            )
+            if len(optional_fields) > 2:
+                blocks.append({"type": "section", "fields": optional_fields[2:]})
 
         # Add description if present
         if alert_description:
-            blocks.append({
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"*Description:*\n{alert_description[:500]}{'...' if len(alert_description) > 500 else ''}"
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": (
+                            f"*Description:*\n{alert_description[:500]}"
+                            f"{'...' if len(alert_description) > 500 else ''}"
+                        ),
+                    },
                 }
-            })
+            )
 
         # Add action buttons
-        blocks.append({
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {
-                        "type": "plain_text",
-                        "text": "View Alert",
-                        "emoji": True
+        blocks.append(
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "View Alert", "emoji": True},
+                        "style": "primary",
+                        "url": f"/alerts/{alert_id}",
                     },
-                    "style": "primary",
-                    "url": f"/alerts/{alert_id}"
-                },
-                {
-                    "type": "button",
-                    "text": {
-                        "type": "plain_text",
-                        "text": "Acknowledge",
-                        "emoji": True
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Acknowledge", "emoji": True},
+                        "value": f"ack_{escalation_id}",
                     },
-                    "value": f"ack_{escalation_id}"
-                }
-            ]
-        })
+                ],
+            }
+        )
 
         # Add footer with escalation ID
-        blocks.append({
-            "type": "context",
-            "elements": [
-                {
-                    "type": "mrkdwn",
-                    "text": f"Escalation ID: `{escalation_id}`"
-                }
-            ]
-        })
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": f"Escalation ID: `{escalation_id}`"}],
+            }
+        )
 
-        payload = {
-            "attachments": [
-                {
-                    "color": severity_color,
-                    "blocks": blocks
-                }
-            ]
-        }
+        payload = {"attachments": [{"color": severity_color, "blocks": blocks}]}
 
         try:
             async with httpx.AsyncClient() as client:
@@ -603,8 +619,8 @@ Escalation ID: {escalation_id}
         alert_time: str = "",
         log_source: str = "",
         escalation_id: str = "",
-        policy: Optional[EscalationPolicy] = None,
-    ) -> Dict[str, Any]:
+        policy: EscalationPolicy | None = None,
+    ) -> dict[str, Any]:
         """
         Send webhook notification with HMAC-SHA256 signing.
 
@@ -636,7 +652,7 @@ Escalation ID: {escalation_id}
                 "rule_name": rule_name,
                 "alert_time": alert_time,
                 "log_source": log_source,
-            }
+            },
         }
 
         payload_json = json.dumps(payload, separators=(",", ":"), sort_keys=True)
@@ -658,9 +674,7 @@ Escalation ID: {escalation_id}
         # Generate HMAC-SHA256 signature if secret is configured
         if policy and policy.webhook_secret:
             signature = hmac.new(
-                policy.webhook_secret.encode("utf-8"),
-                payload_json.encode("utf-8"),
-                hashlib.sha256
+                policy.webhook_secret.encode("utf-8"), payload_json.encode("utf-8"), hashlib.sha256
             ).hexdigest()
             headers["X-Signature-256"] = f"sha256={signature}"
 
@@ -679,10 +693,12 @@ Escalation ID: {escalation_id}
                         "success": True,
                         "type": "webhook",
                         "target": webhook_url,
-                        "status_code": response.status_code
+                        "status_code": response.status_code,
                     }
                 else:
-                    error_msg = f"Webhook returned status {response.status_code}: {response.text[:500]}"
+                    error_msg = (
+                        f"Webhook returned status {response.status_code}: {response.text[:500]}"
+                    )
                     logger.error(error_msg)
                     return {"success": False, "error": error_msg}
 
@@ -719,7 +735,9 @@ Escalation ID: {escalation_id}
             policy = policy_result.scalar_one_or_none()
 
             if not policy:
-                logger.warning(f"Escalation {escalation.id} references missing policy {escalation.policy_id}")
+                logger.warning(
+                    f"Escalation {escalation.id} references missing policy {escalation.policy_id}"
+                )
                 escalation.status = EscalationStatus.EXPIRED
                 await self.db.commit()
                 continue
@@ -741,8 +759,8 @@ Escalation ID: {escalation_id}
 async def trigger_escalation_for_alert(
     db: AsyncSession,
     organization_id: UUID,
-    alert: Dict[str, Any],
-) -> Optional[AlertEscalation]:
+    alert: dict[str, Any],
+) -> AlertEscalation | None:
     """
     Convenience function to trigger escalation for an alert.
 

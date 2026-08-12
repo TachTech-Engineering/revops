@@ -9,10 +9,10 @@ import logging
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 
-from app.db.session import AsyncSessionLocal
 from app.db.models import Connector, ConnectorCategory, ConnectorStatus
+from app.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 

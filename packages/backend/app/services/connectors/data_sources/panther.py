@@ -7,16 +7,16 @@ Wraps the existing PantherService for connector framework compatibility.
 
 import time
 import uuid
-from datetime import datetime, timedelta
-from typing import Any, Optional
+from datetime import datetime
+from typing import Any
 
 import httpx
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
 
 
@@ -78,6 +78,7 @@ class PantherDataSourceConnector(DataSourceConnector):
     async def test_connection(self) -> ConnectionTestResult:
         """Test connection to Panther API."""
         import logging
+
         logger = logging.getLogger(__name__)
 
         start_time = time.time()
@@ -111,7 +112,10 @@ class PantherDataSourceConnector(DataSourceConnector):
                 if "errors" in data:
                     return ConnectionTestResult(
                         success=False,
-                        message=f"GraphQL error: {data['errors'][0].get('message', 'Unknown error')}",
+                        message=(
+                            "GraphQL error: "
+                            f"{data['errors'][0].get('message', 'Unknown error')}"
+                        ),
                         latency_ms=latency_ms,
                     )
                 return ConnectionTestResult(
@@ -150,8 +154,8 @@ class PantherDataSourceConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch alerts from Panther API."""
         query = """
         query ListAlerts($input: AlertsInput!) {
@@ -196,11 +200,16 @@ class PantherDataSourceConnector(DataSourceConnector):
 
             data = response.json()
             import logging
+
             logger = logging.getLogger(__name__)
-            logger.info(f"Panther fetch_alerts response: status={response.status_code}, body={data}")
+            logger.info(
+                f"Panther fetch_alerts response: status={response.status_code}, body={data}"
+            )
 
             if response.status_code != 200:
-                error_msg = data.get("errors", [{}])[0].get("message", f"API returned status {response.status_code}")
+                error_msg = data.get("errors", [{}])[0].get(
+                    "message", f"API returned status {response.status_code}"
+                )
                 raise Exception(error_msg)
 
             if "errors" in data:
@@ -230,13 +239,17 @@ class PantherDataSourceConnector(DataSourceConnector):
         # Parse timestamps - convert to naive datetime (no timezone) for PostgreSQL
         created_at_str = raw_alert.get("createdAt", "")
         if created_at_str:
-            created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00")).replace(tzinfo=None)
+            created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00")).replace(
+                tzinfo=None
+            )
         else:
             created_at = datetime.utcnow()
 
         updated_at = None
         if raw_alert.get("updatedAt"):
-            updated_at = datetime.fromisoformat(raw_alert["updatedAt"].replace("Z", "+00:00")).replace(tzinfo=None)
+            updated_at = datetime.fromisoformat(
+                raw_alert["updatedAt"].replace("Z", "+00:00")
+            ).replace(tzinfo=None)
 
         return NormalizedAlert(
             id=uuid.uuid4(),

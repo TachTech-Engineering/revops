@@ -61,7 +61,10 @@ class DetectionTester:
         tests = [
             TestCase(
                 name="Should alert on DeleteBucket",
-                data={"eventName": "DeleteBucket", "requestParameters": {"bucketName": "my-bucket"}},
+                data={
+                    "eventName": "DeleteBucket",
+                    "requestParameters": {"bucketName": "my-bucket"},
+                },
                 expected_result=True,
                 expected_title="Bucket deleted: my-bucket",
             ),
@@ -125,14 +128,20 @@ class DetectionTester:
                     result.title_match = actual_title == test.expected_title
                     if not result.title_match:
                         result.passed = False
-                        result.error = f"Title mismatch: expected '{test.expected_title}', got '{actual_title}'"
+                        result.error = (
+                            f"Title mismatch: expected '{test.expected_title}', "
+                            f"got '{actual_title}'"
+                        )
 
                 if test.expected_dedup is not None:
                     actual_dedup = self.detection.dedup(test.data)
                     result.dedup_match = actual_dedup == test.expected_dedup
                     if not result.dedup_match:
                         result.passed = False
-                        result.error = f"Dedup mismatch: expected '{test.expected_dedup}', got '{actual_dedup}'"
+                        result.error = (
+                            f"Dedup mismatch: expected '{test.expected_dedup}', "
+                            f"got '{actual_dedup}'"
+                        )
 
                 if test.expected_severity is not None:
                     actual_severity = self.detection.severity_override(test.data)
@@ -145,7 +154,10 @@ class DetectionTester:
                     result.severity_match = str(actual_severity) == test.expected_severity
                     if not result.severity_match:
                         result.passed = False
-                        result.error = f"Severity mismatch: expected '{test.expected_severity}', got '{actual_severity}'"
+                        result.error = (
+                            f"Severity mismatch: expected '{test.expected_severity}', "
+                            f"got '{actual_severity}'"
+                        )
 
             return result
 
@@ -186,7 +198,10 @@ class DetectionTester:
         if failed:
             errors = []
             for result in failed:
-                error_msg = f"Test '{result.name}': expected {result.expected_result}, got {result.actual_result}"
+                error_msg = (
+                    f"Test '{result.name}': expected {result.expected_result}, "
+                    f"got {result.actual_result}"
+                )
                 if result.error:
                     error_msg += f" ({result.error})"
                 errors.append(error_msg)

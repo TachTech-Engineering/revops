@@ -64,9 +64,7 @@ class BatchConversionResult:
     streaming_rules: list[GeneratedRule] = field(default_factory=list)
 
     # Rules recommended for scheduled queries
-    scheduled_recommendations: list[ScheduledRuleRecommendation] = field(
-        default_factory=list
-    )
+    scheduled_recommendations: list[ScheduledRuleRecommendation] = field(default_factory=list)
 
     # Conversion errors (if any, when fail_fast=False)
     errors: list[str] = field(default_factory=list)

@@ -12,9 +12,9 @@ import httpx
 from app.db.models import ConnectorCategory
 from app.services.connectors.base import (
     ActionConnector,
-    ConnectorMetadata,
-    ConnectionTestResult,
     ActionResult,
+    ConnectionTestResult,
+    ConnectorMetadata,
 )
 
 
@@ -230,7 +230,10 @@ class SlackActionConnector(ActionConnector):
                 output={
                     "channel": data.get("channel"),
                     "ts": data.get("ts"),
-                    "message_url": f"https://slack.com/archives/{data.get('channel')}/p{data.get('ts', '').replace('.', '')}",
+                    "message_url": (
+                        f"https://slack.com/archives/{data.get('channel')}"
+                        f"/p{data.get('ts', '').replace('.', '')}"
+                    ),
                 },
             )
         else:

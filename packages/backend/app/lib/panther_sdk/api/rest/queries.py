@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import Field
@@ -12,7 +12,7 @@ from ...models.common import BaseModelConfig
 from ..base import BaseClient
 
 
-class QueryStatus(str, Enum):
+class QueryStatus(StrEnum):
     """Query execution status."""
 
     RUNNING = "RUNNING"

@@ -2,17 +2,17 @@
 Stale Rule Detection API - Feature 2
 Find rules that haven't triggered alerts and monitor rule health.
 """
+
 from datetime import datetime, timedelta
-from typing import Annotated, Optional
-from uuid import UUID
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAdminDep
-from app.db import get_db, RuleHealth
+from app.api.v1.deps import OrgAdminDep, OrgIdDep, OrgUserDep
+from app.db import RuleHealth, get_db
 
 router = APIRouter()
 
@@ -21,16 +21,16 @@ class RuleHealthResponse(BaseModel):
     id: str
     rule_id: str
     rule_name: str
-    last_triggered_at: Optional[str]
+    last_triggered_at: str | None
     trigger_count_7d: int
     trigger_count_30d: int
     trigger_count_90d: int
     is_stale: bool
     health_score: float
-    stale_reason: Optional[str]
+    stale_reason: str | None
     is_enabled: bool
-    severity: Optional[str]
-    owner_email: Optional[str]
+    severity: str | None
+    owner_email: str | None
     last_checked_at: str
 
     class Config:
@@ -52,10 +52,10 @@ class RuleHealthStats(BaseModel):
 
 
 class UpdateRuleHealthRequest(BaseModel):
-    rule_name: Optional[str] = None
-    is_enabled: Optional[bool] = None
-    severity: Optional[str] = None
-    owner_email: Optional[str] = None
+    rule_name: str | None = None
+    is_enabled: bool | None = None
+    severity: str | None = None
+    owner_email: str | None = None
 
 
 def serialize_rule_health(rh: RuleHealth) -> RuleHealthResponse:
@@ -82,9 +82,9 @@ async def list_rule_health(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    is_stale: Optional[bool] = Query(None, description="Filter by stale status"),
-    severity: Optional[str] = Query(None, description="Filter by severity"),
-    min_health_score: Optional[float] = Query(None, description="Minimum health score"),
+    is_stale: bool | None = Query(None, description="Filter by stale status"),
+    severity: str | None = Query(None, description="Filter by severity"),
+    min_health_score: float | None = Query(None, description="Minimum health score"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
 ):
@@ -109,7 +109,7 @@ async def list_rule_health(
     stale_count_result = await db.execute(
         select(func.count(RuleHealth.id))
         .where(RuleHealth.organization_id == org_id)
-        .where(RuleHealth.is_stale == True)
+        .where(RuleHealth.is_stale.is_(True))
     )
     stale_count = stale_count_result.scalar() or 0
 
@@ -141,7 +141,7 @@ async def list_stale_rules(
     result = await db.execute(
         select(RuleHealth)
         .where(RuleHealth.organization_id == org_id)
-        .where(RuleHealth.is_stale == True)
+        .where(RuleHealth.is_stale.is_(True))
         .order_by(RuleHealth.last_triggered_at.asc().nullsfirst())
         .offset(offset)
         .limit(page_size)
@@ -151,7 +151,7 @@ async def list_stale_rules(
     count_result = await db.execute(
         select(func.count(RuleHealth.id))
         .where(RuleHealth.organization_id == org_id)
-        .where(RuleHealth.is_stale == True)
+        .where(RuleHealth.is_stale.is_(True))
     )
     total = count_result.scalar() or 0
 
@@ -179,7 +179,7 @@ async def get_rule_health_stats(
     stale_result = await db.execute(
         select(func.count(RuleHealth.id))
         .where(RuleHealth.organization_id == org_id)
-        .where(RuleHealth.is_stale == True)
+        .where(RuleHealth.is_stale.is_(True))
     )
     stale_rules = stale_result.scalar() or 0
 

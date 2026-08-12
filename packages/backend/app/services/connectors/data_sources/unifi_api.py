@@ -8,16 +8,16 @@ admin activities, client events, and threat detections via the REST API.
 import logging
 import time
 import uuid
-from datetime import datetime, timedelta
-from typing import Any, Optional
+from datetime import datetime
+from typing import Any
 
 import httpx
 
-from app.db.models import NormalizedAlert, ConnectorCategory
+from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
-    DataSourceConnector,
-    ConnectorMetadata,
     ConnectionTestResult,
+    ConnectorMetadata,
+    DataSourceConnector,
 )
 
 logger = logging.getLogger(__name__)
@@ -149,7 +149,10 @@ class UniFiAPIConnector(DataSourceConnector):
                     "api_key": {
                         "type": "string",
                         "title": "API Key",
-                        "description": "UniFi Network API key (create in Settings → Integrations → API Keys)",
+                        "description": (
+                            "UniFi Network API key "
+                            "(create in Settings → Integrations → API Keys)"
+                        ),
                         "format": "password",
                     },
                 },
@@ -212,7 +215,7 @@ class UniFiAPIConnector(DataSourceConnector):
 
                     return ConnectionTestResult(
                         success=True,
-                        message=f"Connected to UniFi Controller",
+                        message="Connected to UniFi Controller",
                         details={
                             "sites": site_names,
                             "site_count": len(sites),
@@ -259,8 +262,8 @@ class UniFiAPIConnector(DataSourceConnector):
         self,
         since: datetime,
         limit: int = 100,
-        cursor: Optional[str] = None,
-    ) -> tuple[list[NormalizedAlert], Optional[str]]:
+        cursor: str | None = None,
+    ) -> tuple[list[NormalizedAlert], str | None]:
         """Fetch events from UniFi Controller API."""
         try:
             base_url = self._get_base_url()
@@ -294,7 +297,8 @@ class UniFiAPIConnector(DataSourceConnector):
                     events.extend(data.get("data", []))
                 else:
                     logger.warning(
-                        f"Failed to fetch UniFi events: {response.status_code} - {response.text[:200]}"
+                        f"Failed to fetch UniFi events: {response.status_code} - "
+                        f"{response.text[:200]}"
                     )
 
                 # Also fetch alarms if available
@@ -435,6 +439,7 @@ class UniFiAPIConnector(DataSourceConnector):
         # Extract hostname from URL for cleaner titles
         try:
             from urllib.parse import urlparse
+
             hostname = urlparse(controller_url).hostname or "UniFi"
         except Exception:
             hostname = "UniFi"

@@ -103,9 +103,7 @@ class SPLToPythonTransformer:
             else:
                 # Combine multiple fields with separator
                 self.result.dedup_expression = (
-                    '"-".join([str(x) for x in ['
-                    + ", ".join(dedup_parts)
-                    + "] if x])"
+                    '"-".join([str(x) for x in [' + ", ".join(dedup_parts) + "] if x])"
                 )
 
         # Transform alert context fields

@@ -1,12 +1,13 @@
 """Service layer wrapping the Panther SDK."""
-from typing import Any, Optional
+
+from typing import Any
 
 from app.lib.panther_sdk import (
-    PantherClient,
     AlertStatus,
-    Severity,
-    PantherError,
     NotFoundError,
+    PantherClient,
+    PantherError,
+    Severity,
 )
 
 
@@ -20,7 +21,7 @@ class PantherService:
     def __init__(self, api_host: str, api_token: str):
         self._api_host = api_host
         self._api_token = api_token
-        self._client: Optional[PantherClient] = None
+        self._client: PantherClient | None = None
 
     @property
     def client(self) -> PantherClient:
@@ -39,14 +40,14 @@ class PantherService:
     # Alert methods
     async def list_alerts(
         self,
-        status: Optional[str] = None,
-        severity: Optional[str] = None,
-        detection_id: Optional[str] = None,
-        created_after: Optional[Any] = None,
-        created_before: Optional[Any] = None,
+        status: str | None = None,
+        severity: str | None = None,
+        detection_id: str | None = None,
+        created_after: Any | None = None,
+        created_before: Any | None = None,
         page_size: int = 50,
-        max_items: Optional[int] = None,
-    ) -> tuple[list[dict[str, Any]], Optional[str]]:
+        max_items: int | None = None,
+    ) -> tuple[list[dict[str, Any]], str | None]:
         """List alerts with pagination."""
         try:
             alerts = []
@@ -77,8 +78,8 @@ class PantherService:
     async def update_alert(
         self,
         alert_id: str,
-        status: Optional[str] = None,
-        assignee_id: Optional[str] = None,
+        status: str | None = None,
+        assignee_id: str | None = None,
     ) -> dict[str, Any]:
         """Update an alert."""
         try:
@@ -97,7 +98,7 @@ class PantherService:
         self,
         alert_id: str,
         page_size: int = 50,
-    ) -> tuple[list[dict[str, Any]], Optional[str]]:
+    ) -> tuple[list[dict[str, Any]], str | None]:
         """Get events for an alert."""
         try:
             events = []
@@ -120,12 +121,12 @@ class PantherService:
     # Rule methods
     async def list_rules(
         self,
-        enabled: Optional[bool] = None,
-        severity: Optional[str] = None,
-        log_types: Optional[list[str]] = None,
-        tags: Optional[list[str]] = None,
+        enabled: bool | None = None,
+        severity: str | None = None,
+        log_types: list[str] | None = None,
+        tags: list[str] | None = None,
         page_size: int = 50,
-    ) -> tuple[list[dict[str, Any]], Optional[str]]:
+    ) -> tuple[list[dict[str, Any]], str | None]:
         """List rules with pagination."""
         try:
             rules = []
@@ -240,7 +241,6 @@ class PantherService:
         """Get alert statistics for analytics."""
         try:
             # Get alerts for the time period
-            from datetime import datetime, timedelta
 
             alerts = []
             async for alert in self.client.alerts.alist(

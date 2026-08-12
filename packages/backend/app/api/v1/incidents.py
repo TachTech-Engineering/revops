@@ -1,42 +1,42 @@
-from typing import Annotated, Optional
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, desc, func, and_
+from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, Incident, IncidentAlert, IncidentStatus, IncidentSeverity
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import Incident, IncidentAlert, IncidentSeverity, IncidentStatus, get_db
 
 router = APIRouter()
 
 
 class IncidentCreate(BaseModel):
     title: str
-    description: Optional[str] = None
+    description: str | None = None
     severity: IncidentSeverity = IncidentSeverity.MEDIUM
-    assignee: Optional[str] = None
+    assignee: str | None = None
     tags: list[str] = []
     alert_ids: list[str] = []
 
 
 class IncidentUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[IncidentStatus] = None
-    severity: Optional[IncidentSeverity] = None
-    assignee: Optional[str] = None
-    tags: Optional[list[str]] = None
+    title: str | None = None
+    description: str | None = None
+    status: IncidentStatus | None = None
+    severity: IncidentSeverity | None = None
+    assignee: str | None = None
+    tags: list[str] | None = None
 
 
 class IncidentResponse(BaseModel):
     id: UUID
     title: str
-    description: Optional[str]
+    description: str | None
     status: IncidentStatus
     severity: IncidentSeverity
-    assignee: Optional[str]
+    assignee: str | None
     tags: list[str]
     alert_count: int
     created_by: str
@@ -60,8 +60,8 @@ async def list_incidents(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    status: Optional[IncidentStatus] = None,
-    severity: Optional[IncidentSeverity] = None,
+    status: IncidentStatus | None = None,
+    severity: IncidentSeverity | None = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ) -> dict:
@@ -91,19 +91,21 @@ async def list_incidents(
         count_result = await db.execute(count_query)
         alert_count = count_result.scalar() or 0
 
-        items.append(IncidentResponse(
-            id=incident.id,
-            title=incident.title,
-            description=incident.description,
-            status=incident.status,
-            severity=incident.severity,
-            assignee=incident.assignee,
-            tags=incident.tags,
-            alert_count=alert_count,
-            created_by=incident.created_by,
-            created_at=incident.created_at.isoformat(),
-            updated_at=incident.updated_at.isoformat(),
-        ))
+        items.append(
+            IncidentResponse(
+                id=incident.id,
+                title=incident.title,
+                description=incident.description,
+                status=incident.status,
+                severity=incident.severity,
+                assignee=incident.assignee,
+                tags=incident.tags,
+                alert_count=alert_count,
+                created_by=incident.created_by,
+                created_at=incident.created_at.isoformat(),
+                updated_at=incident.updated_at.isoformat(),
+            )
+        )
 
     return {
         "items": items,

@@ -1,17 +1,17 @@
-from typing import Annotated, Optional
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, EnrichmentPipeline, EnrichmentType
-from app.api.v1.deps import OrgUserDep, OrgIdDep, OrgAnalystDep, OrgAdminDep
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import EnrichmentPipeline, EnrichmentType, get_db
 from app.services.enrichment_service import (
-    run_enrichment,
     enrich_alert,
     get_alert_enrichments,
+    run_enrichment,
 )
 
 router = APIRouter()
@@ -19,13 +19,13 @@ router = APIRouter()
 
 class EnrichmentPipelineCreate(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     enrichment_type: EnrichmentType
     source_field: str
     target_field: str
-    api_endpoint: Optional[str] = None
+    api_endpoint: str | None = None
     api_headers: dict = {}
-    api_key_env: Optional[str] = None
+    api_key_env: str | None = None
     cache_ttl_minutes: int = 60
     is_active: bool = True
     auto_enrich: bool = False
@@ -33,29 +33,29 @@ class EnrichmentPipelineCreate(BaseModel):
 
 
 class EnrichmentPipelineUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    source_field: Optional[str] = None
-    target_field: Optional[str] = None
-    api_endpoint: Optional[str] = None
-    api_headers: Optional[dict] = None
-    api_key_env: Optional[str] = None
-    cache_ttl_minutes: Optional[int] = None
-    is_active: Optional[bool] = None
-    auto_enrich: Optional[bool] = None
-    severity_filter: Optional[list[str]] = None
+    name: str | None = None
+    description: str | None = None
+    source_field: str | None = None
+    target_field: str | None = None
+    api_endpoint: str | None = None
+    api_headers: dict | None = None
+    api_key_env: str | None = None
+    cache_ttl_minutes: int | None = None
+    is_active: bool | None = None
+    auto_enrich: bool | None = None
+    severity_filter: list[str] | None = None
 
 
 class EnrichmentPipelineResponse(BaseModel):
     id: UUID
     name: str
-    description: Optional[str]
+    description: str | None
     enrichment_type: EnrichmentType
     source_field: str
     target_field: str
-    api_endpoint: Optional[str]
+    api_endpoint: str | None
     api_headers: dict
-    api_key_env: Optional[str]
+    api_key_env: str | None
     cache_ttl_minutes: int
     is_active: bool
     auto_enrich: bool
@@ -75,7 +75,7 @@ class EnrichValueRequest(BaseModel):
 class EnrichAlertRequest(BaseModel):
     alert_id: str
     alert_data: dict
-    pipeline_ids: Optional[list[str]] = None
+    pipeline_ids: list[str] | None = None
 
 
 @router.get("")
@@ -84,15 +84,17 @@ async def list_enrichment_pipelines(
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     active_only: bool = False,
-    enrichment_type: Optional[EnrichmentType] = None,
+    enrichment_type: EnrichmentType | None = None,
 ) -> list[EnrichmentPipelineResponse]:
     """List all enrichment pipelines."""
-    query = select(EnrichmentPipeline).where(
-        EnrichmentPipeline.organization_id == org_id
-    ).order_by(EnrichmentPipeline.created_at.desc())
+    query = (
+        select(EnrichmentPipeline)
+        .where(EnrichmentPipeline.organization_id == org_id)
+        .order_by(EnrichmentPipeline.created_at.desc())
+    )
 
     if active_only:
-        query = query.where(EnrichmentPipeline.is_active == True)
+        query = query.where(EnrichmentPipeline.is_active.is_(True))
     if enrichment_type:
         query = query.where(EnrichmentPipeline.enrichment_type == enrichment_type)
 
@@ -125,10 +127,7 @@ async def list_enrichment_pipelines(
 @router.get("/types")
 async def get_enrichment_types(user: OrgUserDep) -> list[dict]:
     """Get available enrichment types."""
-    return [
-        {"value": t.value, "label": t.value.replace("_", " ").title()}
-        for t in EnrichmentType
-    ]
+    return [{"value": t.value, "label": t.value.replace("_", " ").title()} for t in EnrichmentType]
 
 
 @router.get("/{pipeline_id}")
@@ -141,10 +140,7 @@ async def get_enrichment_pipeline(
     """Get an enrichment pipeline by ID."""
     result = await db.execute(
         select(EnrichmentPipeline).where(
-            and_(
-                EnrichmentPipeline.id == pipeline_id,
-                EnrichmentPipeline.organization_id == org_id
-            )
+            and_(EnrichmentPipeline.id == pipeline_id, EnrichmentPipeline.organization_id == org_id)
         )
     )
     pipeline = result.scalar_one_or_none()
@@ -230,7 +226,7 @@ async def update_enrichment_pipeline(
         select(EnrichmentPipeline).where(
             and_(
                 EnrichmentPipeline.id == pipeline_id,
-                EnrichmentPipeline.organization_id == analyst.organization_id
+                EnrichmentPipeline.organization_id == analyst.organization_id,
             )
         )
     )
@@ -275,7 +271,7 @@ async def delete_enrichment_pipeline(
         select(EnrichmentPipeline).where(
             and_(
                 EnrichmentPipeline.id == pipeline_id,
-                EnrichmentPipeline.organization_id == analyst.organization_id
+                EnrichmentPipeline.organization_id == analyst.organization_id,
             )
         )
     )
@@ -299,7 +295,7 @@ async def test_enrichment_pipeline(
         select(EnrichmentPipeline).where(
             and_(
                 EnrichmentPipeline.id == pipeline_id,
-                EnrichmentPipeline.organization_id == analyst.organization_id
+                EnrichmentPipeline.organization_id == analyst.organization_id,
             )
         )
     )

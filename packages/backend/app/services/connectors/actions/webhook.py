@@ -4,10 +4,10 @@ Webhook Action Connector
 Sends HTTP webhook notifications to arbitrary endpoints.
 """
 
-import time
-import json
-import hmac
 import hashlib
+import hmac
+import json
+import time
 from typing import Any
 
 import httpx
@@ -15,9 +15,9 @@ import httpx
 from app.db.models import ConnectorCategory
 from app.services.connectors.base import (
     ActionConnector,
-    ConnectorMetadata,
-    ConnectionTestResult,
     ActionResult,
+    ConnectionTestResult,
+    ConnectorMetadata,
 )
 
 
@@ -55,7 +55,11 @@ class WebhookActionConnector(ActionConnector):
                     },
                     "content_type": {
                         "type": "string",
-                        "enum": ["application/json", "application/x-www-form-urlencoded", "text/plain"],
+                        "enum": [
+                            "application/json",
+                            "application/x-www-form-urlencoded",
+                            "text/plain",
+                        ],
                         "title": "Content Type",
                         "description": "Request content type",
                         "default": "application/json",
@@ -156,7 +160,8 @@ class WebhookActionConnector(ActionConnector):
 
             latency_ms = int((time.time() - start_time) * 1000)
 
-            # Accept any successful status or 405 (method not allowed - endpoint exists but doesn't support HEAD)
+            # Accept any successful status or 405
+            # (method not allowed - endpoint exists but doesn't support HEAD)
             if response.status_code < 500 or response.status_code == 405:
                 return ConnectionTestResult(
                     success=True,

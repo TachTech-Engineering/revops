@@ -5,10 +5,9 @@ Pauses workflow execution for a specified duration.
 """
 
 import asyncio
-from typing import Any
 
-from app.services.workflow_engine.nodes.base import NodeExecutor, NodeResult
 from app.services.workflow_engine.context import ExecutionContext
+from app.services.workflow_engine.nodes.base import NodeExecutor, NodeResult
 
 
 class DelayExecutor(NodeExecutor):
