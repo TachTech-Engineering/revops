@@ -71,7 +71,24 @@ MIGRATE_JOB="${PREFIX}backend-migrate"
 # Job pod specs are immutable, so drop any previous run before re-applying
 # with the new image tag.
 kubectl delete job "$MIGRATE_JOB" -n "$NAMESPACE" --ignore-not-found
-kustomize build "$OVERLAY" | kubectl apply -l app=backend-migrate -f -
+# The migration Job depends on the backend-config ConfigMap and the Workload
+# Identity ServiceAccount (backend / staging-backend) -- a pod referencing a
+# missing ServiceAccount is rejected, so both must exist BEFORE the Job. Apply
+# those prerequisites plus the Job, WITHOUT rolling the app Deployments (which
+# must not update until migrations succeed). Filter the render by kind so only
+# {ConfigMap, ServiceAccount, Job} are applied here.
+RENDERED="$(kustomize build "$OVERLAY")"
+printf '%s\n' "$RENDERED" | python3 -c '
+import sys
+keep = set(sys.argv[1:])
+for doc in sys.stdin.read().split("\n---\n"):
+    for line in doc.splitlines():
+        s = line.strip()
+        if s.startswith("kind:"):
+            if s.split(":", 1)[1].strip() in keep:
+                sys.stdout.write(doc.rstrip("\n") + "\n---\n")
+            break
+' ConfigMap ServiceAccount Job | kubectl apply -f -
 
 echo "   Waiting for migration job to complete..."
 MIGRATE_OK=""

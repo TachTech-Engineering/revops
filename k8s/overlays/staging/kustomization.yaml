@@ -18,6 +18,8 @@ configMapGenerator:
     literals:
       - LOG_LEVEL=DEBUG
       - CORS_ORIGINS=https://staging.panther-dashboard.example.com
+      # Staging Cloud SQL instance (created by scripts/gke-cloudsql-setup.sh).
+      - CLOUD_SQL_INSTANCE=revops-486917:us-central1:revops-staging-db
 
 images:
   - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend

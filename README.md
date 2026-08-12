@@ -180,14 +180,28 @@ revops/
 Images are tagged with the short commit SHA (and `latest`); deploys pin that
 tag in the kustomize overlay so every deploy actually rolls pods.
 
+**Requirements**
+
+- **GKE 1.29+** — the backend Deployment and migration Job run the Cloud SQL
+  Auth Proxy as a *native sidecar* (an `initContainer` with `restartPolicy: Always`),
+  which is only available on 1.29+.
+- **Workload Identity enabled** on the cluster (`--workload-pool=<project>.svc.id.goog`;
+  `gke-setup.sh` creates the cluster with it). The backend authenticates to Cloud
+  SQL through a KSA→GSA binding, not a key file.
+
 ```bash
 # One-time setup
-./scripts/gke-setup.sh      # cluster, APIs, static IP
-./scripts/gke-secrets.sh    # backend-secrets in revops + revops-staging namespaces
-                            # (requires PANTHER_API_HOST, PANTHER_API_TOKEN and
-                            #  DATABASE_URL in .env — DATABASE_URL must point at a
-                            #  real database such as Cloud SQL; the k8s manifests
-                            #  do not deploy Postgres)
+./scripts/gke-setup.sh          # cluster (Workload Identity), APIs, static IP
+./scripts/gke-cloudsql-setup.sh # Cloud SQL Postgres 15 instances (staging + prod),
+                                #  DB users, GSA + roles/cloudsql.client, Workload
+                                #  Identity bindings, DATABASE_URL in Secret Manager.
+                                #  Prints the instance connection names. USER runs it
+                                #  (billable provisioning; idempotent).
+./scripts/gke-secrets.sh        # backend-secrets in revops + revops-staging namespaces
+                                # (requires PANTHER_API_HOST, PANTHER_API_TOKEN in .env;
+                                #  DATABASE_URL is pulled per-environment from Secret
+                                #  Manager as populated by gke-cloudsql-setup.sh, with
+                                #  an .env DATABASE_URL as fallback)
 
 # Build and push images (tags: $SHORT_SHA + latest)
 TAG=$(git rev-parse --short HEAD)
@@ -201,7 +215,16 @@ gcloud builds submit --config=cloudbuild-backend.yaml --substitutions=SHORT_SHA=
 ```
 
 Project/cluster/namespace settings live in one place: `scripts/gke-env.sh`
-(GCP project `revops-486917`, namespaces `revops` / `revops-staging`).
+(GCP project `revops-486917`, namespaces `revops` / `revops-staging`, and the
+Cloud SQL instance names / DB user / tier).
+
+**Database connectivity.** The backend never talks to Cloud SQL over the public
+internet. A Cloud SQL Auth Proxy v2 sidecar runs alongside both the backend pods
+and the migration Job and opens an mTLS + IAM-authenticated tunnel to the
+instance; the app connects to it at `127.0.0.1:5432`. Staging and production use
+**separate** Cloud SQL instances, selected per overlay via the `CLOUD_SQL_INSTANCE`
+config value. No database IP is exposed to the cluster and no DB password travels
+the network in the clear.
 
 See [ARCHITECTURE-GCP.md](./ARCHITECTURE-GCP.md) for detailed GCP deployment architecture.
 

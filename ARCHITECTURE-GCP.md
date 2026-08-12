@@ -5,10 +5,17 @@
 > The platform as actually deployed today runs on **GKE** using the kustomize
 > manifests in [`k8s/`](./k8s/) (base + `staging`/`production` overlays), with
 > images built by Cloud Build (`cloudbuild-*.yaml`) and deployed via
-> `scripts/gke-deploy.sh`. Redis runs in-cluster, and the database is provided
-> externally via the `DATABASE_URL` secret (see `scripts/gke-secrets.sh`) rather
-> than by a provisioned Cloud SQL instance. Treat the Cloud Run sections below as
-> a design proposal, not a description of current infrastructure.
+> `scripts/gke-deploy.sh`. Redis runs in-cluster. The database **is** a
+> provisioned **Cloud SQL for PostgreSQL 15** instance (one per environment),
+> wired to the workloads via the **Cloud SQL Auth Proxy v2 sidecar** plus
+> **Workload Identity**: the `backend` KSA is bound to the
+> `revops-backend@revops-486917` GSA (`roles/cloudsql.client`), a native-sidecar
+> proxy (`initContainer` with `restartPolicy: Always`, GKE 1.29+) runs on both the
+> backend Deployment and the migration Job, and the app connects at
+> `127.0.0.1:5432`. Provision it with `scripts/gke-cloudsql-setup.sh`; the
+> per-environment `DATABASE_URL` lives in Secret Manager (see
+> `scripts/gke-secrets.sh`). The Cloud Run sections below remain a design
+> proposal, not a description of current infrastructure.
 
 ## Full Infrastructure
 

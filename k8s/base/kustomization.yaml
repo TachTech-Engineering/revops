@@ -5,6 +5,7 @@ namespace: revops
 
 resources:
   - namespace.yaml
+  - serviceaccount.yaml
   - configmap.yaml
   - frontend-deployment.yaml
   - backend-deployment.yaml

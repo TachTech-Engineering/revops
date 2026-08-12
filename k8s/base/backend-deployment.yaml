@@ -14,6 +14,44 @@ spec:
       labels:
         app: backend
     spec:
+      # Workload Identity: the KSA is bound to revops-backend@revops-486917 which
+      # holds roles/cloudsql.client. The Cloud SQL Auth Proxy sidecar uses it.
+      serviceAccountName: backend
+      # Native sidecar (initContainer with restartPolicy: Always) for the Cloud
+      # SQL Auth Proxy v2. REQUIRES GKE 1.29+ (SidecarContainers is GA). The
+      # native-sidecar pattern guarantees the proxy is started and Ready BEFORE
+      # the backend container, so the app's startupProbe DB-retry window sees a
+      # working 127.0.0.1:5432 tunnel, and the proxy stays up for the pod's life.
+      initContainers:
+        - name: cloud-sql-proxy
+          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
+          restartPolicy: Always  # makes this a native sidecar (GKE 1.29+)
+          args:
+            # CLOUD_SQL_INSTANCE (project:region:instance) comes from the
+            # backend-config ConfigMap; k8s substitutes $(VAR) in args when the
+            # var is declared in this container's env.
+            - "--address=127.0.0.1"
+            - "--port=5432"
+            - "--structured-logs"
+            - "--admin-port=9091"
+            - "--quitquitquit"
+            - "$(CLOUD_SQL_INSTANCE)"
+          env:
+            - name: CLOUD_SQL_INSTANCE
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: CLOUD_SQL_INSTANCE
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
       containers:
         - name: backend
           image: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend:latest

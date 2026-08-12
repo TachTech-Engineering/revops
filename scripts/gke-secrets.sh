@@ -32,15 +32,25 @@ if [ -z "${PANTHER_API_HOST:-}" ] || [ -z "${PANTHER_API_TOKEN:-}" ]; then
     exit 1
 fi
 
-# DATABASE_URL must point at a real database (e.g. Cloud SQL). There is no
-# Postgres deployed by the k8s manifests, and without this variable the
-# backend silently falls back to localhost and crash-loops.
-if [ -z "${DATABASE_URL:-}" ]; then
-    echo "ERROR: DATABASE_URL must be set in .env"
-    echo "It must point at a real database reachable from the cluster, e.g. Cloud SQL:"
-    echo "  DATABASE_URL=postgresql+asyncpg://USER:PASSWORD@CLOUD_SQL_IP:5432/DBNAME"
-    exit 1
-fi
+# DATABASE_URL resolution order (per namespace), so staging and production can
+# point at SEPARATE Cloud SQL instances:
+#   1. Secret Manager, per environment, as populated by gke-cloudsql-setup.sh:
+#        production namespace -> secret "$DATABASE_URL_SECRET"          (database-url)
+#        staging namespace    -> secret "${DATABASE_URL_SECRET}-staging" (database-url-staging)
+#   2. Fallback: the DATABASE_URL in .env (legacy / manually-managed DB).
+# With the Cloud SQL Auth Proxy sidecar every URL is 127.0.0.1:5432, e.g.
+#   postgresql+asyncpg://USER:PASSWORD@127.0.0.1:5432/DBNAME
+# The hard requirement is checked per namespace below, after consulting Secret Manager.
+
+# Prefer the per-environment Secret Manager value; fall back to .env DATABASE_URL.
+resolve_db_url() {
+    local secret_id="$1"
+    if gcloud secrets describe "$secret_id" --project="$PROJECT_ID" >/dev/null 2>&1; then
+        gcloud secrets versions access latest --secret="$secret_id" --project="$PROJECT_ID"
+    else
+        printf '%s' "${DATABASE_URL:-}"
+    fi
+}
 
 # Generate a secret key if not set
 if [ -z "${SECRET_KEY:-}" ]; then
@@ -61,7 +71,12 @@ create_or_update_secret() {
 create_or_update_secret panther-api-host "$PANTHER_API_HOST"
 create_or_update_secret panther-api-token "$PANTHER_API_TOKEN"
 create_or_update_secret jwt-secret-key "$SECRET_KEY"
-create_or_update_secret database-url "$DATABASE_URL"
+# Do NOT clobber a DATABASE_URL already provisioned by gke-cloudsql-setup.sh.
+# Only seed the production secret from .env when it does not already exist.
+if [ -n "${DATABASE_URL:-}" ] \
+    && ! gcloud secrets describe "$DATABASE_URL_SECRET" --project="$PROJECT_ID" >/dev/null 2>&1; then
+    create_or_update_secret "$DATABASE_URL_SECRET" "$DATABASE_URL"
+fi
 
 echo ""
 echo "2. Creating Kubernetes namespaces..."
@@ -72,12 +87,23 @@ echo ""
 echo "3. Creating Kubernetes secrets..."
 
 for ns in "$PROD_NAMESPACE" "$STAGING_NAMESPACE"; do
+    if [ "$ns" == "$STAGING_NAMESPACE" ]; then
+        DB_SECRET_ID="${DATABASE_URL_SECRET}-staging"
+    else
+        DB_SECRET_ID="$DATABASE_URL_SECRET"
+    fi
+    NS_DB_URL="$(resolve_db_url "$DB_SECRET_ID")"
+    if [ -z "$NS_DB_URL" ]; then
+        echo "ERROR: no DATABASE_URL available for namespace '$ns'." >&2
+        echo "  Run ./scripts/gke-cloudsql-setup.sh first, or set DATABASE_URL in .env." >&2
+        exit 1
+    fi
     kubectl create secret generic backend-secrets \
         --namespace="$ns" \
         --from-literal=PANTHER_API_HOST="$PANTHER_API_HOST" \
         --from-literal=PANTHER_API_TOKEN="$PANTHER_API_TOKEN" \
         --from-literal=SECRET_KEY="$SECRET_KEY" \
-        --from-literal=DATABASE_URL="$DATABASE_URL" \
+        --from-literal=DATABASE_URL="$NS_DB_URL" \
         --dry-run=client -o yaml | kubectl apply -f -
 done
 
