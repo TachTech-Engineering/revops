@@ -14,7 +14,6 @@ import {
   FolderOpen,
   Tag,
 } from 'lucide-react'
-import { cn } from '../lib/utils'
 
 interface JiraProject {
   id: string
@@ -59,7 +58,7 @@ const mockProjects: JiraProject[] = [
 ]
 
 export default function JiraIntegrationPage() {
-  const [isConnected, setIsConnected] = useState(true)
+  const [isConnected] = useState(true)
   const [projects, setProjects] = useState(mockProjects)
   const [showAddProject, setShowAddProject] = useState(false)
   const [isSaving, setIsSaving] = useState(false)

@@ -189,7 +189,7 @@ export default function IOCSearchPage() {
                   <div className="flex items-center gap-2 mb-2">
                     <Shield size={16} />
                     <span className="font-medium">VirusTotal</span>
-                    {threatIntelResult.virustotal?.found && (
+                    {!!threatIntelResult.virustotal?.found && (
                       <a
                         href={`https://www.virustotal.com/gui/search/${searchResult.indicator}`}
                         target="_blank"
@@ -201,10 +201,10 @@ export default function IOCSearchPage() {
                     )}
                   </div>
                   {threatIntelResult.virustotal?.error ? (
-                    <p className="text-sm text-muted-foreground">{threatIntelResult.virustotal.error}</p>
+                    <p className="text-sm text-muted-foreground">{String(threatIntelResult.virustotal.error)}</p>
                   ) : threatIntelResult.virustotal?.found ? (
                     <div className="space-y-2 text-sm">
-                      {threatIntelResult.virustotal.last_analysis_stats && (
+                      {!!threatIntelResult.virustotal.last_analysis_stats && (
                         <div className="flex items-center gap-2">
                           <span className="text-muted-foreground">Detection:</span>
                           <span className="text-red-400">
@@ -215,13 +215,13 @@ export default function IOCSearchPage() {
                           </span>
                         </div>
                       )}
-                      {threatIntelResult.virustotal.country && (
+                      {!!threatIntelResult.virustotal.country && (
                         <div>
                           <span className="text-muted-foreground">Country:</span>
                           <span className="ml-2">{threatIntelResult.virustotal.country as string}</span>
                         </div>
                       )}
-                      {threatIntelResult.virustotal.as_owner && (
+                      {!!threatIntelResult.virustotal.as_owner && (
                         <div>
                           <span className="text-muted-foreground">AS Owner:</span>
                           <span className="ml-2">{threatIntelResult.virustotal.as_owner as string}</span>
@@ -258,13 +258,13 @@ export default function IOCSearchPage() {
                           <span className="text-muted-foreground">Reports:</span>
                           <span className="ml-2">{threatIntelResult.abuseipdb.total_reports as number}</span>
                         </div>
-                        {threatIntelResult.abuseipdb.isp && (
+                        {!!threatIntelResult.abuseipdb.isp && (
                           <div>
                             <span className="text-muted-foreground">ISP:</span>
                             <span className="ml-2">{threatIntelResult.abuseipdb.isp as string}</span>
                           </div>
                         )}
-                        {threatIntelResult.abuseipdb.is_tor && (
+                        {!!threatIntelResult.abuseipdb.is_tor && (
                           <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 rounded text-xs">
                             Tor Exit Node
                           </span>

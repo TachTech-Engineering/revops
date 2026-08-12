@@ -16,8 +16,6 @@ const severityColors: Record<string, string> = {
 export default function RecentAlertsWidget({ config }: RecentAlertsWidgetProps) {
   const { data, isLoading } = useListAlertsQuery({
     pageSize: config?.limit || 5,
-    sortBy: 'createdAt',
-    sortDir: 'desc',
   })
 
   if (isLoading) {
@@ -28,7 +26,7 @@ export default function RecentAlertsWidget({ config }: RecentAlertsWidgetProps) 
     )
   }
 
-  if (!data?.items?.length) {
+  if (!data?.results?.length) {
     return <div className="text-gray-500 text-center p-4">No recent alerts</div>
   }
 
@@ -43,7 +41,7 @@ export default function RecentAlertsWidget({ config }: RecentAlertsWidgetProps) 
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-200">
-          {data.items.map((alert) => (
+          {data.results.map((alert) => (
             <tr key={alert.id} className="hover:bg-gray-50">
               <td className="px-3 py-2">
                 <Link

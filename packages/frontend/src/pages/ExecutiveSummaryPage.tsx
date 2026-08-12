@@ -20,6 +20,7 @@ import {
   useGetTeamPerformanceQuery,
   useGetSLAComplianceQuery,
   useExportExecutiveReportMutation,
+  type MetricValue,
 } from '../api/pantherApi'
 
 interface MetricCard {
@@ -29,6 +30,14 @@ interface MetricCard {
   trend: 'up' | 'down' | 'stable'
   isGood: boolean
   description: string
+  unavailable?: boolean
+}
+
+// Returns the metric's numeric value, or null when the backend reported the
+// metric as unavailable. Null must render as an explicit "No data" state,
+// never as 0.
+function metricNumber(metric: MetricValue): number | null {
+  return metric.data_available && metric.value !== null ? metric.value : null
 }
 
 function getDaysFromTimeRange(timeRange: string): number {
@@ -92,38 +101,51 @@ export default function ExecutiveSummaryPage() {
   const metricCards: MetricCard[] = useMemo(() => {
     if (!metricsData) return []
 
+    const totalAlerts = metricNumber(metricsData.total_alerts)
+    const mttr = metricNumber(metricsData.mttr_hours)
+    const criticalIncidents = metricNumber(metricsData.critical_incidents)
+    const complianceScore = metricNumber(metricsData.compliance_score)
+
     return [
       {
         title: 'Total Alerts',
-        value: metricsData.total_alerts.value.toLocaleString(),
-        change: metricsData.total_alerts.change_percent,
+        value: totalAlerts !== null ? totalAlerts.toLocaleString() : 'No data',
+        change: totalAlerts !== null ? metricsData.total_alerts.change_percent : null,
         trend: metricsData.total_alerts.trend,
         isGood: metricsData.total_alerts.trend === 'down',
-        description: 'vs previous period',
+        description: totalAlerts !== null ? 'vs previous period' : 'Not available for this period',
+        unavailable: totalAlerts === null,
       },
       {
         title: 'Mean Time to Resolve',
-        value: formatHours(metricsData.mttr_hours.value),
-        change: metricsData.mttr_hours.change_percent,
+        value: mttr !== null ? formatHours(mttr) : 'No data',
+        change: mttr !== null ? metricsData.mttr_hours.change_percent : null,
         trend: metricsData.mttr_hours.trend,
         isGood: metricsData.mttr_hours.trend === 'down',
-        description: 'vs previous period',
+        description: mttr !== null ? 'vs previous period' : 'Not available for this period',
+        unavailable: mttr === null,
       },
       {
         title: 'Critical Incidents',
-        value: metricsData.critical_incidents.value,
-        change: metricsData.critical_incidents.change_percent,
+        value: criticalIncidents !== null ? criticalIncidents : 'No data',
+        change: criticalIncidents !== null ? metricsData.critical_incidents.change_percent : null,
         trend: metricsData.critical_incidents.trend,
         isGood: metricsData.critical_incidents.trend === 'down',
-        description: 'vs previous period',
+        description:
+          criticalIncidents !== null ? 'vs previous period' : 'Not available for this period',
+        unavailable: criticalIncidents === null,
       },
       {
         title: 'Compliance Score',
-        value: `${Math.round(metricsData.compliance_score.value)}%`,
-        change: metricsData.compliance_score.change_percent,
+        value: complianceScore !== null ? `${Math.round(complianceScore)}%` : 'No data',
+        change: complianceScore !== null ? metricsData.compliance_score.change_percent : null,
         trend: metricsData.compliance_score.trend,
-        isGood: metricsData.compliance_score.trend === 'up' || metricsData.compliance_score.value >= 90,
-        description: 'vs previous period',
+        isGood:
+          metricsData.compliance_score.trend === 'up' ||
+          (complianceScore !== null && complianceScore >= 90),
+        description:
+          complianceScore !== null ? 'vs previous period' : 'Not available for this period',
+        unavailable: complianceScore === null,
       },
     ]
   }, [metricsData])
@@ -171,14 +193,24 @@ export default function ExecutiveSummaryPage() {
     )
   }
 
-  // Calculate security posture score
-  const securityScore = metricsData
-    ? Math.round(
-        (metricsData.compliance_score.value * 0.3) +
-        (Math.max(0, 100 - metricsData.false_positive_rate.value) * 0.3) +
-        (Math.min(100, (metricsData.resolved_incidents.value / Math.max(1, metricsData.open_incidents.value + metricsData.resolved_incidents.value)) * 100) * 0.4)
-      )
-    : 0
+  // Calculate security posture score. Null (rendered as "No data") when any
+  // input metric is unavailable - a partial score would be misleading.
+  const complianceScoreValue = metricsData ? metricNumber(metricsData.compliance_score) : null
+  const falsePositiveRate = metricsData ? metricNumber(metricsData.false_positive_rate) : null
+  const openIncidents = metricsData ? metricNumber(metricsData.open_incidents) : null
+  const resolvedIncidents = metricsData ? metricNumber(metricsData.resolved_incidents) : null
+
+  const securityScore =
+    complianceScoreValue !== null &&
+    falsePositiveRate !== null &&
+    openIncidents !== null &&
+    resolvedIncidents !== null
+      ? Math.round(
+          (complianceScoreValue * 0.3) +
+          (Math.max(0, 100 - falsePositiveRate) * 0.3) +
+          (Math.min(100, (resolvedIncidents / Math.max(1, openIncidents + resolvedIncidents)) * 100) * 0.4)
+        )
+      : null
 
   return (
     <div className="space-y-6">
@@ -245,7 +277,14 @@ export default function ExecutiveSummaryPage() {
                 </div>
               )}
             </div>
-            <p className="text-3xl font-bold">{metric.value}</p>
+            <p
+              className={cn(
+                'text-3xl font-bold',
+                metric.unavailable && 'text-xl text-muted-foreground'
+              )}
+            >
+              {metric.value}
+            </p>
             <p className="text-xs text-muted-foreground mt-1">{metric.description}</p>
           </div>
         ))}
@@ -378,40 +417,54 @@ export default function ExecutiveSummaryPage() {
                 strokeWidth="8"
                 className="text-muted"
               />
-              <circle
-                cx="64"
-                cy="64"
-                r="56"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="8"
-                strokeDasharray={`${(securityScore / 100) * 352} 352`}
-                className={cn(
-                  securityScore >= 80 ? 'text-green-500' :
-                  securityScore >= 60 ? 'text-yellow-500' :
-                  'text-red-500'
-                )}
-              />
+              {securityScore !== null && (
+                <circle
+                  cx="64"
+                  cy="64"
+                  r="56"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="8"
+                  strokeDasharray={`${(securityScore / 100) * 352} 352`}
+                  className={cn(
+                    securityScore >= 80 ? 'text-green-500' :
+                    securityScore >= 60 ? 'text-yellow-500' :
+                    'text-red-500'
+                  )}
+                />
+              )}
             </svg>
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-center">
-                <span className="text-2xl font-bold">{securityScore}</span>
-                <p className="text-xs text-muted-foreground">/ 100</p>
+                {securityScore !== null ? (
+                  <>
+                    <span className="text-2xl font-bold">{securityScore}</span>
+                    <p className="text-xs text-muted-foreground">/ 100</p>
+                  </>
+                ) : (
+                  <span className="text-sm text-muted-foreground">No data</span>
+                )}
               </div>
             </div>
           </div>
-          <p className="text-center text-sm text-muted-foreground">
-            Your security score is{' '}
-            <span className={cn(
-              securityScore >= 80 ? 'text-green-400' :
-              securityScore >= 60 ? 'text-yellow-400' :
-              'text-red-400'
-            )}>
-              {securityScore >= 80 ? 'above average' :
-               securityScore >= 60 ? 'average' :
-               'below average'}
-            </span>
-          </p>
+          {securityScore !== null ? (
+            <p className="text-center text-sm text-muted-foreground">
+              Your security score is{' '}
+              <span className={cn(
+                securityScore >= 80 ? 'text-green-400' :
+                securityScore >= 60 ? 'text-yellow-400' :
+                'text-red-400'
+              )}>
+                {securityScore >= 80 ? 'above average' :
+                 securityScore >= 60 ? 'average' :
+                 'below average'}
+              </span>
+            </p>
+          ) : (
+            <p className="text-center text-sm text-muted-foreground">
+              Not enough data to compute a security score
+            </p>
+          )}
         </div>
 
         <div className="bg-card rounded-lg border p-4">
@@ -423,42 +476,54 @@ export default function ExecutiveSummaryPage() {
             <div>
               <div className="flex justify-between text-sm mb-1">
                 <span>Open Incidents</span>
-                <span className="font-medium">{metricsData?.open_incidents.value || 0}</span>
+                <span className={cn('font-medium', openIncidents === null && 'text-muted-foreground')}>
+                  {openIncidents !== null ? openIncidents : 'No data'}
+                </span>
               </div>
               <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-orange-500 rounded-full"
-                  style={{ width: `${Math.min(100, (metricsData?.open_incidents.value || 0) / 10 * 100)}%` }}
-                />
+                {openIncidents !== null && (
+                  <div
+                    className="h-full bg-orange-500 rounded-full"
+                    style={{ width: `${Math.min(100, openIncidents / 10 * 100)}%` }}
+                  />
+                )}
               </div>
             </div>
             <div>
               <div className="flex justify-between text-sm mb-1">
                 <span>Resolved This Period</span>
-                <span className="font-medium">{metricsData?.resolved_incidents.value || 0}</span>
+                <span className={cn('font-medium', resolvedIncidents === null && 'text-muted-foreground')}>
+                  {resolvedIncidents !== null ? resolvedIncidents : 'No data'}
+                </span>
               </div>
               <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-green-500 rounded-full"
-                  style={{ width: `${Math.min(100, (metricsData?.resolved_incidents.value || 0) / 50 * 100)}%` }}
-                />
+                {resolvedIncidents !== null && (
+                  <div
+                    className="h-full bg-green-500 rounded-full"
+                    style={{ width: `${Math.min(100, resolvedIncidents / 50 * 100)}%` }}
+                  />
+                )}
               </div>
             </div>
             <div>
               <div className="flex justify-between text-sm mb-1">
                 <span>False Positive Rate</span>
-                <span className="font-medium">{Math.round(metricsData?.false_positive_rate.value || 0)}%</span>
+                <span className={cn('font-medium', falsePositiveRate === null && 'text-muted-foreground')}>
+                  {falsePositiveRate !== null ? `${Math.round(falsePositiveRate)}%` : 'No data'}
+                </span>
               </div>
               <div className="h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className={cn(
-                    'h-full rounded-full',
-                    (metricsData?.false_positive_rate.value || 0) <= 10 ? 'bg-green-500' :
-                    (metricsData?.false_positive_rate.value || 0) <= 25 ? 'bg-yellow-500' :
-                    'bg-red-500'
-                  )}
-                  style={{ width: `${metricsData?.false_positive_rate.value || 0}%` }}
-                />
+                {falsePositiveRate !== null && (
+                  <div
+                    className={cn(
+                      'h-full rounded-full',
+                      falsePositiveRate <= 10 ? 'bg-green-500' :
+                      falsePositiveRate <= 25 ? 'bg-yellow-500' :
+                      'bg-red-500'
+                    )}
+                    style={{ width: `${falsePositiveRate}%` }}
+                  />
+                )}
               </div>
             </div>
           </div>
@@ -504,14 +569,18 @@ export default function ExecutiveSummaryPage() {
               <div className="pt-2 border-t">
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Overall Compliance</span>
-                  <span className={cn(
-                    'font-bold',
-                    slaData.overall_compliance_rate >= 95 ? 'text-green-400' :
-                    slaData.overall_compliance_rate >= 80 ? 'text-yellow-400' :
-                    'text-red-400'
-                  )}>
-                    {Math.round(slaData.overall_compliance_rate)}%
-                  </span>
+                  {slaData.data_available && slaData.overall_compliance_rate !== null ? (
+                    <span className={cn(
+                      'font-bold',
+                      slaData.overall_compliance_rate >= 95 ? 'text-green-400' :
+                      slaData.overall_compliance_rate >= 80 ? 'text-yellow-400' :
+                      'text-red-400'
+                    )}>
+                      {Math.round(slaData.overall_compliance_rate)}%
+                    </span>
+                  ) : (
+                    <span className="font-bold text-muted-foreground">No data</span>
+                  )}
                 </div>
               </div>
             )}

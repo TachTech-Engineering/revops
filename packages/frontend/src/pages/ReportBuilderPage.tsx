@@ -12,16 +12,12 @@ import {
   Copy,
   Eye,
   Mail,
-  ChevronDown,
-  ChevronUp,
   BarChart3,
   PieChart,
   LineChart,
   Table,
-  Filter,
   Save,
 } from 'lucide-react'
-import { cn } from '../lib/utils'
 
 interface ReportTemplate {
   id: string
@@ -106,7 +102,6 @@ const chartTypeIcons = {
 
 export default function ReportBuilderPage() {
   const [templates, setTemplates] = useState(mockTemplates)
-  const [selectedTemplate, setSelectedTemplate] = useState<ReportTemplate | null>(null)
   const [showBuilder, setShowBuilder] = useState(false)
   const [isGenerating, setIsGenerating] = useState<string | null>(null)
   const [previewTemplate, setPreviewTemplate] = useState<ReportTemplate | null>(null)

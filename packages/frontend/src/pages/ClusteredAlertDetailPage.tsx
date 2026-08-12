@@ -1,14 +1,10 @@
-import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft,
-  AlertTriangle,
   Clock,
-  User,
   ExternalLink,
   RefreshCw,
   MoreVertical,
-  Shield,
   Activity,
 } from 'lucide-react'
 import {
@@ -17,7 +13,6 @@ import {
   useUpdateAlertClusterMutation,
 } from '../api/pantherApi'
 import { cn } from '../lib/utils'
-import { formatRelativeTime } from '../lib/dateUtils'
 
 const severityColors: Record<string, string> = {
   critical: 'bg-red-500/20 text-red-400 border-red-500/50',
@@ -36,7 +31,7 @@ const statusColors: Record<string, string> = {
 
 export default function ClusteredAlertDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { data: cluster, isLoading: isLoadingCluster, refetch: refetchCluster } = useGetAlertClusterQuery(id!)
+  const { data: cluster, isLoading: isLoadingCluster } = useGetAlertClusterQuery(id!)
   const { data: alerts, isLoading: isLoadingAlerts } = useGetClusterAlertsQuery(id!)
   const [updateCluster] = useUpdateAlertClusterMutation()
 
@@ -156,37 +151,27 @@ export default function ClusteredAlertDetailPage() {
                   No alerts found in this cluster
                 </div>
               ) : (
-                alerts?.map((alert) => (
-                  <div key={alert.id} className="p-4 hover:bg-muted/20 transition-colors">
+                alerts?.map((member) => (
+                  <div key={member.id} className="p-4 hover:bg-muted/20 transition-colors">
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className={cn(
-                            'px-1.5 py-0.5 rounded-[4px] text-[10px] font-bold uppercase',
-                            severityColors[(alert.severity || 'info').toLowerCase()] || severityColors.info
-                          )}>
-                            {alert.severity || 'INFO'}
-                          </span>
-                          <Link to={`/alerts/${alert.id}`} className="font-medium hover:underline truncate">
-                            {alert.title}
+                          <Link to={`/alerts/${member.alert_id}`} className="font-medium hover:underline truncate">
+                            {member.alert_id}
                           </Link>
                         </div>
-                        <p className="text-xs text-muted-foreground mb-2">{alert.rule_name}</p>
+                        <p className="text-xs text-muted-foreground mb-2">
+                          Similarity: {(member.similarity_score * 100).toFixed(0)}%
+                        </p>
                         <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
                           <span className="flex items-center gap-1">
                             <Clock size={10} />
-                            {new Date(alert.created_at).toLocaleString()}
+                            {new Date(member.added_at).toLocaleString()}
                           </span>
-                          {alert.source_type && (
-                            <span className="flex items-center gap-1">
-                              <Shield size={10} />
-                              {alert.source_type}
-                            </span>
-                          )}
                         </div>
                       </div>
                       <Link 
-                        to={`/alerts/${alert.id}`}
+                        to={`/alerts/${member.alert_id}`}
                         className="p-2 hover:bg-accent rounded-md text-muted-foreground hover:text-foreground"
                       >
                         <ExternalLink size={16} />
@@ -224,7 +209,7 @@ export default function ClusteredAlertDetailPage() {
             <div className="space-y-3">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Clustered By:</span>
-                <span className="font-medium">{cluster.clustered_by?.join(', ') || 'N/A'}</span>
+                <span className="font-medium capitalize">{cluster.cluster_type.replace(/_/g, ' ')}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Time Window:</span>

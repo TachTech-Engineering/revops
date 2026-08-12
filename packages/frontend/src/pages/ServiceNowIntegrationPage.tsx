@@ -8,11 +8,8 @@ import {
   XCircle,
   RefreshCw,
   Settings,
-  Link,
   TestTube,
   Save,
-  AlertTriangle,
-  ArrowRight,
   Clock,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
@@ -89,7 +86,7 @@ export default function ServiceNowIntegrationPage() {
   const [config, setConfig] = useState(mockConfig)
   const [mappings, setMappings] = useState(mockMappings)
   const [showConfigModal, setShowConfigModal] = useState(false)
-  const [showMappingModal, setShowMappingModal] = useState(false)
+  const [, setShowMappingModal] = useState(false)
   const [isTesting, setIsTesting] = useState(false)
   const [isSyncing, setIsSyncing] = useState(false)
 

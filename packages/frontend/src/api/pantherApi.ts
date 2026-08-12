@@ -8,13 +8,8 @@ import type {
   AlertEvent,
   AlertComment,
   AlertFilters,
-  Rule,
   RuleSummary,
   RuleFilters,
-  RuleCreate,
-  RuleUpdate,
-  ConversionResult,
-  SPLConvertRequest,
   PaginatedResponse,
 } from '../types'
 
@@ -80,7 +75,7 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
 export const revopsApi = createApi({
   reducerPath: 'revopsApi',
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'SuppressionRule', 'Settings', 'Webhook', 'UserRole', 'User', 'AuditLog', 'Playbook', 'ScheduledReport', 'Incident', 'CorrelationRule', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Recommendation', 'SimulationRun', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleVersion', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'OnCallSchedule', 'TrendAnalytics', 'Anomaly', 'AISettings', 'ComplianceFramework', 'ComplianceControl', 'ComplianceAssessment', 'ExecutiveMetrics', 'ThreatHunt', 'HuntResult'],
+  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'Settings', 'Webhook', 'UserRole', 'User', 'AuditLog', 'ScheduledReport', 'Incident', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'OnCallSchedule', 'TrendAnalytics', 'Anomaly', 'AISettings', 'ComplianceFramework', 'ComplianceControl', 'ComplianceAssessment', 'ExecutiveMetrics', 'ThreatHunt', 'HuntResult'],
   endpoints: (builder) => ({
     // Alerts
     listAlerts: builder.query<PaginatedResponse<AlertSummary>, AlertFilters>({
@@ -128,53 +123,6 @@ export const revopsApi = createApi({
         params: filters,
       }),
       providesTags: ['Rule'],
-    }),
-
-    getRule: builder.query<Rule, string>({
-      query: (id) => `/rules/${id}`,
-      providesTags: (_result, _error, id) => [{ type: 'Rule', id }],
-    }),
-
-    createRule: builder.mutation<Rule, RuleCreate>({
-      query: (rule) => ({
-        url: '/rules',
-        method: 'POST',
-        body: rule,
-      }),
-      invalidatesTags: ['Rule'],
-    }),
-
-    updateRule: builder.mutation<Rule, { id: string; update: RuleUpdate }>({
-      query: ({ id, update }) => ({
-        url: `/rules/${id}`,
-        method: 'PATCH',
-        body: update,
-      }),
-      invalidatesTags: (_result, _error, { id }) => [{ type: 'Rule', id }, 'Rule'],
-    }),
-
-    deleteRule: builder.mutation<void, string>({
-      query: (id) => ({
-        url: `/rules/${id}`,
-        method: 'DELETE',
-      }),
-      invalidatesTags: ['Rule'],
-    }),
-
-    testRule: builder.mutation<{ total: number; passed: number; failed: number; results: unknown[] }, string>({
-      query: (ruleId) => ({
-        url: `/rules/${ruleId}/test`,
-        method: 'POST',
-      }),
-    }),
-
-    // Converter
-    convertSPL: builder.mutation<ConversionResult, SPLConvertRequest>({
-      query: (request) => ({
-        url: '/converter/convert',
-        method: 'POST',
-        body: request,
-      }),
     }),
 
     // Queries (Data Lake)
@@ -234,41 +182,6 @@ export const revopsApi = createApi({
         method: 'DELETE',
       }),
       invalidatesTags: ['SavedQuery'],
-    }),
-
-    // Suppression Rules
-    listSuppressionRules: builder.query<SuppressionRule[], { activeOnly?: boolean }>({
-      query: ({ activeOnly }) => ({
-        url: '/suppression-rules',
-        params: activeOnly ? { active_only: true } : {},
-      }),
-      providesTags: ['SuppressionRule'],
-    }),
-
-    createSuppressionRule: builder.mutation<SuppressionRule, SuppressionRuleCreate>({
-      query: (rule) => ({
-        url: '/suppression-rules',
-        method: 'POST',
-        body: rule,
-      }),
-      invalidatesTags: ['SuppressionRule'],
-    }),
-
-    updateSuppressionRule: builder.mutation<SuppressionRule, { id: string; update: Partial<SuppressionRuleCreate> }>({
-      query: ({ id, update }) => ({
-        url: `/suppression-rules/${id}`,
-        method: 'PATCH',
-        body: update,
-      }),
-      invalidatesTags: ['SuppressionRule'],
-    }),
-
-    deleteSuppressionRule: builder.mutation<void, string>({
-      query: (id) => ({
-        url: `/suppression-rules/${id}`,
-        method: 'DELETE',
-      }),
-      invalidatesTags: ['SuppressionRule'],
     }),
 
     // User Settings
@@ -435,68 +348,6 @@ export const revopsApi = createApi({
       query: () => '/audit/resource-types',
     }),
 
-    // Playbooks
-    listPlaybooks: builder.query<PlaybookResponse[], { status?: string }>({
-      query: (params) => ({
-        url: '/playbooks',
-        params,
-      }),
-      providesTags: ['Playbook'],
-    }),
-
-    getPlaybook: builder.query<PlaybookResponse, string>({
-      query: (id) => `/playbooks/${id}`,
-      providesTags: (_result, _error, id) => [{ type: 'Playbook', id }],
-    }),
-
-    createPlaybook: builder.mutation<PlaybookResponse, PlaybookCreate>({
-      query: (playbook) => ({
-        url: '/playbooks',
-        method: 'POST',
-        body: playbook,
-      }),
-      invalidatesTags: ['Playbook'],
-    }),
-
-    updatePlaybook: builder.mutation<PlaybookResponse, { id: string; update: Partial<PlaybookCreate> & { status?: string } }>({
-      query: ({ id, update }) => ({
-        url: `/playbooks/${id}`,
-        method: 'PATCH',
-        body: update,
-      }),
-      invalidatesTags: (_result, _error, { id }) => [{ type: 'Playbook', id }, 'Playbook'],
-    }),
-
-    deletePlaybook: builder.mutation<void, string>({
-      query: (id) => ({
-        url: `/playbooks/${id}`,
-        method: 'DELETE',
-      }),
-      invalidatesTags: ['Playbook'],
-    }),
-
-    executePlaybook: builder.mutation<PlaybookExecutionResponse, { playbookId: string; alertId: string; alertData?: Record<string, unknown> }>({
-      query: ({ playbookId, alertId, alertData }) => ({
-        url: `/playbooks/${playbookId}/execute`,
-        method: 'POST',
-        body: { alert_id: alertId, alert_data: alertData },
-      }),
-    }),
-
-    listPlaybookExecutions: builder.query<PlaybookExecutionListResponse, { playbookId: string; page?: number; pageSize?: number }>({
-      query: ({ playbookId, page = 1, pageSize = 20 }) => ({
-        url: `/playbooks/${playbookId}/executions`,
-        params: { page, page_size: pageSize },
-      }),
-    }),
-
-    listRecentExecutions: builder.query<PlaybookExecutionResponse[], { limit?: number }>({
-      query: ({ limit = 10 }) => ({
-        url: '/playbooks/executions/recent',
-        params: { limit },
-      }),
-    }),
-
     // Scheduled Reports
     listScheduledReports: builder.query<ScheduledReportResponse[], { activeOnly?: boolean }>({
       query: ({ activeOnly }) => ({
@@ -601,46 +452,6 @@ export const revopsApi = createApi({
       invalidatesTags: (_result, _error, { incidentId }) => [{ type: 'Incident', id: incidentId }],
     }),
 
-    // Correlation Rules
-    listCorrelationRules: builder.query<CorrelationRuleResponse[], { activeOnly?: boolean }>({
-      query: ({ activeOnly }) => ({
-        url: '/correlation-rules',
-        params: activeOnly ? { active_only: true } : {},
-      }),
-      providesTags: ['CorrelationRule'],
-    }),
-
-    getCorrelationRule: builder.query<CorrelationRuleResponse, string>({
-      query: (id) => `/correlation-rules/${id}`,
-      providesTags: (_result, _error, id) => [{ type: 'CorrelationRule', id }],
-    }),
-
-    createCorrelationRule: builder.mutation<CorrelationRuleResponse, CorrelationRuleCreate>({
-      query: (rule) => ({
-        url: '/correlation-rules',
-        method: 'POST',
-        body: rule,
-      }),
-      invalidatesTags: ['CorrelationRule'],
-    }),
-
-    updateCorrelationRule: builder.mutation<CorrelationRuleResponse, { id: string; update: CorrelationRuleUpdate }>({
-      query: ({ id, update }) => ({
-        url: `/correlation-rules/${id}`,
-        method: 'PATCH',
-        body: update,
-      }),
-      invalidatesTags: (_result, _error, { id }) => [{ type: 'CorrelationRule', id }, 'CorrelationRule'],
-    }),
-
-    deleteCorrelationRule: builder.mutation<void, string>({
-      query: (id) => ({
-        url: `/correlation-rules/${id}`,
-        method: 'DELETE',
-      }),
-      invalidatesTags: ['CorrelationRule'],
-    }),
-
     // Cases
     listCases: builder.query<CaseListResponse, CaseFilters>({
       query: (filters) => ({
@@ -648,71 +459,6 @@ export const revopsApi = createApi({
         params: filters,
       }),
       providesTags: ['Case'],
-    }),
-
-    getCase: builder.query<CaseDetailResponse, string>({
-      query: (id) => `/cases/${id}`,
-      providesTags: (_result, _error, id) => [{ type: 'Case', id }],
-    }),
-
-    getCaseTimeline: builder.query<CaseActivityResponse[], { caseId: string; limit?: number }>({
-      query: ({ caseId, limit = 50 }) => ({
-        url: `/cases/${caseId}/timeline`,
-        params: { limit },
-      }),
-      providesTags: (_result, _error, { caseId }) => [{ type: 'Case', id: caseId }],
-    }),
-
-    createCase: builder.mutation<CaseDetailResponse, CaseCreate>({
-      query: (caseData) => ({
-        url: '/cases',
-        method: 'POST',
-        body: caseData,
-      }),
-      invalidatesTags: ['Case'],
-    }),
-
-    updateCase: builder.mutation<CaseResponse, { id: string; update: CaseUpdate }>({
-      query: ({ id, update }) => ({
-        url: `/cases/${id}`,
-        method: 'PATCH',
-        body: update,
-      }),
-      invalidatesTags: (_result, _error, { id }) => [{ type: 'Case', id }, 'Case'],
-    }),
-
-    deleteCase: builder.mutation<void, string>({
-      query: (id) => ({
-        url: `/cases/${id}`,
-        method: 'DELETE',
-      }),
-      invalidatesTags: ['Case'],
-    }),
-
-    addCaseComment: builder.mutation<CaseActivityResponse, { caseId: string; comment: string }>({
-      query: ({ caseId, comment }) => ({
-        url: `/cases/${caseId}/comments`,
-        method: 'POST',
-        body: { comment },
-      }),
-      invalidatesTags: (_result, _error, { caseId }) => [{ type: 'Case', id: caseId }],
-    }),
-
-    linkIncidentToCase: builder.mutation<{ status: string; incident_id: string }, { caseId: string; incidentId: string }>({
-      query: ({ caseId, incidentId }) => ({
-        url: `/cases/${caseId}/incidents`,
-        method: 'POST',
-        body: { incident_id: incidentId },
-      }),
-      invalidatesTags: (_result, _error, { caseId }) => [{ type: 'Case', id: caseId }],
-    }),
-
-    unlinkIncidentFromCase: builder.mutation<void, { caseId: string; incidentId: string }>({
-      query: ({ caseId, incidentId }) => ({
-        url: `/cases/${caseId}/incidents/${incidentId}`,
-        method: 'DELETE',
-      }),
-      invalidatesTags: (_result, _error, { caseId }) => [{ type: 'Case', id: caseId }],
     }),
 
     // Enrichment Pipelines
@@ -1230,154 +976,6 @@ export const revopsApi = createApi({
       }),
     }),
 
-    // AI Converter endpoints
-    getAIConverterProviders: builder.query<AIConverterProvidersResponse, void>({
-      query: () => '/ai/converter/providers',
-    }),
-
-    aiConvertRule: builder.mutation<AIConvertResponse, AIConvertRequest>({
-      query: (body) => ({
-        url: '/ai/converter/convert',
-        method: 'POST',
-        body,
-      }),
-    }),
-
-    aiExplainRule: builder.mutation<AIExplainResponse, AIExplainRequest>({
-      query: (body) => ({
-        url: '/ai/converter/explain',
-        method: 'POST',
-        body,
-      }),
-    }),
-
-    aiEnhanceRule: builder.mutation<AIEnhanceResponse, AIEnhanceRequest>({
-      query: (body) => ({
-        url: '/ai/converter/enhance',
-        method: 'POST',
-        body,
-      }),
-    }),
-
-    // Phase 5: Rule Recommendations
-    listRecommendations: builder.query<RecommendationListResponse, { log_source?: string; status?: string; page?: number; page_size?: number }>({
-      query: (params) => ({
-        url: '/recommendations',
-        params,
-      }),
-      providesTags: ['Recommendation'],
-    }),
-
-    getRecommendationStats: builder.query<{ total: number; by_status: Record<string, number>; pending_by_source: Record<string, number>; catalog_version: string; catalog_rules: number }, void>({
-      query: () => '/recommendations/stats',
-      providesTags: ['Recommendation'],
-    }),
-
-    getCoverageGaps: builder.query<CoverageGapResponse[], void>({
-      query: () => '/recommendations/coverage',
-      providesTags: ['Recommendation'],
-    }),
-
-    generateRecommendations: builder.mutation<{ added: number; skipped: number }, { log_sources?: string[] }>({
-      query: (params) => ({
-        url: '/recommendations/generate',
-        method: 'POST',
-        params: { log_sources: params.log_sources },
-      }),
-      invalidatesTags: ['Recommendation'],
-    }),
-
-    acceptRecommendation: builder.mutation<{ recommendation_id: string; rule_id: string; status: string }, string>({
-      query: (id) => ({
-        url: `/recommendations/${id}/accept`,
-        method: 'POST',
-      }),
-      invalidatesTags: ['Recommendation', 'Rule'],
-    }),
-
-    dismissRecommendation: builder.mutation<{ recommendation_id: string; status: string }, { id: string; reason?: string }>({
-      query: ({ id, reason }) => ({
-        url: `/recommendations/${id}/dismiss`,
-        method: 'POST',
-        body: { reason },
-      }),
-      invalidatesTags: ['Recommendation'],
-    }),
-
-    // Phase 5: Attack Simulation
-    listSimulationTemplates: builder.query<TemplateListResponse, { framework?: string; platform?: string; tactic?: string; search?: string; page?: number; page_size?: number }>({
-      query: (params) => ({
-        url: '/simulations/templates',
-        params,
-      }),
-    }),
-
-    getSimulationTemplate: builder.query<SimulationTemplateResponse, string>({
-      query: (id) => `/simulations/templates/${id}`,
-    }),
-
-    getManualCommands: builder.mutation<ManualCommandsResponse, { template_id: string; parameters?: Record<string, unknown> }>({
-      query: ({ template_id, parameters }) => ({
-        url: `/simulations/templates/${template_id}/commands`,
-        method: 'POST',
-        body: { parameters },
-      }),
-    }),
-
-    runSimulation: builder.mutation<SimulationRunResponse, { template_id: string; targets: string[]; mode?: 'manual' | 'automated'; parameters?: Record<string, unknown> }>({
-      query: (data) => ({
-        url: '/simulations/run',
-        method: 'POST',
-        body: data,
-      }),
-      invalidatesTags: ['SimulationRun'],
-    }),
-
-    listSimulationRuns: builder.query<RunListResponse, { status?: string; page?: number; page_size?: number }>({
-      query: (params) => ({
-        url: '/simulations/runs',
-        params,
-      }),
-      providesTags: ['SimulationRun'],
-    }),
-
-    getSimulationRun: builder.query<SimulationRunResponse, string>({
-      query: (id) => `/simulations/runs/${id}`,
-      providesTags: (_result, _error, id) => [{ type: 'SimulationRun', id }],
-    }),
-
-    markSimulationExecuted: builder.mutation<SimulationRunResponse, string>({
-      query: (runId) => ({
-        url: `/simulations/runs/${runId}/executed`,
-        method: 'POST',
-      }),
-      invalidatesTags: ['SimulationRun'],
-    }),
-
-    verifySimulationDetection: builder.mutation<VerifyDetectionResponse, string>({
-      query: (runId) => ({
-        url: `/simulations/runs/${runId}/verify`,
-        method: 'POST',
-      }),
-      invalidatesTags: ['SimulationRun'],
-    }),
-
-    getSimulationStats: builder.query<SimulationStatsResponse, void>({
-      query: () => '/simulations/stats',
-    }),
-
-    getSyncStatus: builder.query<SyncStatusResponse, void>({
-      query: () => '/simulations/sync/status',
-    }),
-
-    syncTechniques: builder.mutation<SyncResultResponse, { force?: boolean }>({
-      query: ({ force }) => ({
-        url: '/simulations/sync',
-        method: 'POST',
-        params: { force },
-      }),
-    }),
-
     // Phase 5: Enhanced Threat Intel (unified lookup)
     unifiedThreatIntelLookup: builder.query<UnifiedThreatIntelResponse, { indicator: string; indicator_type: string }>({
       query: ({ indicator, indicator_type }) => ({
@@ -1576,35 +1174,6 @@ export const revopsApi = createApi({
       providesTags: (_result, _error, id) => [{ type: 'WorkflowExecution', id }],
     }),
 
-    // ==================== Feature 1: Rule Version History ====================
-    listRuleVersions: builder.query<RuleVersionListResponse, { ruleId: string; limit?: number }>({
-      query: ({ ruleId, limit = 50 }) => ({
-        url: `/rules/${ruleId}/versions`,
-        params: { limit },
-      }),
-      providesTags: ['RuleVersion'],
-    }),
-
-    getRuleVersion: builder.query<RuleVersionResponse, { ruleId: string; version: number }>({
-      query: ({ ruleId, version }) => `/rules/${ruleId}/versions/${version}`,
-      providesTags: ['RuleVersion'],
-    }),
-
-    diffRuleVersions: builder.query<RuleDiffResponse, { ruleId: string; fromVersion: number; toVersion: number }>({
-      query: ({ ruleId, fromVersion, toVersion }) => ({
-        url: `/rules/${ruleId}/diff`,
-        params: { from_version: fromVersion, to_version: toVersion },
-      }),
-    }),
-
-    rollbackRule: builder.mutation<{ status: string; new_version: number; rule_snapshot: Record<string, unknown> }, { ruleId: string; version: number }>({
-      query: ({ ruleId, version }) => ({
-        url: `/rules/${ruleId}/rollback/${version}`,
-        method: 'POST',
-      }),
-      invalidatesTags: ['RuleVersion', 'Rule'],
-    }),
-
     // ==================== Feature 2: Stale Rule Detection ====================
     listRuleHealth: builder.query<RuleHealthListResponse, { isStale?: boolean; severity?: string; minHealthScore?: number; page?: number; pageSize?: number }>({
       query: (params) => ({
@@ -1787,7 +1356,7 @@ export const revopsApi = createApi({
       invalidatesTags: ['AlertCluster'],
     }),
 
-    askYourData: builder.mutation<{ answer: string; sql: string; results: any[]; provider: string; model: string }, { query: string; provider?: string }>({
+    askYourData: builder.mutation<{ answer: string; sql: string; results: NLQueryResultRow[]; provider: string; model: string }, { query: string; provider?: string }>({
       query: (data) => ({
         url: '/ai/ask',
         method: 'POST',
@@ -1824,7 +1393,7 @@ export const revopsApi = createApi({
         method: 'POST',
         body: { convert_to_playbook: convertToPlaybook },
       }),
-      invalidatesTags: ['PlaybookTemplate', 'Playbook'],
+      invalidatesTags: ['PlaybookTemplate'],
     }),
 
     getPlaybookSuggestions: builder.query<SuggestedPlaybookResponse[], { alertId?: string; ruleId?: string; severity?: string }>({
@@ -2294,31 +1863,6 @@ export interface SavedQueryCreate {
   is_shared?: boolean
 }
 
-// Suppression Rule Types
-export interface SuppressionRule {
-  id: string
-  name: string
-  description: string | null
-  rule_id: string | null
-  severity: string | null
-  title_pattern: string | null
-  is_active: boolean
-  expires_at: string | null
-  created_by: string
-  created_at: string
-  updated_at: string
-}
-
-export interface SuppressionRuleCreate {
-  name: string
-  description?: string
-  rule_id?: string
-  severity?: string
-  title_pattern?: string
-  is_active?: boolean
-  expires_at?: string
-}
-
 // User Settings Types
 export interface UserSettings {
   id: string
@@ -2483,71 +2027,6 @@ export interface AuditLogFilters {
 }
 
 // Playbook Types
-export type PlaybookStatus = 'active' | 'inactive' | 'draft'
-export type ExecutionStatus = 'pending' | 'running' | 'success' | 'failed' | 'partial'
-export type ActionType = 'webhook' | 'jira_ticket' | 'servicenow_ticket' | 'update_alert' | 'run_query' | 'crowdstrike_isolate' | 'sentinelone_isolate' | 'firewall_block' | 'soar_trigger'
-
-export interface ActionConfig {
-  type: ActionType
-  name?: string
-  config: Record<string, unknown>
-  stop_on_failure?: boolean
-}
-
-export interface TriggerConditions {
-  severities?: string[]
-  rule_ids?: string[]
-  title_pattern?: string
-}
-
-export interface PlaybookResponse {
-  id: string
-  name: string
-  description: string | null
-  trigger_conditions: TriggerConditions
-  actions: ActionConfig[]
-  status: PlaybookStatus
-  auto_execute: boolean
-  created_by: string
-  created_at: string
-  updated_at: string
-}
-
-export interface PlaybookCreate {
-  name: string
-  description?: string
-  trigger_conditions?: TriggerConditions
-  actions: ActionConfig[]
-  auto_execute?: boolean
-}
-
-export interface PlaybookExecutionResponse {
-  id: string
-  playbook_id: string
-  alert_id: string
-  status: ExecutionStatus
-  started_at: string | null
-  completed_at: string | null
-  action_results: Array<{
-    index: number
-    type: string
-    success: boolean
-    message: string
-    data?: Record<string, unknown>
-    error?: string
-  }>
-  error_message: string | null
-  triggered_by: string
-  created_at: string
-}
-
-export interface PlaybookExecutionListResponse {
-  items: PlaybookExecutionResponse[]
-  total: number
-  page: number
-  page_size: number
-}
-
 // Scheduled Report Types
 export type ReportFrequency = 'daily' | 'weekly' | 'monthly'
 
@@ -2630,48 +2109,9 @@ export interface IncidentListResponse {
   page_size: number
 }
 
-// Correlation Rule Types
-export interface CorrelationConditions {
-  time_window_minutes: number
-  min_alerts: number
-  field_matches?: string[]
-  severity_filter?: string[]
-  rule_id_filter?: string[]
-}
-
-export interface CorrelationRuleResponse {
-  id: string
-  name: string
-  description: string | null
-  conditions: CorrelationConditions
-  is_active: boolean
-  auto_create_incident: boolean
-  created_by: string
-  created_at: string
-  updated_at: string
-}
-
-export interface CorrelationRuleCreate {
-  name: string
-  description?: string
-  conditions: CorrelationConditions
-  is_active?: boolean
-  auto_create_incident?: boolean
-}
-
-export interface CorrelationRuleUpdate {
-  name?: string
-  description?: string
-  conditions?: CorrelationConditions
-  is_active?: boolean
-  auto_create_incident?: boolean
-}
-
 // Case Types
 export type CaseStatus = 'open' | 'in_progress' | 'pending' | 'resolved' | 'closed'
 export type CasePriority = 'low' | 'medium' | 'high' | 'critical'
-export type CaseActivityType = 'created' | 'status_changed' | 'priority_changed' | 'assignee_changed' | 'comment_added' | 'incident_linked' | 'incident_unlinked' | 'attachment_added' | 'updated'
-
 export interface CaseResponse {
   id: string
   case_number: string
@@ -2688,28 +2128,6 @@ export interface CaseResponse {
   updated_at: string
 }
 
-export interface CaseDetailResponse extends CaseResponse {
-  incident_ids: string[]
-}
-
-export interface CaseCreate {
-  title: string
-  description?: string
-  priority?: CasePriority
-  assignee?: string
-  tags?: string[]
-  incident_ids?: string[]
-}
-
-export interface CaseUpdate {
-  title?: string
-  description?: string
-  status?: CaseStatus
-  priority?: CasePriority
-  assignee?: string
-  tags?: string[]
-}
-
 export interface CaseFilters {
   status?: CaseStatus
   priority?: CasePriority
@@ -2723,16 +2141,6 @@ export interface CaseListResponse {
   total: number
   page: number
   page_size: number
-}
-
-export interface CaseActivityResponse {
-  id: string
-  activity_type: CaseActivityType
-  description: string
-  old_value: string | null
-  new_value: string | null
-  user_email: string
-  created_at: string
 }
 
 // Enrichment Types
@@ -3271,209 +2679,6 @@ export interface SaveAPIKeyResponse {
   is_active: boolean
 }
 
-// AI Converter Types
-export interface AIConverterProvider {
-  id: string
-  name: string
-  model: string
-  description: string
-}
-
-export interface AIConverterFormat {
-  value: string
-  label: string
-}
-
-export interface AIConverterProvidersResponse {
-  providers: AIConverterProvider[]
-  formats: AIConverterFormat[]
-}
-
-export interface AIConvertRequest {
-  source_code: string
-  source_format: string
-  target_format?: string
-  context?: string
-  provider?: string
-}
-
-export interface AIConvertResponse {
-  converted_code: string
-  source_format: string
-  target_format: string
-  provider: string
-  model: string
-  success: boolean
-  error?: string
-}
-
-export interface AIExplainRequest {
-  source_code: string
-  source_format: string
-  provider?: string
-}
-
-export interface AIExplainResponse {
-  explanation: string
-  provider: string
-  model: string
-  success: boolean
-  error?: string
-}
-
-export interface AIEnhanceRequest {
-  source_code: string
-  source_format: string
-  provider?: string
-}
-
-export interface AIEnhanceResponse {
-  suggestions: string
-  provider: string
-  model: string
-  success: boolean
-  error?: string
-}
-
-// Phase 5: Rule Recommendations Types
-export type RecommendationStatus = 'pending' | 'accepted' | 'dismissed'
-
-export interface RecommendationResponse {
-  id: string
-  log_source: string
-  rule_name: string
-  rule_id: string
-  rule_code: string
-  description: string | null
-  mitre_techniques: string[]
-  confidence_score: number
-  status: RecommendationStatus
-  created_at: string
-  updated_at: string
-}
-
-export interface RecommendationListResponse {
-  items: RecommendationResponse[]
-  total: number
-  page: number
-  page_size: number
-}
-
-export interface CoverageGapResponse {
-  log_source: string
-  total_available_rules: number
-  implemented_rules: number
-  missing_rules: number
-  coverage_percentage: number
-  missing_rule_details: Array<{ id: string; name: string; mitre_tactic: string; confidence: number }>
-}
-
-// Phase 5: Attack Simulation Types
-export interface SimulationTemplateResponse {
-  id: string
-  framework: string
-  technique_id: string
-  mitre_technique_id: string | null
-  name: string
-  description: string | null
-  mitre_tactic: string
-  mitre_technique: string | null
-  platforms: string[]
-  cloud_provider: string | null
-  is_enabled: boolean
-  executor_type: string | null
-  executor_command: string | null
-  executor_cleanup: string | null
-  input_arguments: Record<string, unknown> | null
-  dependencies: unknown[] | null
-  cloud_permissions: string[] | null
-  detonation_command: string | null
-  cleanup_command: string | null
-}
-
-export interface ManualCommandsResponse {
-  template_id: string
-  name: string
-  framework: string
-  executor_type: string | null
-  platform: string | null
-  cloud_provider: string | null
-  execution_command: string
-  cleanup_command: string
-  input_arguments: Record<string, unknown>
-  applied_parameters: Record<string, unknown>
-  dependencies: unknown[]
-  cloud_permissions: string[]
-  instructions: string[]
-}
-
-export interface SyncStatusResponse {
-  last_sync: string | null
-  atomic_red_team_count: number
-  stratus_red_team_count: number
-  next_sync: string
-}
-
-export interface SyncResultResponse {
-  atomic_red_team: { added: number; updated: number; errors: string[] }
-  stratus_red_team: { added: number; updated: number; errors: string[] }
-  synced_at: string
-}
-
-export interface SimulationStatsResponse {
-  total_runs: number
-  by_status: Record<string, number>
-  detections: { found: number; completed_runs: number; detection_rate: number }
-  templates: { atomic_red_team: number; stratus_red_team: number }
-}
-
-export interface TemplateListResponse {
-  items: SimulationTemplateResponse[]
-  total: number
-  page: number
-  page_size: number
-}
-
-export interface SimulationRunResponse {
-  id: string
-  template_id: string
-  template_name?: string
-  status: string
-  targets: string[]
-  started_at: string | null
-  completed_at: string | null
-  detection_expected: boolean
-  detection_found: boolean
-  detection_rule_id: string | null
-  triggered_by: string
-  error_message: string | null
-  created_at: string
-  results?: Array<{
-    target: string
-    success: boolean
-    detected_at: string | null
-    output?: string
-  }>
-}
-
-export interface RunListResponse {
-  items: SimulationRunResponse[]
-  total: number
-  page: number
-  page_size: number
-}
-
-export interface VerifyDetectionResponse {
-  run_id: string
-  technique_id: string
-  technique_name: string
-  status: string
-  detection_found: boolean
-  detection_count: number
-  detections: Array<{ alert_id: string; title: string; severity: string; created_at: string }>
-  time_to_detect: number | null
-}
-
 // Phase 5: Unified Threat Intel Types
 export interface UnifiedThreatIntelResponse {
   indicator: string
@@ -3488,9 +2693,6 @@ export interface UnifiedThreatIntelResponse {
 // SecOps Platform: Connector Types
 export type ConnectorCategory = 'data_source' | 'action'
 export type ConnectorStatus = 'connected' | 'error' | 'disabled' | 'pending'
-export type DataSourceType = 'panther' | 'google_secops' | 'splunk' | 'sentinel' | 'elastic'
-export type ActionConnectorType = 'jira' | 'slack' | 'pagerduty' | 'teams' | 'crowdstrike' | 'sentinelone' | 'servicenow' | 'webhook' | 'http'
-
 export interface ConnectorResponse {
   id: string
   name: string
@@ -3859,32 +3061,6 @@ export interface StageTypeMetadata {
   }
 }
 
-// ==================== Feature 1: Rule Version History Types ====================
-export interface RuleVersionResponse {
-  id: string
-  rule_id: string
-  version: number
-  change_type: string
-  rule_snapshot: Record<string, unknown>
-  changed_fields: string[]
-  change_summary: string | null
-  changed_by: string
-  created_at: string
-}
-
-export interface RuleVersionListResponse {
-  versions: RuleVersionResponse[]
-  total: number
-}
-
-export interface RuleDiffResponse {
-  rule_id: string
-  from_version: number
-  to_version: number
-  changes: Record<string, { old: unknown; new: unknown }>
-  summary: string | null
-}
-
 // ==================== Feature 2: Stale Rule Detection Types ====================
 export interface RuleHealthResponse {
   id: string
@@ -3967,6 +3143,13 @@ export interface NLQueryResponse {
   error_message: string | null
 }
 
+export interface NLQueryResultRow {
+  id: string
+  title?: string
+  severity?: string
+  source_system?: string
+}
+
 export interface NLQueryHistoryResponse {
   id: string
   natural_query: string
@@ -4013,7 +3196,7 @@ export interface PlaybookTemplateResponse {
   id: string
   name: string
   description: string | null
-  trigger_conditions: Record<string, unknown>
+  trigger_conditions: { severities?: string[]; rule_ids?: string[] } & Record<string, unknown>
   actions: Array<{ order: number; type: string; name: string; config: Record<string, unknown> }>
   confidence_score: number
   source_incident_count: number
@@ -4356,10 +3539,13 @@ export interface ComplianceDashboardSummary {
 // ==================== Executive Summary Types ====================
 
 export interface MetricValue {
-  value: number
+  // null when the backend cannot compute the metric (data_available=false).
+  // Treat null as "not measured", never as zero.
+  value: number | null
   previous_value: number | null
   change_percent: number | null
   trend: 'up' | 'down' | 'stable'
+  data_available: boolean
 }
 
 export interface ExecutiveMetrics {
@@ -4409,9 +3595,11 @@ export interface TeamMemberPerformance {
 
 export interface TeamPerformanceResponse {
   team_members: TeamMemberPerformance[]
-  team_avg_resolution_hours: number
-  team_total_alerts_handled: number
-  team_total_incidents_resolved: number
+  // null when per-user attribution data does not exist (data_available=false).
+  team_avg_resolution_hours: number | null
+  team_total_alerts_handled: number | null
+  team_total_incidents_resolved: number | null
+  data_available: boolean
   period_start: string
   period_end: string
 }
@@ -4427,9 +3615,12 @@ export interface SLAMetric {
 }
 
 export interface SLAComplianceResponse {
+  // may be empty when no SLA timing data exists
   sla_metrics: SLAMetric[]
-  overall_compliance_rate: number
-  total_breaches: number
+  // null when SLA timing data cannot be computed (data_available=false).
+  overall_compliance_rate: number | null
+  total_breaches: number | null
+  data_available: boolean
   period_start: string
   period_end: string
 }
@@ -4467,6 +3658,9 @@ export interface GeneratedHypothesis {
   suggested_queries: { name: string; description: string; sql: string }[]
   indicators_to_look_for: string[]
   priority: 'low' | 'medium' | 'high' | 'critical'
+  // "llm" when produced by the AI model; "fallback" when a keyword-matching
+  // heuristic produced the result because the LLM call failed/was unavailable.
+  generated_by: 'llm' | 'fallback'
 }
 
 export interface GenerateHypothesisRequest {
@@ -4576,6 +3770,9 @@ export interface HuntResult {
   executed_at: string | null
   executed_by: string | null
   created_at: string
+  // True when produced by the built-in simulation instead of a real
+  // data-lake query execution. Simulated findings are not evidence.
+  simulated: boolean
 }
 
 export const {
@@ -4585,12 +3782,6 @@ export const {
   useGetAlertEventsQuery,
   useAddAlertCommentMutation,
   useListRulesQuery,
-  useGetRuleQuery,
-  useCreateRuleMutation,
-  useUpdateRuleMutation,
-  useDeleteRuleMutation,
-  useTestRuleMutation,
-  useConvertSPLMutation,
   useExecuteQueryMutation,
   useGetAlertAnalyticsQuery,
   useBulkUpdateAlertsMutation,
@@ -4598,10 +3789,6 @@ export const {
   useCreateSavedQueryMutation,
   useUpdateSavedQueryMutation,
   useDeleteSavedQueryMutation,
-  useListSuppressionRulesQuery,
-  useCreateSuppressionRuleMutation,
-  useUpdateSuppressionRuleMutation,
-  useDeleteSuppressionRuleMutation,
   useGetSettingsQuery,
   useUpdateSettingsMutation,
   useListWebhooksQuery,
@@ -4625,14 +3812,6 @@ export const {
   useListAuditLogsQuery,
   useGetAuditActionsQuery,
   useGetAuditResourceTypesQuery,
-  useListPlaybooksQuery,
-  useGetPlaybookQuery,
-  useCreatePlaybookMutation,
-  useUpdatePlaybookMutation,
-  useDeletePlaybookMutation,
-  useExecutePlaybookMutation,
-  useListPlaybookExecutionsQuery,
-  useListRecentExecutionsQuery,
   useListScheduledReportsQuery,
   useGetScheduledReportQuery,
   useCreateScheduledReportMutation,
@@ -4646,20 +3825,7 @@ export const {
   useDeleteIncidentMutation,
   useAddAlertsToIncidentMutation,
   useRemoveAlertFromIncidentMutation,
-  useListCorrelationRulesQuery,
-  useGetCorrelationRuleQuery,
-  useCreateCorrelationRuleMutation,
-  useUpdateCorrelationRuleMutation,
-  useDeleteCorrelationRuleMutation,
   useListCasesQuery,
-  useGetCaseQuery,
-  useGetCaseTimelineQuery,
-  useCreateCaseMutation,
-  useUpdateCaseMutation,
-  useDeleteCaseMutation,
-  useAddCaseCommentMutation,
-  useLinkIncidentToCaseMutation,
-  useUnlinkIncidentFromCaseMutation,
   useListEnrichmentPipelinesQuery,
   useGetEnrichmentTypesQuery,
   useGetEnrichmentPipelineQuery,
@@ -4732,30 +3898,6 @@ export const {
   useDeleteAPIKeyMutation,
   useTestOrganizationAPIKeyMutation,
   useTestAPIKeyDirectMutation,
-  // AI Converter
-  useGetAIConverterProvidersQuery,
-  useAiConvertRuleMutation,
-  useAiExplainRuleMutation,
-  useAiEnhanceRuleMutation,
-  // Phase 5: Rule Recommendations
-  useListRecommendationsQuery,
-  useGetRecommendationStatsQuery,
-  useGetCoverageGapsQuery,
-  useGenerateRecommendationsMutation,
-  useAcceptRecommendationMutation,
-  useDismissRecommendationMutation,
-  // Phase 5: Attack Simulation
-  useListSimulationTemplatesQuery,
-  useGetSimulationTemplateQuery,
-  useGetManualCommandsMutation,
-  useRunSimulationMutation,
-  useListSimulationRunsQuery,
-  useGetSimulationRunQuery,
-  useMarkSimulationExecutedMutation,
-  useVerifySimulationDetectionMutation,
-  useGetSimulationStatsQuery,
-  useGetSyncStatusQuery,
-  useSyncTechniquesMutation,
   // Phase 5: Enhanced Threat Intel
   useUnifiedThreatIntelLookupQuery,
   useGetThreatIntelSourcesQuery,
@@ -4787,11 +3929,6 @@ export const {
   useExecuteWorkflowMutation,
   useListWorkflowExecutionsQuery,
   useGetWorkflowExecutionQuery,
-  // Feature 1: Rule Version History
-  useListRuleVersionsQuery,
-  useGetRuleVersionQuery,
-  useDiffRuleVersionsQuery,
-  useRollbackRuleMutation,
   // Feature 2: Stale Rule Detection
   useListRuleHealthQuery,
   useListStaleRulesQuery,

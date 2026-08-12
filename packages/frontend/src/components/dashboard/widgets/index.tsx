@@ -74,7 +74,7 @@ export function WidgetRenderer({ widget }: WidgetRendererProps) {
   }
 }
 
-function AlertsOverTimeWidget({ config }: { config?: Record<string, unknown> }) {
+function AlertsOverTimeWidget({ config: _config }: { config?: Record<string, unknown> }) {
   return (
     <div className="h-full flex items-center justify-center p-4">
       <div className="text-center text-gray-500">

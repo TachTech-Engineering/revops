@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
 import { MessageSquare, Send, Edit2, Trash2, Reply, ChevronDown, ChevronRight } from 'lucide-react'
 import {
   useListNotesQuery,
@@ -9,7 +9,6 @@ import {
   type NoteResponse,
   type NoteResourceType,
 } from '../../api/pantherApi'
-import { cn } from '../../lib/utils'
 import { useSelector } from 'react-redux'
 import { RootState } from '../../store'
 
@@ -394,7 +393,6 @@ function NoteItem({
 
 function NoteReplies({
   noteId,
-  userEmail,
   formatDate,
   highlightMentions,
 }: {

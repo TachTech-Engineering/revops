@@ -3,7 +3,6 @@ import {
   Trophy,
   RefreshCw,
   ChevronRight,
-  TrendingUp,
   CheckCircle,
   Clock,
   Target,

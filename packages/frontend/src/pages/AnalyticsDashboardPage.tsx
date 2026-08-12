@@ -128,10 +128,6 @@ export default function AnalyticsDashboardPage() {
   const [days, setDays] = useState(7)
   const { data, isLoading, error, refetch } = useGetAlertAnalyticsQuery({ days })
 
-  const maxDailyCount = data?.byDay
-    ? Math.max(...Object.values(data.byDay), 1)
-    : 1
-
   const severityOrder = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO'] as const
   const maxSeverityCount = data?.bySeverity
     ? Math.max(...Object.values(data.bySeverity), 1)

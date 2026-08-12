@@ -90,7 +90,7 @@ export default function ComplianceDashboardPage() {
     {
       frameworkId: selectedFramework?.id || '',
       status: statusFilter !== 'all' ? statusFilter : undefined,
-      page_size: 100,
+      pageSize: 100,
     },
     { skip: !selectedFramework }
   )

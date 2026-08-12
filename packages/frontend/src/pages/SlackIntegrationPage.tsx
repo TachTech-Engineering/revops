@@ -89,11 +89,11 @@ const mockRules: NotificationRule[] = [
 ]
 
 export default function SlackIntegrationPage() {
-  const [isConnected, setIsConnected] = useState(true)
+  const [isConnected] = useState(true)
   const [channels, setChannels] = useState(mockChannels)
-  const [rules, setRules] = useState(mockRules)
+  const [rules] = useState(mockRules)
   const [showAddChannel, setShowAddChannel] = useState(false)
-  const [showAddRule, setShowAddRule] = useState(false)
+  const [, setShowAddRule] = useState(false)
   const [testingChannel, setTestingChannel] = useState<string | null>(null)
   const [isSaving, setIsSaving] = useState(false)
 

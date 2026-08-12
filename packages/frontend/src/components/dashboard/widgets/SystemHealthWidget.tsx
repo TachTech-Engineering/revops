@@ -5,8 +5,6 @@ import {
   CheckCircle,
   AlertTriangle,
   XCircle,
-  Server,
-  Database,
   Cpu,
   HardDrive,
   ChevronRight,

@@ -32,10 +32,6 @@ import {
   Plug,
   GitBranch,
   KeyRound,
-  Mail,
-  MessageSquare,
-  Ticket,
-  AlertCircle,
 } from 'lucide-react'
 import { RootState } from '../../store'
 import { toggleSidebar } from '../../store/uiSlice'

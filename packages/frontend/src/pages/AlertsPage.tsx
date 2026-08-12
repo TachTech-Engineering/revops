@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { FileJson, FileSpreadsheet, CheckSquare, Square, X, Search, Sparkles, Database, ChevronRight } from 'lucide-react'
-import { useListAlertsQuery, useUpdateAlertMutation, useBulkUpdateAlertsMutation, useAskYourDataMutation } from '../api/pantherApi'
+import { FileJson, FileSpreadsheet, CheckSquare, Square, X, Sparkles, Database, ChevronRight } from 'lucide-react'
+import { useListAlertsQuery, useUpdateAlertMutation, useBulkUpdateAlertsMutation, useAskYourDataMutation, type NLQueryResultRow } from '../api/pantherApi'
 import { getSeverityColor, getStatusColor, formatDate } from '../lib/utils'
 import type { AlertStatus, Severity } from '../types'
 
@@ -13,7 +13,7 @@ export default function AlertsPage() {
   
   // NLQ State
   const [nlqQuery, setNlqQuery] = useState('')
-  const [nlqResult, setNlqResult] = useState<{ answer: string; sql: string; results: any[] } | null>(null)
+  const [nlqResult, setNlqResult] = useState<{ answer: string; sql: string; results: NLQueryResultRow[] } | null>(null)
   const [isNlqOpen, setIsNlqOpen] = useState(false)
 
   const { data, isLoading, error } = useListAlertsQuery({
@@ -69,9 +69,15 @@ export default function AlertsPage() {
   const handleBulkUpdate = async () => {
     if (selectedAlerts.size === 0 || !bulkStatus) return
     try {
+      const statusToAction: Record<string, string> = {
+        OPEN: 'reopen',
+        TRIAGED: 'acknowledge',
+        CLOSED: 'close',
+        RESOLVED: 'resolve',
+      }
       const result = await bulkUpdateAlerts({
         alert_ids: Array.from(selectedAlerts),
-        status: bulkStatus,
+        action: statusToAction[bulkStatus],
       }).unwrap()
       console.log(`Updated ${result.success.length} alerts, ${result.failed.length} failed`)
       setSelectedAlerts(new Set())
@@ -196,7 +202,7 @@ export default function AlertsPage() {
               <div className="space-y-2">
                 <p className="text-xs font-medium text-muted-foreground px-1">Matching Results ({nlqResult.results.length})</p>
                 <div className="grid gap-2">
-                  {nlqResult.results.slice(0, 5).map((alert: any) => (
+                  {nlqResult.results.slice(0, 5).map((alert) => (
                     <div key={alert.id} className="flex items-center justify-between p-2 bg-card border rounded-md hover:bg-muted/50 transition-colors">
                       <div className="flex flex-col gap-0.5">
                         <span className="text-xs font-medium">{alert.title}</span>

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Users, Plus, Trash2, Edit2, Check, X, Shield } from 'lucide-react'
+import { Users, Plus, Trash2, Edit2, Check, Shield } from 'lucide-react'
 import {
   useListUserRolesQuery,
   useCreateUserRoleMutation,

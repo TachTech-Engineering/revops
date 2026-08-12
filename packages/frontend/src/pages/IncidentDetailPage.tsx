@@ -38,7 +38,7 @@ export default function IncidentDetailPage() {
 
   // Fetch alert details for the incident's alerts
   const { data: alertsData } = useListAlertsQuery(
-    { alertIds: incident?.alert_ids?.join(',') },
+    { pageSize: 100 },
     { skip: !incident?.alert_ids?.length }
   )
 
@@ -137,7 +137,7 @@ export default function IncidentDetailPage() {
             {incident.alert_ids.length > 0 ? (
               <div className="space-y-3">
                 {incident.alert_ids.map((alertId) => {
-                  const alert = alertsData?.items?.find(a => a.id === alertId)
+                  const alert = alertsData?.results?.find((a) => a.id === alertId)
                   return (
                     <div
                       key={alertId}

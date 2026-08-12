@@ -13,12 +13,6 @@ const roleColors: Record<string, string> = {
   viewer: 'bg-gray-500/20 text-gray-400',
 }
 
-const roleLabels: Record<string, string> = {
-  admin: 'Admin',
-  analyst: 'Analyst',
-  viewer: 'Viewer',
-}
-
 export default function UserManagementPage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')

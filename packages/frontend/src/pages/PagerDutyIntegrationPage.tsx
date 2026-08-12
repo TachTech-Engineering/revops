@@ -59,7 +59,7 @@ const mockServices: PagerDutyService[] = [
 ]
 
 export default function PagerDutyIntegrationPage() {
-  const [isConnected, setIsConnected] = useState(true)
+  const [isConnected] = useState(true)
   const [services, setServices] = useState(mockServices)
   const [showAddService, setShowAddService] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
@@ -78,7 +78,7 @@ export default function PagerDutyIntegrationPage() {
     name: '',
     integrationKey: '',
     escalationPolicy: '',
-    urgency: 'dynamic' as const,
+    urgency: 'dynamic' as 'high' | 'low' | 'dynamic',
     severityMapping: [] as string[],
   })
 

@@ -7,10 +7,7 @@ import {
   XCircle,
   AlertTriangle,
   ChevronRight,
-  Settings,
   Plus,
-  RefreshCw,
-  ExternalLink,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
 

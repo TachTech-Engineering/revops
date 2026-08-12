@@ -29,7 +29,14 @@ export default function AlertForecastWidget({ config }: AlertForecastWidgetProps
     )
   }
 
-  const trend = data.trend_direction || 'stable'
+  const forecastDays = config?.forecastDays || 7
+  const predictedDaily = data.predicted_total / forecastDays
+  const trend =
+    predictedDaily > data.historical_average * 1.1
+      ? 'increasing'
+      : predictedDaily < data.historical_average * 0.9
+        ? 'decreasing'
+        : 'stable'
   const TrendIcon = trend === 'increasing' ? TrendingUp : trend === 'decreasing' ? TrendingDown : Minus
   const trendColor = trend === 'increasing' ? 'text-red-400' : trend === 'decreasing' ? 'text-green-400' : 'text-yellow-400'
 
@@ -46,46 +53,26 @@ export default function AlertForecastWidget({ config }: AlertForecastWidgetProps
       {/* Forecast Summary */}
       <div className="grid grid-cols-2 gap-4 mb-4">
         <div className="bg-muted/50 rounded-lg p-3">
-          <p className="text-xs text-muted-foreground">Predicted (next 7d)</p>
+          <p className="text-xs text-muted-foreground">Predicted ({data.forecast_period})</p>
           <p className="text-2xl font-bold">{data.predicted_total || 0}</p>
         </div>
         <div className="bg-muted/50 rounded-lg p-3">
-          <p className="text-xs text-muted-foreground">Avg Daily</p>
-          <p className="text-2xl font-bold">{data.daily_average?.toFixed(0) || 0}</p>
+          <p className="text-xs text-muted-foreground">Historical Daily Avg</p>
+          <p className="text-2xl font-bold">{data.historical_average.toFixed(0)}</p>
         </div>
       </div>
 
-      {/* Daily Predictions */}
+      {/* Method */}
       <div className="flex-1">
-        <p className="text-xs text-muted-foreground mb-2">Daily Predictions</p>
-        <div className="flex items-end gap-1 h-24">
-          {data.daily_forecast?.map((day, index) => {
-            const maxCount = Math.max(...(data.daily_forecast?.map((d) => d.predicted_count) || [1]))
-            const height = (day.predicted_count / maxCount) * 100 || 10
-
-            return (
-              <div
-                key={index}
-                className="flex-1 flex flex-col items-center gap-1"
-              >
-                <div
-                  className="w-full bg-primary/60 rounded-t transition-all"
-                  style={{ height: `${height}%` }}
-                  title={`${day.date}: ${day.predicted_count} alerts`}
-                />
-                <span className="text-[10px] text-muted-foreground">
-                  {new Date(day.date).toLocaleDateString('en-US', { weekday: 'short' }).charAt(0)}
-                </span>
-              </div>
-            )
-          })}
-        </div>
+        <p className="text-xs text-muted-foreground">
+          Prediction method: <span className="capitalize">{data.prediction_method.replace(/_/g, ' ')}</span>
+        </p>
       </div>
 
       {/* Confidence */}
       {data.confidence_interval && (
         <p className="text-xs text-muted-foreground mt-2">
-          Confidence: {((data.confidence_interval.confidence || 0.8) * 100).toFixed(0)}%
+          Confidence: {data.confidence_interval.confidence_level}
           (range: {data.confidence_interval.lower}-{data.confidence_interval.upper})
         </p>
       )}

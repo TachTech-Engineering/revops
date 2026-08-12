@@ -6,7 +6,6 @@ import {
   Hash,
   Link,
   Mail,
-  AlertTriangle,
   CheckCircle,
   XCircle,
   Plus,

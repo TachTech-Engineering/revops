@@ -11,7 +11,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useSelector } from 'react-redux'
 import {
-  MessageSquare,
   X,
   Minus,
   Send,
@@ -26,7 +25,6 @@ import {
   User,
   ChevronDown,
   Paperclip,
-  ArrowRightLeft,
   Settings,
   AlertCircle,
 } from 'lucide-react'

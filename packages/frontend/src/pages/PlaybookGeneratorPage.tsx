@@ -3,11 +3,9 @@ import {
   Sparkles,
   RefreshCw,
   CheckCircle,
-  XCircle,
   ChevronRight,
   Play,
   BookOpen,
-  Filter,
   Wand2,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
@@ -264,7 +262,7 @@ export default function PlaybookGeneratorPage() {
                   </>
                 ) : (
                   <Link
-                    to={`/playbooks/${template.playbook_id}`}
+                    to={`/playbooks/${template.converted_playbook_id}`}
                     className="flex items-center gap-2 px-3 py-1.5 text-sm border rounded hover:bg-accent"
                   >
                     View Playbook <ChevronRight size={14} />

@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   AlertTriangle,
   RefreshCw,
@@ -121,12 +120,12 @@ export default function AnomalyDetectionWidget({ config }: AnomalyDetectionWidge
                     Dismiss
                   </button>
                 </div>
-                <p className="text-sm font-medium">{anomaly.title}</p>
+                <p className="text-sm font-medium capitalize">{anomaly.anomaly_type.replace(/_/g, ' ')}</p>
                 <p className="text-xs text-muted-foreground mt-1">{anomaly.description}</p>
                 <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
                   <span>{new Date(anomaly.detected_at).toLocaleString()}</span>
-                  {anomaly.affected_rules_count && (
-                    <span>{anomaly.affected_rules_count} rules affected</span>
+                  {anomaly.related_rule_ids.length > 0 && (
+                    <span>{anomaly.related_rule_ids.length} rules affected</span>
                   )}
                 </div>
               </div>

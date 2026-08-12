@@ -15,16 +15,12 @@ import {
   HelpCircle,
   Bot,
   CheckCircle2,
-  Circle,
-  Play,
   RefreshCw,
   Download,
   ChevronRight,
-  AlertTriangle,
   FileText,
   Zap,
   Shield,
-  BarChart3,
   Clock,
   Plug,
   Settings,
@@ -36,7 +32,6 @@ import {
   Trash2,
   GitCompare,
   GripVertical,
-  Send,
   ExternalLink,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
@@ -73,7 +68,7 @@ const SIEM_FORMATS = [
 type FormatId = typeof SIEM_FORMATS[number]['id']
 
 // Popular migration paths
-const QUICK_CONVERT_PATHS = [
+const QUICK_CONVERT_PATHS: Array<{ from: FormatId; to: FormatId; label: string; popular: boolean }> = [
   { from: 'spl', to: 'yaral', label: 'Splunk → Google SecOps', popular: true },
   { from: 'spl', to: 'kql', label: 'Splunk → Microsoft Sentinel', popular: true },
   { from: 'kql', to: 'yaral', label: 'Sentinel → Google SecOps', popular: true },
@@ -263,7 +258,6 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
 // Local storage keys
 const HISTORY_KEY = 'migration_history'
-const FAVORITES_KEY = 'migration_favorites'
 
 export default function MigrationPage() {
   const { accessToken } = useSelector((state: RootState) => state.auth)
@@ -971,18 +965,6 @@ export default function MigrationPage() {
   const getFormatById = (id: FormatId) => SIEM_FORMATS.find(f => f.id === id)!
   const getFormatIcon = (id: FormatId) => SIEM_ICONS[id] || { icon: '?', color: 'text-gray-400', bgColor: 'bg-gray-500' }
 
-  // Syntax highlighting helper (basic)
-  const highlightSyntax = (code: string, format: FormatId) => {
-    // This is a simplified version - in production you'd use a proper library
-    const keywords: Record<string, string[]> = {
-      spl: ['index', 'sourcetype', 'where', 'stats', 'table', 'count', 'by', 'sort', 'eval', 'rex', 'lookup'],
-      kql: ['where', 'project', 'summarize', 'extend', 'join', 'union', 'let', 'order', 'top', 'count'],
-      yaral: ['rule', 'meta', 'events', 'match', 'outcome', 'condition', 'over'],
-      sigma: ['title', 'status', 'logsource', 'detection', 'selection', 'condition', 'level'],
-    }
-
-    return code // Return as-is for now, actual highlighting would need more work
-  }
 
   return (
     <div className="space-y-6">
@@ -1010,8 +992,6 @@ export default function MigrationPage() {
       {/* Quick Convert Cards */}
       <div className="grid grid-cols-4 gap-3">
         {QUICK_CONVERT_PATHS.filter(p => p.popular).map((path) => {
-          const fromFormat = getFormatById(path.from)
-          const toFormat = getFormatById(path.to)
           const fromIcon = getFormatIcon(path.from)
           const toIcon = getFormatIcon(path.to)
           return (
@@ -1904,26 +1884,8 @@ function MigrationWizard({
   connectors,
   selectedConnector,
   setSelectedConnector,
-  extractedRules,
-  setExtractedRules,
-  isExtracting,
-  extractRulesFromConnector,
-  migrationPlan,
-  isPlanning,
-  generateMigrationPlan,
-  convertedRules,
-  isMigrating,
-  migrationProgress,
-  runMigration,
-  validateConvertedRules,
   downloadConvertedRules,
   resetWizard,
-  aiAvailable,
-  aiProviders,
-  selectedProvider,
-  setSelectedProvider,
-  getFormatById,
-  getFormatIcon,
 }: {
   wizardStep: number
   setWizardStep: (step: number) => void

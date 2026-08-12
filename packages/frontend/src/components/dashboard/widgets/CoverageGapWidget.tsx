@@ -1,6 +1,6 @@
 import { RefreshCw, Shield, AlertTriangle, ChevronRight } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { useGetCoverageHeatmapQuery } from '../../../api/pantherApi'
+import { useGetCoverageAnalysisQuery } from '../../../api/pantherApi'
 import { cn } from '../../../lib/utils'
 
 interface CoverageGapWidgetProps {
@@ -33,10 +33,8 @@ const tacticLabels: Record<string, string> = {
   'impact': 'Impact',
 }
 
-export default function CoverageGapWidget({ config }: CoverageGapWidgetProps) {
-  const { data, isLoading } = useGetCoverageHeatmapQuery({
-    days: config?.days || 30,
-  })
+export default function CoverageGapWidget({ config: _config }: CoverageGapWidgetProps) {
+  const { data, isLoading } = useGetCoverageAnalysisQuery()
 
   if (isLoading) {
     return (
@@ -54,7 +52,11 @@ export default function CoverageGapWidget({ config }: CoverageGapWidgetProps) {
     )
   }
 
-  const tactics = data.tactics || []
+  const tactics = data
+  const overallCoverage =
+    tactics.length > 0
+      ? tactics.reduce((sum, t) => sum + (t.coverage_percentage || 0), 0) / tactics.length
+      : 0
   const criticalGaps = tactics.filter((t) => (t.coverage_percentage || 0) < 40)
 
   return (
@@ -74,7 +76,7 @@ export default function CoverageGapWidget({ config }: CoverageGapWidgetProps) {
         <div className="flex-1 bg-muted/50 rounded-lg p-3">
           <p className="text-xs text-muted-foreground">Overall</p>
           <p className="text-xl font-bold">
-            {((data.overall_coverage || 0) * 100).toFixed(0)}%
+            {overallCoverage.toFixed(0)}%
           </p>
         </div>
         {criticalGaps.length > 0 && (
@@ -90,7 +92,7 @@ export default function CoverageGapWidget({ config }: CoverageGapWidgetProps) {
         <p className="text-xs text-muted-foreground mb-2">Coverage by Tactic</p>
         <div className="grid grid-cols-7 gap-1">
           {tactics.slice(0, 14).map((tactic) => {
-            const percentage = (tactic.coverage_percentage || 0) * 100
+            const percentage = tactic.coverage_percentage || 0
             return (
               <div
                 key={tactic.tactic}

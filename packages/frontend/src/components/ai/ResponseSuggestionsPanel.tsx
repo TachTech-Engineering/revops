@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import {
-  Sparkles,
   RefreshCw,
   ChevronRight,
   Play,
@@ -23,7 +22,7 @@ interface ResponseSuggestionsPanelProps {
 }
 
 // Mock API hook - in production this would call a real endpoint
-const useResponseSuggestions = (alertId: string) => {
+const useResponseSuggestions = (_alertId: string) => {
   return {
     data: {
       alert_context: {
@@ -128,7 +127,7 @@ export default function ResponseSuggestionsPanel({
 
   const { data, isLoading } = useResponseSuggestions(alertId)
 
-  const handleExecuteAction = async (actionId: string, playbookId?: string) => {
+  const handleExecuteAction = async (actionId: string, _playbookId?: string) => {
     setExecutingAction(actionId)
     // Simulate execution
     await new Promise((resolve) => setTimeout(resolve, 2000))

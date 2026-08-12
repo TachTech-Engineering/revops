@@ -1,13 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   Sparkles,
-  Search,
   Send,
   RefreshCw,
   History,
   Lightbulb,
   Code,
-  Play,
   ThumbsUp,
   ThumbsDown,
   ChevronDown,
@@ -19,6 +17,7 @@ import {
   useGetNLQueryHistoryQuery,
   useGetNLQueryExamplesQuery,
   useSubmitNLQueryFeedbackMutation,
+  type NLQueryResponse,
 } from '../../api/pantherApi'
 import { cn } from '../../lib/utils'
 
@@ -35,13 +34,7 @@ export default function NaturalQueryInput({
   const [showHistory, setShowHistory] = useState(false)
   const [showExamples, setShowExamples] = useState(false)
   const [showGeneratedSql, setShowGeneratedSql] = useState(false)
-  const [currentResult, setCurrentResult] = useState<{
-    query_id: string
-    generated_sql: string
-    explanation: string
-    results?: unknown[]
-    row_count?: number
-  } | null>(null)
+  const [currentResult, setCurrentResult] = useState<NLQueryResponse | null>(null)
 
   const [executeQuery, { isLoading }] = useExecuteNaturalQueryMutation()
   const { data: history } = useGetNLQueryHistoryQuery({ limit: 10 })
@@ -78,7 +71,7 @@ export default function NaturalQueryInput({
     if (!currentResult) return
     try {
       await submitFeedback({
-        queryId: currentResult.query_id,
+        queryId: currentResult.id,
         wasHelpful,
       }).unwrap()
     } catch (err) {
@@ -234,7 +227,7 @@ export default function NaturalQueryInput({
               </div>
 
               {/* Results Count */}
-              {currentResult.row_count !== undefined && (
+              {currentResult.row_count !== null && (
                 <p className="text-sm text-muted-foreground">
                   {currentResult.row_count} rows returned
                 </p>

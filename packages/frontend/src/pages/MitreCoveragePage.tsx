@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Shield, Plus, Search, X, ChevronDown, ChevronRight, Edit, Trash2, AlertTriangle, Activity } from 'lucide-react'
+import { Shield, Plus, Search, X, ChevronDown, ChevronRight, Edit, Trash2, Activity } from 'lucide-react'
 import {
   useGetMitreCoverageQuery,
   useGetMitreAlertCoverageQuery,
@@ -571,7 +571,7 @@ export default function MitreCoveragePage() {
         <MappingModal
           mapping={editingMapping}
           tactics={tactics || []}
-          rules={rules?.data || []}
+          rules={rules?.results || []}
           onClose={() => {
             setShowCreateModal(false)
             setEditingMapping(null)
@@ -592,7 +592,7 @@ export default function MitreCoveragePage() {
 interface MappingModalProps {
   mapping: MitreMappingResponse | null
   tactics: { value: string; label: string }[]
-  rules: { id: string; displayName?: string }[]
+  rules: { id: string; displayName?: string | null }[]
   onClose: () => void
   onSave: (data: Partial<MitreMappingCreate>) => void
 }

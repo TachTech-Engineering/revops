@@ -37,7 +37,6 @@ const notificationIcons: Record<string, React.ElementType> = {
 export default function EscalationPoliciesPage() {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [expandedPolicy, setExpandedPolicy] = useState<string | null>(null)
-  const [editingPolicy, setEditingPolicy] = useState<string | null>(null)
 
   const { data: policies, isLoading } = useListEscalationPoliciesQuery({})
   const { data: activeEscalations } = useListActiveEscalationsQuery()
@@ -46,7 +45,7 @@ export default function EscalationPoliciesPage() {
   const [deletePolicy] = useDeleteEscalationPolicyMutation()
   const [addStep] = useAddEscalationStepMutation()
 
-  const [newPolicy, setNewPolicy] = useState<EscalationPolicyCreate>({
+  const [newPolicy, setNewPolicy] = useState<EscalationPolicyCreate & { severity_filter: string[]; steps: EscalationStepCreate[] }>({
     name: '',
     description: '',
     severity_filter: [],

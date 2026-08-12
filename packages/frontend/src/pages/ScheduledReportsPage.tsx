@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { FileBarChart, Plus, Trash2, Edit2, Play, Check, X, Pause } from 'lucide-react'
+import { FileBarChart, Plus, Trash2, Edit2, Play, Check } from 'lucide-react'
 import {
   useListScheduledReportsQuery,
   useCreateScheduledReportMutation,

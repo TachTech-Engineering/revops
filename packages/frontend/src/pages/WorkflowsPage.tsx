@@ -8,7 +8,6 @@ import {
   Pause,
   Clock,
   CheckCircle,
-  XCircle,
   AlertCircle,
   GitBranch,
   Zap,

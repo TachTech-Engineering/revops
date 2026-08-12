@@ -23,7 +23,6 @@ interface SwipeableAlertCardProps {
 export default function SwipeableAlertCard({
   alert,
   onAcknowledge,
-  onAssign,
   onResolve,
 }: SwipeableAlertCardProps) {
   const [swipeX, setSwipeX] = useState(0)

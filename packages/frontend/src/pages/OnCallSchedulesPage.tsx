@@ -19,6 +19,7 @@ import {
   useCreateOnCallOverrideMutation,
   useGetOnCallCalendarQuery,
   OnCallScheduleCreate,
+  OnCallMemberCreate,
 } from '../api/pantherApi'
 import { cn } from '../lib/utils'
 
@@ -43,7 +44,7 @@ export default function OnCallSchedulesPage() {
     scheduleId: selectedScheduleId || undefined,
   })
 
-  const [newSchedule, setNewSchedule] = useState<OnCallScheduleCreate>({
+  const [newSchedule, setNewSchedule] = useState<OnCallScheduleCreate & { members: OnCallMemberCreate[] }>({
     name: '',
     description: '',
     timezone: 'UTC',

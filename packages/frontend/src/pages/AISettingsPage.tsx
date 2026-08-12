@@ -54,50 +54,15 @@ export default function AISettingsPage() {
         result = await testConnection(provider).unwrap()
       }
       setTestResults(prev => ({ ...prev, [provider]: result }))
-    } catch (err: any) {
+    } catch (err) {
+      const detail = (err as { data?: { detail?: string } }).data?.detail
       setTestResults(prev => ({
         ...prev,
-        [provider]: { status: 'error', message: err.data?.detail || 'Test failed' }
+        [provider]: { status: 'error', message: detail || 'Test failed' }
       }))
     }
   }
 
-  const handleSaveKey = async (provider: string) => {
-    setSaveError(null)
-    setSaveSuccess(null)
-
-    const key = provider === 'openai' ? openaiKey : anthropicKey
-    const model = provider === 'openai' ? openaiModel : anthropicModel
-
-    if (!key.trim()) {
-      setSaveError(`Please enter an API key for ${provider}`)
-      return
-    }
-
-    try {
-      await saveAPIKey({
-        provider,
-        api_key: key,
-        model: model || undefined,
-      }).unwrap()
-
-      setSaveSuccess(`${provider} API key saved successfully`)
-      // Clear the input
-      if (provider === 'openai') {
-        setOpenaiKey('')
-        setOpenaiModel('')
-      } else {
-        setAnthropicKey('')
-        setAnthropicModel('')
-      }
-      refetch()
-
-      // Clear success message after 3 seconds
-      setTimeout(() => setSaveSuccess(null), 3000)
-    } catch (err: any) {
-      setSaveError(err.data?.detail || `Failed to save ${provider} API key`)
-    }
-  }
 
   const handleTestAndSave = async (provider: string) => {
     setSaveError(null)
@@ -146,11 +111,12 @@ export default function AISettingsPage() {
       refetch()
 
       setTimeout(() => setSaveSuccess(null), 3000)
-    } catch (err: any) {
-      setSaveError(err.data?.detail || `Failed to test/save ${provider} API key`)
+    } catch (err) {
+      const detail = (err as { data?: { detail?: string } }).data?.detail
+      setSaveError(detail || `Failed to test/save ${provider} API key`)
       setTestResults(prev => ({
         ...prev,
-        [provider]: { status: 'error', message: err.data?.detail || 'Test failed' }
+        [provider]: { status: 'error', message: detail || 'Test failed' }
       }))
     }
   }
@@ -171,8 +137,8 @@ export default function AISettingsPage() {
       })
       refetch()
       setTimeout(() => setSaveSuccess(null), 3000)
-    } catch (err: any) {
-      setSaveError(err.data?.detail || `Failed to delete ${provider} API key`)
+    } catch (err) {
+      setSaveError((err as { data?: { detail?: string } }).data?.detail || `Failed to delete ${provider} API key`)
     }
   }
 

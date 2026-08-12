@@ -54,7 +54,7 @@ function PipelineEditorContent({ pipelineId }: PipelineEditorContentProps) {
   const reactFlowInstance = useReactFlow()
 
   // API hooks
-  const { data: pipeline, isLoading: isLoadingPipeline } = useGetPipelineQuery(pipelineId ?? '', {
+  const { data: pipeline } = useGetPipelineQuery(pipelineId ?? '', {
     skip: !pipelineId,
   })
   const [createPipeline, { isLoading: isCreating }] = useCreatePipelineMutation()

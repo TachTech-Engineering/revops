@@ -1,6 +1,5 @@
 import { Link } from 'react-router-dom'
 import {
-  AlertTriangle,
   RefreshCw,
   CheckCircle,
   ChevronRight,
@@ -102,8 +101,8 @@ export default function StaleRulesWidget({ config }: StaleRulesWidgetProps) {
               <div className="flex items-center gap-3 text-xs text-muted-foreground">
                 <span className="flex items-center gap-1">
                   <Clock size={10} />
-                  {rule.last_triggered
-                    ? `Last: ${new Date(rule.last_triggered).toLocaleDateString()}`
+                  {rule.last_triggered_at
+                    ? `Last: ${new Date(rule.last_triggered_at).toLocaleDateString()}`
                     : 'Never triggered'}
                 </span>
                 <span>Score: {rule.health_score}</span>

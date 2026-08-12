@@ -81,7 +81,7 @@ const mockRules: EmailRule[] = [
 ]
 
 export default function EmailIntegrationPage() {
-  const [config, setConfig] = useState(mockConfig)
+  const [config] = useState(mockConfig)
   const [rules, setRules] = useState(mockRules)
   const [showConfigModal, setShowConfigModal] = useState(false)
   const [showRuleModal, setShowRuleModal] = useState(false)

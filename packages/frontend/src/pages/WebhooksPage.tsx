@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Webhook, Plus, Trash2, Edit2, Check, X, Play, AlertCircle } from 'lucide-react'
+import { Webhook, Plus, Trash2, Edit2, Check, Play, AlertCircle } from 'lucide-react'
 import {
   useListWebhooksQuery,
   useCreateWebhookMutation,

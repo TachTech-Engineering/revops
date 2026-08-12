@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import {
   useGetDashboardQuery,
   useUpdateDashboardMutation,
@@ -12,7 +12,6 @@ import { WidgetRenderer, widgetTypeLabels } from '../components/dashboard/widget
 
 export default function CustomDashboardPage() {
   const { id } = useParams<{ id: string }>()
-  const navigate = useNavigate()
   const [isEditing, setIsEditing] = useState(false)
   const [showAddWidget, setShowAddWidget] = useState(false)
 

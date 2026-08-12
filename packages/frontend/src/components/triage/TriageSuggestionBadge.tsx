@@ -40,7 +40,7 @@ export default function TriageSuggestionBadge({
   const [expanded, setExpanded] = useState(false)
   const [feedbackComment, setFeedbackComment] = useState('')
 
-  const { data: suggestion, isLoading, refetch } = useGetTriageSuggestionQuery({
+  const { data: suggestion, isLoading } = useGetTriageSuggestionQuery({
     alertId,
     forceRefresh: false,
   })
