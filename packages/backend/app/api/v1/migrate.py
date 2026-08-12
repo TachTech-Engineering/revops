@@ -2,19 +2,18 @@
 Migration API - Detection rule conversion endpoints.
 """
 
-from typing import Optional
-from fastapi import APIRouter, HTTPException, status, UploadFile, File, Depends
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.migration_service import migration_service, SIEMFormat
-from app.services.ai_converter_service import ai_converter_service, ConversionFormat, LLMProvider
-from app.services.encryption_service import decrypt_credential
+from app.api.v1.deps import OrgIdDep, OrgUserDep
 from app.config import settings
-from app.db.session import get_db
 from app.db.models import OrganizationAPIKeys
-from app.api.v1.deps import OrgUserDep, OrgIdDep
+from app.db.session import get_db
+from app.services.ai_converter_service import ConversionFormat, LLMProvider, ai_converter_service
+from app.services.encryption_service import decrypt_credential
+from app.services.migration_service import SIEMFormat, migration_service
 
 router = APIRouter()
 
@@ -23,15 +22,15 @@ async def get_org_api_key(
     db: AsyncSession,
     org_id,
     provider: LLMProvider,
-) -> Optional[str]:
+) -> str | None:
     """Fetch and decrypt organization API key for the given provider."""
-    provider_name = 'anthropic' if provider == LLMProvider.CLAUDE else 'openai'
+    provider_name = "anthropic" if provider == LLMProvider.CLAUDE else "openai"
     result = await db.execute(
         select(OrganizationAPIKeys).where(
             and_(
                 OrganizationAPIKeys.organization_id == org_id,
                 OrganizationAPIKeys.provider == provider_name,
-                OrganizationAPIKeys.is_active == True,
+                OrganizationAPIKeys.is_active.is_(True),
             )
         )
     )
@@ -54,7 +53,7 @@ class ConvertResponse(BaseModel):
     converted_code: str
     source_format: str
     target_format: str
-    intermediate_sigma: Optional[str] = None
+    intermediate_sigma: str | None = None
 
 
 class BulkConvertRequest(BaseModel):
@@ -79,8 +78,8 @@ class AIConvertRequest(BaseModel):
     source_format: str
     target_format: str
     source_code: str
-    context: Optional[str] = None
-    provider: Optional[str] = "anthropic"  # anthropic or openai
+    context: str | None = None
+    provider: str | None = "anthropic"  # anthropic or openai
 
 
 class AIConvertResponse(BaseModel):
@@ -90,27 +89,27 @@ class AIConvertResponse(BaseModel):
     provider: str
     model: str
     success: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class ExplainRequest(BaseModel):
     source_format: str
     source_code: str
-    provider: Optional[str] = "anthropic"
+    provider: str | None = "anthropic"
 
 
 class SuggestRequest(BaseModel):
     source_format: str
     source_code: str
-    provider: Optional[str] = "anthropic"
+    provider: str | None = "anthropic"
 
 
 class AIBulkConvertRequest(BaseModel):
     source_format: str
     target_format: str
     rules: list[str]
-    context: Optional[str] = None
-    provider: Optional[str] = "anthropic"
+    context: str | None = None
+    provider: str | None = "anthropic"
 
 
 class AIBulkConvertResponse(BaseModel):
@@ -122,13 +121,13 @@ class AIBulkConvertResponse(BaseModel):
 
 
 @router.get("/formats", response_model=list[FormatInfo])
-async def get_supported_formats():
+async def get_supported_formats(user: OrgUserDep):
     """Get list of supported SIEM formats for conversion."""
     return migration_service.get_supported_formats()
 
 
 @router.post("/convert", response_model=ConvertResponse)
-async def convert_rule(request: ConvertRequest):
+async def convert_rule(request: ConvertRequest, user: OrgUserDep):
     """
     Convert a detection rule from one SIEM format to another.
 
@@ -150,13 +149,12 @@ async def convert_rule(request: ConvertRequest):
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid format: {e}. Supported formats: {[f.value for f in SIEMFormat]}"
+            detail=f"Invalid format: {e}. Supported formats: {[f.value for f in SIEMFormat]}",
         )
 
     if not request.source_code.strip():
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Source code cannot be empty"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Source code cannot be empty"
         )
 
     try:
@@ -184,13 +182,12 @@ async def convert_rule(request: ConvertRequest):
 
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Conversion failed: {str(e)}"
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Conversion failed: {str(e)}"
         )
 
 
 @router.post("/convert/bulk", response_model=BulkConvertResponse)
-async def bulk_convert_rules(request: BulkConvertRequest):
+async def bulk_convert_rules(request: BulkConvertRequest, user: OrgUserDep):
     """
     Convert multiple detection rules in batch.
 
@@ -200,10 +197,7 @@ async def bulk_convert_rules(request: BulkConvertRequest):
         source_format = SIEMFormat(request.source_format.lower())
         target_format = SIEMFormat(request.target_format.lower())
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid format: {e}"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid format: {e}")
 
     results = []
     success_count = 0
@@ -216,18 +210,22 @@ async def bulk_convert_rules(request: BulkConvertRequest):
                 source_format=source_format,
                 target_format=target_format,
             )
-            results.append({
-                "index": i,
-                "status": "success",
-                "converted_code": converted,
-            })
+            results.append(
+                {
+                    "index": i,
+                    "status": "success",
+                    "converted_code": converted,
+                }
+            )
             success_count += 1
         except Exception as e:
-            results.append({
-                "index": i,
-                "status": "error",
-                "error": str(e),
-            })
+            results.append(
+                {
+                    "index": i,
+                    "status": "error",
+                    "error": str(e),
+                }
+            )
             error_count += 1
 
     return BulkConvertResponse(
@@ -239,6 +237,7 @@ async def bulk_convert_rules(request: BulkConvertRequest):
 
 @router.post("/convert/file")
 async def convert_file(
+    user: OrgUserDep,
     file: UploadFile = File(...),
     source_format: str = "sigma",
     target_format: str = "spl",
@@ -252,10 +251,7 @@ async def convert_file(
         src_format = SIEMFormat(source_format.lower())
         tgt_format = SIEMFormat(target_format.lower())
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid format: {e}"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid format: {e}")
 
     # Read file content
     content = await file.read()
@@ -263,8 +259,7 @@ async def convert_file(
         source_code = content.decode("utf-8")
     except UnicodeDecodeError:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="File must be UTF-8 encoded text"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="File must be UTF-8 encoded text"
         )
 
     try:
@@ -283,13 +278,12 @@ async def convert_file(
 
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Conversion failed: {str(e)}"
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Conversion failed: {str(e)}"
         )
 
 
 @router.get("/examples/{format}")
-async def get_format_example(format: str):
+async def get_format_example(format: str, user: OrgUserDep):
     """Get an example detection rule for a specific format."""
     examples = {
         "sigma": """title: Suspicious PowerShell Execution
@@ -312,12 +306,10 @@ level: high
 tags:
   - attack.execution
   - attack.t1059.001""",
-
         "spl": """index=windows sourcetype=WinEventLog:Security EventCode=4688
 | where like(NewProcessName, "%powershell.exe")
 | where like(CommandLine, "%-enc%")
 | table _time, ComputerName, User, NewProcessName, CommandLine""",
-
         "yaral": """rule suspicious_powershell_execution {
   meta:
     author = "Security Team"
@@ -332,19 +324,18 @@ tags:
   condition:
     $e
 }""",
-
         "kql": """SecurityEvent
 | where EventID == 4688
 | where NewProcessName endswith "powershell.exe"
 | where CommandLine contains "-enc"
 | project TimeGenerated, Computer, Account, NewProcessName, CommandLine""",
-
-        "eql": """process where process.name == "powershell.exe" and process.command_line : "*-enc*\"""",
-
+        "eql": (
+            'process where process.name == "powershell.exe"'
+            ' and process.command_line : "*-enc*"'
+        ),
         "esql": """FROM logs-windows.*
 | WHERE process.name == "powershell.exe" AND process.command_line LIKE "%-enc%"
 | KEEP @timestamp, host.name, user.name, process.name, process.command_line""",
-
         "panther": """def rule(event):
     \"\"\"
     Detects encoded PowerShell execution
@@ -363,7 +354,6 @@ def title(event):
 
 def severity(event):
     return "HIGH\"""",
-
         "aql": """SELECT sourceip, destinationip, username, LOGSOURCENAME(logsourceid), starttime
 FROM events
 WHERE category = 'Authentication'
@@ -372,7 +362,6 @@ AND username ILIKE '%admin%'
 AND eventcount > 5
 GROUP BY sourceip, destinationip, username
 LAST 24 HOURS""",
-
         "sql": """-- Suspicious authentication events
 SELECT source_ip, destination_ip, username, log_source, timestamp
 FROM security_events
@@ -387,7 +376,7 @@ LIMIT 1000;""",
     if format_lower not in examples:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No example available for format: {format}"
+            detail=f"No example available for format: {format}",
         )
 
     return {
@@ -397,6 +386,7 @@ LIMIT 1000;""",
 
 
 # AI-Assisted Conversion Endpoints
+
 
 @router.post("/convert/ai", response_model=AIConvertResponse)
 async def ai_convert_rule(
@@ -420,7 +410,7 @@ async def ai_convert_rule(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid provider: {request.provider}. Supported: anthropic, openai"
+            detail=f"Invalid provider: {request.provider}. Supported: anthropic, openai",
         )
 
     # Try to get organization API key
@@ -430,12 +420,12 @@ async def ai_convert_rule(
     if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Anthropic not available - no API key configured"
+            detail="Anthropic not available - no API key configured",
         )
     if provider == LLMProvider.OPENAI and not settings.openai_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="OpenAI not available - no API key configured"
+            detail="OpenAI not available - no API key configured",
         )
 
     try:
@@ -444,13 +434,12 @@ async def ai_convert_rule(
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid format: {e}. Supported formats: {[f.value for f in ConversionFormat]}"
+            detail=f"Invalid format: {e}. Supported formats: {[f.value for f in ConversionFormat]}",
         )
 
     if not request.source_code.strip():
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Source code cannot be empty"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Source code cannot be empty"
         )
 
     result = ai_converter_service.convert(
@@ -474,7 +463,7 @@ async def ai_convert_rule(
 
 
 @router.post("/convert/ai/bulk", response_model=AIBulkConvertResponse)
-async def ai_bulk_convert_rules(request: AIBulkConvertRequest):
+async def ai_bulk_convert_rules(request: AIBulkConvertRequest, user: OrgUserDep):
     """
     Convert multiple detection rules using AI (Anthropic or OpenAI).
 
@@ -489,19 +478,19 @@ async def ai_bulk_convert_rules(request: AIBulkConvertRequest):
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid provider: {request.provider}. Supported: anthropic, openai"
+            detail=f"Invalid provider: {request.provider}. Supported: anthropic, openai",
         )
 
     # Check if selected provider is available
     if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Anthropic not available - ANTHROPIC_API_KEY not configured"
+            detail="Anthropic not available - ANTHROPIC_API_KEY not configured",
         )
     if provider == LLMProvider.OPENAI and not settings.openai_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="OpenAI not available - OPENAI_API_KEY not configured"
+            detail="OpenAI not available - OPENAI_API_KEY not configured",
         )
 
     try:
@@ -510,7 +499,7 @@ async def ai_bulk_convert_rules(request: AIBulkConvertRequest):
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid format: {e}. Supported formats: {[f.value for f in ConversionFormat]}"
+            detail=f"Invalid format: {e}. Supported formats: {[f.value for f in ConversionFormat]}",
         )
 
     results = []
@@ -520,11 +509,13 @@ async def ai_bulk_convert_rules(request: AIBulkConvertRequest):
 
     for i, rule in enumerate(request.rules):
         if not rule.strip():
-            results.append({
-                "index": i,
-                "status": "error",
-                "error": "Empty rule",
-            })
+            results.append(
+                {
+                    "index": i,
+                    "status": "error",
+                    "error": "Empty rule",
+                }
+            )
             error_count += 1
             continue
 
@@ -539,18 +530,22 @@ async def ai_bulk_convert_rules(request: AIBulkConvertRequest):
         model = result.get("model", model)
 
         if result.get("success"):
-            results.append({
-                "index": i,
-                "status": "success",
-                "converted_code": result.get("converted_code", ""),
-            })
+            results.append(
+                {
+                    "index": i,
+                    "status": "success",
+                    "converted_code": result.get("converted_code", ""),
+                }
+            )
             success_count += 1
         else:
-            results.append({
-                "index": i,
-                "status": "error",
-                "error": result.get("error", "Conversion failed"),
-            })
+            results.append(
+                {
+                    "index": i,
+                    "status": "error",
+                    "error": result.get("error", "Conversion failed"),
+                }
+            )
             error_count += 1
 
     return AIBulkConvertResponse(
@@ -584,7 +579,7 @@ async def explain_rule(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid provider: {request.provider}. Supported: anthropic, openai"
+            detail=f"Invalid provider: {request.provider}. Supported: anthropic, openai",
         )
 
     # Get org API key
@@ -594,26 +589,22 @@ async def explain_rule(
     if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Anthropic not available - no API key configured"
+            detail="Anthropic not available - no API key configured",
         )
     if provider == LLMProvider.OPENAI and not settings.openai_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="OpenAI not available - no API key configured"
+            detail="OpenAI not available - no API key configured",
         )
 
     try:
         source_format = ConversionFormat(request.source_format.lower())
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid format: {e}"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid format: {e}")
 
     if not request.source_code.strip():
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Source code cannot be empty"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Source code cannot be empty"
         )
 
     result = ai_converter_service.explain_rule(
@@ -655,7 +646,7 @@ async def suggest_improvements(
     except ValueError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid provider: {request.provider}. Supported: anthropic, openai"
+            detail=f"Invalid provider: {request.provider}. Supported: anthropic, openai",
         )
 
     # Get org API key
@@ -665,26 +656,22 @@ async def suggest_improvements(
     if provider == LLMProvider.CLAUDE and not settings.anthropic_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Anthropic not available - no API key configured"
+            detail="Anthropic not available - no API key configured",
         )
     if provider == LLMProvider.OPENAI and not settings.openai_api_key and not org_api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="OpenAI not available - no API key configured"
+            detail="OpenAI not available - no API key configured",
         )
 
     try:
         source_format = ConversionFormat(request.source_format.lower())
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid format: {e}"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid format: {e}")
 
     if not request.source_code.strip():
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Source code cannot be empty"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Source code cannot be empty"
         )
 
     result = ai_converter_service.suggest_improvements(
@@ -716,13 +703,13 @@ async def get_ai_status(
         select(OrganizationAPIKeys.provider).where(
             and_(
                 OrganizationAPIKeys.organization_id == org_id,
-                OrganizationAPIKeys.is_active == True,
+                OrganizationAPIKeys.is_active.is_(True),
             )
         )
     )
     org_providers = [row[0] for row in result.all()]
-    org_has_anthropic = 'anthropic' in org_providers
-    org_has_openai = 'openai' in org_providers
+    org_has_anthropic = "anthropic" in org_providers
+    org_has_openai = "openai" in org_providers
 
     providers = ai_converter_service.get_available_providers(
         org_has_anthropic=org_has_anthropic,

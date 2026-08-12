@@ -1,20 +1,27 @@
 """
 Threat Feed Management API endpoints.
 """
+
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.deps import OrgAnalystDep, OrgUserDep
+from app.db.models import FeedStatus, FeedType
 from app.db.session import get_db
-from app.db.models import FeedType, FeedStatus
 from app.services.feed_service import feed_service
-from app.api.v1.deps import get_current_user_email
 
 router = APIRouter()
+
+# NOTE: ThreatFeed rows carry an organization_id column, but feed_service does
+# not (yet) accept or filter by organization. The service layer is outside the
+# scope of this change, so these endpoints require org membership via the JWT
+# deps (OrgUserDep / OrgAnalystDep) without applying per-organization
+# filtering to the queries themselves.
 
 
 # Request/Response models
@@ -26,10 +33,10 @@ class FeedCreate(BaseModel):
 
 
 class FeedUpdate(BaseModel):
-    name: Optional[str] = None
-    url: Optional[str] = None
-    update_interval_minutes: Optional[int] = None
-    status: Optional[FeedStatus] = None
+    name: str | None = None
+    url: str | None = None
+    update_interval_minutes: int | None = None
+    status: FeedStatus | None = None
 
 
 class FeedResponse(BaseModel):
@@ -39,10 +46,10 @@ class FeedResponse(BaseModel):
     feed_type: str
     status: str
     update_interval_minutes: int
-    last_sync_at: Optional[datetime] = None
-    next_sync_at: Optional[datetime] = None
+    last_sync_at: datetime | None = None
+    next_sync_at: datetime | None = None
     ioc_count: int
-    error_message: Optional[str] = None
+    error_message: str | None = None
     created_by: str
     created_at: datetime
     updated_at: datetime
@@ -55,7 +62,7 @@ class SyncLogResponse(BaseModel):
     iocs_added: int
     iocs_updated: int
     duration_ms: int
-    error: Optional[str] = None
+    error: str | None = None
     synced_at: datetime
 
 
@@ -65,8 +72,8 @@ class SyncResult(BaseModel):
     status: str
     iocs_added: int
     iocs_updated: int
-    error: Optional[str] = None
-    duration_ms: Optional[int] = None
+    error: str | None = None
+    duration_ms: int | None = None
 
 
 def feed_to_response(feed) -> FeedResponse:
@@ -104,8 +111,9 @@ def sync_log_to_response(log) -> SyncLogResponse:
 
 @router.get("", response_model=list[FeedResponse])
 async def list_feeds(
-    status: Optional[FeedStatus] = Query(None, description="Filter by status"),
-    db: AsyncSession = Depends(get_db),
+    user: OrgUserDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    status: FeedStatus | None = Query(None, description="Filter by status"),
 ):
     """List all threat feed subscriptions."""
     feeds = await feed_service.list_feeds(db, status=status)
@@ -113,7 +121,7 @@ async def list_feeds(
 
 
 @router.get("/types")
-async def get_feed_types():
+async def get_feed_types(user: OrgUserDep):
     """Get available feed types."""
     return [
         {
@@ -152,17 +160,17 @@ async def get_feed_types():
 @router.post("", response_model=FeedResponse)
 async def create_feed(
     feed_create: FeedCreate,
-    db: AsyncSession = Depends(get_db),
-    user_email: str = Depends(get_current_user_email),
+    analyst: OrgAnalystDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Create a new feed subscription."""
+    """Create a new feed subscription. Requires analyst role."""
     feed = await feed_service.create_feed(
         db,
         name=feed_create.name,
         url=feed_create.url,
         feed_type=feed_create.feed_type,
         update_interval_minutes=feed_create.update_interval_minutes,
-        created_by=user_email,
+        created_by=analyst.email,
     )
     return feed_to_response(feed)
 
@@ -170,7 +178,8 @@ async def create_feed(
 @router.get("/{feed_id}", response_model=FeedResponse)
 async def get_feed(
     feed_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    user: OrgUserDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get a single feed by ID."""
     feed = await feed_service.get_feed(db, feed_id)
@@ -183,9 +192,10 @@ async def get_feed(
 async def update_feed(
     feed_id: uuid.UUID,
     feed_update: FeedUpdate,
-    db: AsyncSession = Depends(get_db),
+    analyst: OrgAnalystDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Update a feed."""
+    """Update a feed. Requires analyst role."""
     updates = feed_update.model_dump(exclude_none=True)
     feed = await feed_service.update_feed(db, feed_id, **updates)
     if not feed:
@@ -196,9 +206,10 @@ async def update_feed(
 @router.delete("/{feed_id}")
 async def delete_feed(
     feed_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    analyst: OrgAnalystDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Delete a feed and its associated IOCs."""
+    """Delete a feed and its associated IOCs. Requires analyst role."""
     success = await feed_service.delete_feed(db, feed_id)
     if not success:
         raise HTTPException(status_code=404, detail="Feed not found")
@@ -208,9 +219,10 @@ async def delete_feed(
 @router.post("/{feed_id}/sync", response_model=SyncResult)
 async def sync_feed(
     feed_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    analyst: OrgAnalystDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Trigger a manual sync for a feed."""
+    """Trigger a manual sync for a feed. Requires analyst role."""
     try:
         result = await feed_service.sync_feed(db, feed_id)
         return SyncResult(**result)
@@ -223,8 +235,9 @@ async def sync_feed(
 @router.get("/{feed_id}/logs", response_model=list[SyncLogResponse])
 async def get_sync_logs(
     feed_id: uuid.UUID,
+    user: OrgUserDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = Query(20, ge=1, le=100),
-    db: AsyncSession = Depends(get_db),
 ):
     """Get sync history for a feed."""
     logs = await feed_service.get_sync_logs(db, feed_id, limit=limit)
@@ -233,8 +246,9 @@ async def get_sync_logs(
 
 @router.post("/sync-all", response_model=list[SyncResult])
 async def sync_all_feeds(
-    db: AsyncSession = Depends(get_db),
+    analyst: OrgAnalystDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Trigger sync for all active feeds that are due."""
+    """Trigger sync for all active feeds that are due. Requires analyst role."""
     results = await feed_service.sync_all_active(db)
     return [SyncResult(**r) for r in results]

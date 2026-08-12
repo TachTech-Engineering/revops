@@ -1,30 +1,31 @@
-from typing import Annotated, Optional
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, Header, HTTPException, Request, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy import select
+from fastapi import Depends, Header, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.panther_service import PantherService
-from app.services.converter_service import ConverterService
+from app.db import User, UserRoleType, get_db
 from app.services.auth_service import decode_access_token, get_user_by_id
-from app.db import get_db, User, UserRole, UserRoleType
-from app.config import settings
+from app.services.converter_service import ConverterService
+from app.services.panther_service import PantherService
 
 # JWT Bearer token security
 security = HTTPBearer(auto_error=False)
 
 
 async def get_panther_credentials(
-    x_panther_host: Optional[str] = Header(None),
-    x_panther_token: Optional[str] = Header(None),
+    x_panther_host: str | None = Header(None),
+    x_panther_token: str | None = Header(None),
 ) -> tuple[str, str]:
     """Extract Panther credentials from request headers."""
     if not x_panther_host or not x_panther_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Panther credentials. Please provide X-Panther-Host and X-Panther-Token headers.",
+            detail=(
+                "Missing Panther credentials. "
+                "Please provide X-Panther-Host and X-Panther-Token headers."
+            ),
         )
     return x_panther_host, x_panther_token
 
@@ -38,9 +39,9 @@ async def get_panther_service(
 
 
 async def get_optional_panther_service(
-    x_panther_host: Optional[str] = Header(None),
-    x_panther_token: Optional[str] = Header(None),
-) -> Optional[PantherService]:
+    x_panther_host: str | None = Header(None),
+    x_panther_token: str | None = Header(None),
+) -> PantherService | None:
     """Create a Panther service if credentials are provided, otherwise return None."""
     if not x_panther_host or not x_panther_token:
         return None
@@ -52,74 +53,9 @@ def get_converter_service() -> ConverterService:
     return ConverterService()
 
 
-async def get_current_user_email(
-    x_user_email: Optional[str] = Header(None),
-) -> str:
-    """Extract user email from request headers."""
-    if not x_user_email:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing user email. Please provide X-User-Email header.",
-        )
-    return x_user_email.lower()
-
-
-async def get_current_user_role(
-    email: str = Depends(get_current_user_email),
-    db: AsyncSession = Depends(get_db),
-) -> tuple[str, UserRoleType]:
-    """Get the role for the current user."""
-    # Check if user is in admin whitelist
-    if email in settings.admin_emails_list:
-        return email, UserRoleType.ADMIN
-
-    # Check database for role assignment
-    result = await db.execute(select(UserRole).where(UserRole.email == email))
-    user_role = result.scalar_one_or_none()
-
-    if user_role:
-        return email, user_role.role
-
-    # Default to viewer role
-    return email, UserRoleType.VIEWER
-
-
-async def get_optional_user_email(
-    x_user_email: Optional[str] = Header(None),
-) -> Optional[str]:
-    """Extract user email from request headers (optional)."""
-    return x_user_email.lower() if x_user_email else None
-
-
-def require_role(min_role: UserRoleType):
-    """Dependency factory that requires a minimum role level."""
-    role_hierarchy = {
-        UserRoleType.VIEWER: 0,
-        UserRoleType.ANALYST: 1,
-        UserRoleType.ADMIN: 2,
-    }
-
-    async def role_checker(
-        user_role: tuple[str, UserRoleType] = Depends(get_current_user_role),
-    ) -> tuple[str, UserRoleType]:
-        email, role = user_role
-        if role_hierarchy[role] < role_hierarchy[min_role]:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Insufficient permissions. Required role: {min_role.value}",
-            )
-        return user_role
-
-    return role_checker
-
-
 PantherServiceDep = Annotated[PantherService, Depends(get_panther_service)]
-OptionalPantherServiceDep = Annotated[Optional[PantherService], Depends(get_optional_panther_service)]
+OptionalPantherServiceDep = Annotated[PantherService | None, Depends(get_optional_panther_service)]
 ConverterServiceDep = Annotated[ConverterService, Depends(get_converter_service)]
-CurrentUserDep = Annotated[tuple[str, UserRoleType], Depends(get_current_user_role)]
-OptionalUserEmailDep = Annotated[Optional[str], Depends(get_optional_user_email)]
-RequireAdminDep = Annotated[tuple[str, UserRoleType], Depends(require_role(UserRoleType.ADMIN))]
-RequireAnalystDep = Annotated[tuple[str, UserRoleType], Depends(require_role(UserRoleType.ANALYST))]
 
 
 # JWT-based authentication dependencies
@@ -170,7 +106,7 @@ async def get_current_user_jwt(
 async def get_optional_user_jwt(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db),
-) -> Optional[User]:
+) -> User | None:
     """Get current user from JWT if provided, otherwise return None."""
     if not credentials:
         return None
@@ -184,6 +120,32 @@ async def get_optional_user_jwt(
         return None
 
     return await get_user_by_id(db, UUID(user_id))
+
+
+async def get_user_from_token(db: AsyncSession, token: str) -> User | None:
+    """
+    Validate a raw JWT and return the active user, or None if invalid.
+
+    Shared by transports that cannot use the HTTP Bearer dependency
+    (e.g. WebSocket endpoints passing the token as a query parameter).
+    """
+    payload = decode_access_token(token)
+    if not payload:
+        return None
+
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+
+    try:
+        user = await get_user_by_id(db, UUID(user_id))
+    except ValueError:
+        return None
+
+    if not user or not user.is_active:
+        return None
+
+    return user
 
 
 def require_jwt_role(min_role: UserRoleType):
@@ -209,7 +171,7 @@ def require_jwt_role(min_role: UserRoleType):
 
 # JWT-based type aliases
 CurrentUserJWTDep = Annotated[User, Depends(get_current_user_jwt)]
-OptionalUserJWTDep = Annotated[Optional[User], Depends(get_optional_user_jwt)]
+OptionalUserJWTDep = Annotated[User | None, Depends(get_optional_user_jwt)]
 RequireAdminJWTDep = Annotated[User, Depends(require_jwt_role(UserRoleType.ADMIN))]
 RequireAnalystJWTDep = Annotated[User, Depends(require_jwt_role(UserRoleType.ANALYST))]
 
@@ -225,7 +187,10 @@ async def get_current_user_with_org(
     if not user.organization_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User is not associated with an organization. Please contact your administrator.",
+            detail=(
+                "User is not associated with an organization. "
+                "Please contact your administrator."
+            ),
         )
     return user
 

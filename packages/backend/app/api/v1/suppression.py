@@ -1,13 +1,14 @@
+from datetime import datetime
 from typing import Annotated
 from uuid import UUID
-from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, SuppressionRule
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db import SuppressionRule, get_db
 
 router = APIRouter()
 
@@ -51,13 +52,19 @@ class SuppressionRuleResponse(BaseModel):
 
 @router.get("")
 async def list_suppression_rules(
+    user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     active_only: bool = False,
 ) -> list[SuppressionRuleResponse]:
     """List all suppression rules."""
-    query = select(SuppressionRule).order_by(SuppressionRule.created_at.desc())
+    query = (
+        select(SuppressionRule)
+        .where(SuppressionRule.organization_id == org_id)
+        .order_by(SuppressionRule.created_at.desc())
+    )
     if active_only:
-        query = query.where(SuppressionRule.is_active == True)
+        query = query.where(SuppressionRule.is_active.is_(True))
     result = await db.execute(query)
     rules = result.scalars().all()
     return [
@@ -81,10 +88,14 @@ async def list_suppression_rules(
 @router.post("")
 async def create_suppression_rule(
     rule: SuppressionRuleCreate,
+    analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SuppressionRuleResponse:
-    """Create a new suppression rule."""
+    """Create a new suppression rule. Requires analyst role."""
     db_rule = SuppressionRule(
+        organization_id=org_id,
+        created_by=analyst.email,
         name=rule.name,
         description=rule.description,
         rule_id=rule.rule_id,
@@ -115,10 +126,17 @@ async def create_suppression_rule(
 async def update_suppression_rule(
     rule_id: UUID,
     update: SuppressionRuleUpdate,
+    analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SuppressionRuleResponse:
-    """Update a suppression rule."""
-    result = await db.execute(select(SuppressionRule).where(SuppressionRule.id == rule_id))
+    """Update a suppression rule. Requires analyst role."""
+    result = await db.execute(
+        select(SuppressionRule).where(
+            SuppressionRule.id == rule_id,
+            SuppressionRule.organization_id == org_id,
+        )
+    )
     rule = result.scalar_one_or_none()
     if not rule:
         raise HTTPException(status_code=404, detail="Suppression rule not found")
@@ -146,10 +164,17 @@ async def update_suppression_rule(
 @router.delete("/{rule_id}")
 async def delete_suppression_rule(
     rule_id: UUID,
+    analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
-    """Delete a suppression rule."""
-    result = await db.execute(select(SuppressionRule).where(SuppressionRule.id == rule_id))
+    """Delete a suppression rule. Requires analyst role."""
+    result = await db.execute(
+        select(SuppressionRule).where(
+            SuppressionRule.id == rule_id,
+            SuppressionRule.organization_id == org_id,
+        )
+    )
     rule = result.scalar_one_or_none()
     if not rule:
         raise HTTPException(status_code=404, detail="Suppression rule not found")

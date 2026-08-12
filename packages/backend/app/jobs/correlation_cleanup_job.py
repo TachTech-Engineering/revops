@@ -8,7 +8,7 @@ Runs as a background job on a schedule.
 import logging
 from datetime import datetime
 
-from app.db import get_db_session
+from app.db.session import AsyncSessionLocal
 from app.services.correlation_service import CorrelationService
 
 logger = logging.getLogger(__name__)
@@ -27,15 +27,14 @@ async def cleanup_correlation_windows(max_age_hours: int = 24):
     logger.info(f"Starting correlation window cleanup job at {start_time}")
 
     try:
-        async with get_db_session() as db:
+        async with AsyncSessionLocal() as db:
             service = CorrelationService(db)
             deleted_count = await service.cleanup_expired_windows(max_age_hours)
             await db.commit()
 
             duration = (datetime.utcnow() - start_time).total_seconds()
             logger.info(
-                f"Correlation cleanup completed: {deleted_count} windows deleted "
-                f"in {duration:.2f}s"
+                f"Correlation cleanup completed: {deleted_count} windows deleted in {duration:.2f}s"
             )
 
     except Exception as e:

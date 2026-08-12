@@ -1,13 +1,13 @@
-from typing import Annotated, Optional
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, CorrelationRule
-from app.api.v1.deps import RequireAnalystDep, CurrentUserDep
+from app.api.v1.deps import OrgAnalystDep, OrgUserDep
+from app.db import CorrelationRule, get_db
 
 router = APIRouter()
 
@@ -15,31 +15,31 @@ router = APIRouter()
 class CorrelationConditions(BaseModel):
     time_window_minutes: int = 60
     min_alerts: int = 2
-    field_matches: Optional[list[str]] = None  # Fields that must match across alerts
-    severity_filter: Optional[list[str]] = None
-    rule_id_filter: Optional[list[str]] = None
+    field_matches: list[str] | None = None  # Fields that must match across alerts
+    severity_filter: list[str] | None = None
+    rule_id_filter: list[str] | None = None
 
 
 class CorrelationRuleCreate(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     conditions: CorrelationConditions
     is_active: bool = True
     auto_create_incident: bool = False
 
 
 class CorrelationRuleUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    conditions: Optional[CorrelationConditions] = None
-    is_active: Optional[bool] = None
-    auto_create_incident: Optional[bool] = None
+    name: str | None = None
+    description: str | None = None
+    conditions: CorrelationConditions | None = None
+    is_active: bool | None = None
+    auto_create_incident: bool | None = None
 
 
 class CorrelationRuleResponse(BaseModel):
     id: UUID
     name: str
-    description: Optional[str]
+    description: str | None
     conditions: dict
     is_active: bool
     auto_create_incident: bool
@@ -53,14 +53,14 @@ class CorrelationRuleResponse(BaseModel):
 
 @router.get("")
 async def list_correlation_rules(
-    user: CurrentUserDep,
+    user: OrgUserDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     active_only: bool = False,
 ) -> list[CorrelationRuleResponse]:
     """List all correlation rules."""
     query = select(CorrelationRule).order_by(CorrelationRule.created_at.desc())
     if active_only:
-        query = query.where(CorrelationRule.is_active == True)
+        query = query.where(CorrelationRule.is_active.is_(True))
 
     result = await db.execute(query)
     rules = result.scalars().all()
@@ -84,7 +84,7 @@ async def list_correlation_rules(
 @router.get("/{rule_id}")
 async def get_correlation_rule(
     rule_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CorrelationRuleResponse:
     """Get a correlation rule by ID."""
@@ -109,7 +109,7 @@ async def get_correlation_rule(
 @router.post("")
 async def create_correlation_rule(
     rule: CorrelationRuleCreate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CorrelationRuleResponse:
     """Create a new correlation rule. Requires analyst role."""
@@ -144,7 +144,7 @@ async def create_correlation_rule(
 async def update_correlation_rule(
     rule_id: UUID,
     update: CorrelationRuleUpdate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CorrelationRuleResponse:
     """Update a correlation rule. Requires analyst role."""
@@ -179,7 +179,7 @@ async def update_correlation_rule(
 @router.delete("/{rule_id}")
 async def delete_correlation_rule(
     rule_id: UUID,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete a correlation rule. Requires analyst role."""

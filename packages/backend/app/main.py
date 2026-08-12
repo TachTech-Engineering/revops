@@ -13,28 +13,31 @@ from app.db import init_db
 from app.jobs.connector_sync import start_connector_sync_scheduler, stop_connector_sync_scheduler
 from app.services.syslog_receiver import get_syslog_receiver
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG)
-logging.getLogger("panther_sdk").setLevel(logging.DEBUG)
-logging.getLogger("httpx").setLevel(logging.DEBUG)
+# Configure logging from settings (default INFO)
+_log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+logging.basicConfig(level=_log_level)
+logging.getLogger("panther_sdk").setLevel(_log_level)
+# httpx logs request details (including auth headers) at DEBUG - never allow below INFO
+logging.getLogger("httpx").setLevel(max(_log_level, logging.INFO))
 
 logger = logging.getLogger(__name__)
 
 
 async def register_syslog_handlers(syslog_receiver) -> None:
     """Register syslog handlers for all syslog-type connectors in the database."""
-    from app.db.session import AsyncSessionLocal
     from sqlalchemy import select
-    from app.db.models import Connector
 
-    SYSLOG_CONNECTOR_TYPES = ["unifi_syslog"]
+    from app.db.models import Connector
+    from app.db.session import AsyncSessionLocal
+
+    syslog_connector_types = ["unifi_syslog"]
 
     try:
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(Connector).where(
-                    Connector.connector_type.in_(SYSLOG_CONNECTOR_TYPES),
-                    Connector.sync_enabled == True
+                    Connector.connector_type.in_(syslog_connector_types),
+                    Connector.sync_enabled.is_(True),
                 )
             )
             connectors = result.scalars().all()
@@ -48,7 +51,9 @@ async def register_syslog_handlers(syslog_receiver) -> None:
                     hostname_patterns=None,
                     app_name_patterns=None,
                 )
-                logger.info(f"Registered syslog handler for connector {connector.name} ({connector.id})")
+                logger.info(
+                    f"Registered syslog handler for connector {connector.name} ({connector.id})"
+                )
 
             logger.info(f"Registered {len(connectors)} syslog handlers")
     except Exception as e:

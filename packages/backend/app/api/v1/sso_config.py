@@ -2,73 +2,76 @@
 SSO Configuration API endpoints for per-organization SSO management.
 Only accessible by organization admins.
 """
-from typing import Optional
+
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from app.db import get_db, OrganizationSSO, Organization, User, SSOProvider, UserRoleType
-from app.services.encryption_service import encrypt_credential, decrypt_credential
-from app.api.v1.auth import get_current_user
+from app.api.v1.deps import OrgAdminDep
+from app.db import Organization, OrganizationSSO, SSOProvider, User, UserRoleType, get_db
+from app.services.encryption_service import encrypt_credential
 
 router = APIRouter()
 
 
 # ==================== Request/Response Models ====================
 
+
 class SSOConfigBase(BaseModel):
     provider: str = Field(..., description="SSO provider: google, okta, azure_ad, saml")
-    display_name: Optional[str] = Field(None, description="Custom name for login button")
+    display_name: str | None = Field(None, description="Custom name for login button")
     client_id: str = Field(..., description="OAuth2 client ID")
-    domain: Optional[str] = Field(None, description="Provider domain (for Okta)")
-    tenant_id: Optional[str] = Field(None, description="Azure AD tenant ID")
-    metadata_url: Optional[str] = Field(None, description="SAML metadata URL")
-    entity_id: Optional[str] = Field(None, description="SAML entity ID")
-    sso_url: Optional[str] = Field(None, description="SAML SSO URL")
-    allowed_email_domains: Optional[str] = Field(None, description="Comma-separated allowed email domains")
+    domain: str | None = Field(None, description="Provider domain (for Okta)")
+    tenant_id: str | None = Field(None, description="Azure AD tenant ID")
+    metadata_url: str | None = Field(None, description="SAML metadata URL")
+    entity_id: str | None = Field(None, description="SAML entity ID")
+    sso_url: str | None = Field(None, description="SAML SSO URL")
+    allowed_email_domains: str | None = Field(
+        None, description="Comma-separated allowed email domains"
+    )
     auto_create_users: bool = Field(True, description="Auto-create users on first SSO login")
     default_role: str = Field("viewer", description="Default role for new SSO users")
 
 
 class SSOConfigCreate(SSOConfigBase):
     client_secret: str = Field(..., description="OAuth2 client secret (will be encrypted)")
-    certificate: Optional[str] = Field(None, description="SAML certificate in PEM format")
+    certificate: str | None = Field(None, description="SAML certificate in PEM format")
 
 
 class SSOConfigUpdate(BaseModel):
-    display_name: Optional[str] = None
-    client_id: Optional[str] = None
-    client_secret: Optional[str] = None  # Only update if provided
-    domain: Optional[str] = None
-    tenant_id: Optional[str] = None
-    metadata_url: Optional[str] = None
-    entity_id: Optional[str] = None
-    sso_url: Optional[str] = None
-    certificate: Optional[str] = None
-    allowed_email_domains: Optional[str] = None
-    auto_create_users: Optional[bool] = None
-    default_role: Optional[str] = None
-    is_enabled: Optional[bool] = None
+    display_name: str | None = None
+    client_id: str | None = None
+    client_secret: str | None = None  # Only update if provided
+    domain: str | None = None
+    tenant_id: str | None = None
+    metadata_url: str | None = None
+    entity_id: str | None = None
+    sso_url: str | None = None
+    certificate: str | None = None
+    allowed_email_domains: str | None = None
+    auto_create_users: bool | None = None
+    default_role: str | None = None
+    is_enabled: bool | None = None
 
 
 class SSOConfigResponse(BaseModel):
     id: str
     provider: str
-    display_name: Optional[str]
+    display_name: str | None
     is_enabled: bool
     client_id: str
     # client_secret is never returned
-    domain: Optional[str]
-    tenant_id: Optional[str]
-    metadata_url: Optional[str]
-    entity_id: Optional[str]
-    sso_url: Optional[str]
+    domain: str | None
+    tenant_id: str | None
+    metadata_url: str | None
+    entity_id: str | None
+    sso_url: str | None
     # certificate is never returned
-    allowed_email_domains: Optional[str]
+    allowed_email_domains: str | None
     auto_create_users: bool
     default_role: str
     created_at: str
@@ -84,21 +87,14 @@ class SSOConfigListResponse(BaseModel):
 
 # ==================== Helper Functions ====================
 
-async def get_current_admin_user(
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    """Get current user and verify they are an admin."""
-    # This is a simplified version - in production, integrate with your auth middleware
-    # For now, we'll get the user from the request context
-    from fastapi import Request
-    from app.services.auth_service import decode_access_token, get_user_by_id
 
-    # This dependency should be replaced with your actual auth dependency
-    # that extracts the user from the JWT token
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Auth middleware integration required"
-    )
+def verify_org_access(admin: User, organization_id: UUID) -> None:
+    """Ensure the authenticated admin belongs to the organization in the path."""
+    if admin.organization_id != organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this organization",
+        )
 
 
 def validate_provider(provider: str) -> SSOProvider:
@@ -109,7 +105,7 @@ def validate_provider(provider: str) -> SSOProvider:
         valid = [p.value for p in SSOProvider]
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid provider '{provider}'. Must be one of: {valid}"
+            detail=f"Invalid provider '{provider}'. Must be one of: {valid}",
         )
 
 
@@ -121,21 +117,24 @@ def validate_role(role: str) -> UserRoleType:
         valid = [r.value for r in UserRoleType]
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid role '{role}'. Must be one of: {valid}"
+            detail=f"Invalid role '{role}'. Must be one of: {valid}",
         )
 
 
 # ==================== Endpoints ====================
 
+
 @router.get("", response_model=SSOConfigListResponse)
 async def list_sso_configs(
     organization_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    admin: OrgAdminDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
     List all SSO configurations for an organization.
     Requires admin access to the organization.
     """
+    verify_org_access(admin, organization_id)
     result = await db.execute(
         select(OrganizationSSO)
         .where(OrganizationSSO.organization_id == organization_id)
@@ -171,51 +170,46 @@ async def list_sso_configs(
 async def create_sso_config(
     organization_id: UUID,
     config: SSOConfigCreate,
-    created_by: str = "admin",  # Should come from auth middleware
-    db: AsyncSession = Depends(get_db),
+    admin: OrgAdminDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
     Create a new SSO configuration for an organization.
     Requires admin access to the organization.
     """
+    verify_org_access(admin, organization_id)
+
     # Validate provider and role
     provider = validate_provider(config.provider)
     default_role = validate_role(config.default_role)
 
     # Verify organization exists
-    org_result = await db.execute(
-        select(Organization).where(Organization.id == organization_id)
-    )
+    org_result = await db.execute(select(Organization).where(Organization.id == organization_id))
     org = org_result.scalar_one_or_none()
     if not org:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Organization not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Organization not found")
 
     # Check for existing config with same provider
     existing_result = await db.execute(
         select(OrganizationSSO).where(
-            OrganizationSSO.organization_id == organization_id,
-            OrganizationSSO.provider == provider
+            OrganizationSSO.organization_id == organization_id, OrganizationSSO.provider == provider
         )
     )
     if existing_result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"SSO configuration for {provider.value} already exists"
+            detail=f"SSO configuration for {provider.value} already exists",
         )
 
     # Validate provider-specific requirements
     if provider == SSOProvider.OKTA and not config.domain:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Okta provider requires 'domain' field"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Okta provider requires 'domain' field"
         )
     if provider == SSOProvider.AZURE_AD and not config.tenant_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Azure AD provider requires 'tenant_id' field"
+            detail="Azure AD provider requires 'tenant_id' field",
         )
 
     # Encrypt sensitive data
@@ -240,7 +234,7 @@ async def create_sso_config(
         allowed_email_domains=config.allowed_email_domains,
         auto_create_users=config.auto_create_users,
         default_role=default_role,
-        created_by=created_by,
+        created_by=admin.email,
     )
 
     db.add(sso_config)
@@ -270,24 +264,24 @@ async def create_sso_config(
 async def get_sso_config(
     organization_id: UUID,
     config_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    admin: OrgAdminDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
     Get a specific SSO configuration.
     Requires admin access to the organization.
     """
+    verify_org_access(admin, organization_id)
     result = await db.execute(
         select(OrganizationSSO).where(
-            OrganizationSSO.id == config_id,
-            OrganizationSSO.organization_id == organization_id
+            OrganizationSSO.id == config_id, OrganizationSSO.organization_id == organization_id
         )
     )
     config = result.scalar_one_or_none()
 
     if not config:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="SSO configuration not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="SSO configuration not found"
         )
 
     return SSOConfigResponse(
@@ -314,24 +308,24 @@ async def update_sso_config(
     organization_id: UUID,
     config_id: UUID,
     update: SSOConfigUpdate,
-    db: AsyncSession = Depends(get_db),
+    admin: OrgAdminDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
     Update an SSO configuration.
     Requires admin access to the organization.
     """
+    verify_org_access(admin, organization_id)
     result = await db.execute(
         select(OrganizationSSO).where(
-            OrganizationSSO.id == config_id,
-            OrganizationSSO.organization_id == organization_id
+            OrganizationSSO.id == config_id, OrganizationSSO.organization_id == organization_id
         )
     )
     config = result.scalar_one_or_none()
 
     if not config:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="SSO configuration not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="SSO configuration not found"
         )
 
     # Update fields
@@ -388,24 +382,24 @@ async def update_sso_config(
 async def delete_sso_config(
     organization_id: UUID,
     config_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    admin: OrgAdminDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
     Delete an SSO configuration.
     Requires admin access to the organization.
     """
+    verify_org_access(admin, organization_id)
     result = await db.execute(
         select(OrganizationSSO).where(
-            OrganizationSSO.id == config_id,
-            OrganizationSSO.organization_id == organization_id
+            OrganizationSSO.id == config_id, OrganizationSSO.organization_id == organization_id
         )
     )
     config = result.scalar_one_or_none()
 
     if not config:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="SSO configuration not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="SSO configuration not found"
         )
 
     await db.delete(config)
@@ -416,24 +410,24 @@ async def delete_sso_config(
 async def test_sso_config(
     organization_id: UUID,
     config_id: UUID,
-    db: AsyncSession = Depends(get_db),
+    admin: OrgAdminDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """
     Test an SSO configuration by attempting to fetch provider metadata.
     Returns success if the configuration appears valid.
     """
+    verify_org_access(admin, organization_id)
     result = await db.execute(
         select(OrganizationSSO).where(
-            OrganizationSSO.id == config_id,
-            OrganizationSSO.organization_id == organization_id
+            OrganizationSSO.id == config_id, OrganizationSSO.organization_id == organization_id
         )
     )
     config = result.scalar_one_or_none()
 
     if not config:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="SSO configuration not found"
+            status_code=status.HTTP_404_NOT_FOUND, detail="SSO configuration not found"
         )
 
     # Build the metadata URL based on provider
@@ -469,7 +463,7 @@ async def test_sso_config(
             else:
                 return {
                     "success": False,
-                    "error": f"Provider returned status {response.status_code}"
+                    "error": f"Provider returned status {response.status_code}",
                 }
 
     except httpx.TimeoutException:

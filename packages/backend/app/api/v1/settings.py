@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, UserSettings
+from app.api.v1.deps import CurrentUserJWTDep
+from app.db import UserSettings, get_db
 
 router = APIRouter()
 
@@ -34,7 +35,7 @@ class UserSettingsResponse(BaseModel):
         from_attributes = True
 
 
-async def get_or_create_settings(db: AsyncSession, user_id: str = "default") -> UserSettings:
+async def get_or_create_settings(db: AsyncSession, user_id: str) -> UserSettings:
     """Get user settings or create default if not exists."""
     result = await db.execute(select(UserSettings).where(UserSettings.user_id == user_id))
     settings = result.scalar_one_or_none()
@@ -48,11 +49,11 @@ async def get_or_create_settings(db: AsyncSession, user_id: str = "default") -> 
 
 @router.get("")
 async def get_settings(
+    user: CurrentUserJWTDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user_id: str = "default",
 ) -> UserSettingsResponse:
-    """Get user settings."""
-    settings = await get_or_create_settings(db, user_id)
+    """Get settings for the authenticated user."""
+    settings = await get_or_create_settings(db, str(user.id))
     return UserSettingsResponse(
         id=settings.id,
         user_id=settings.user_id,
@@ -68,11 +69,11 @@ async def get_settings(
 @router.patch("")
 async def update_settings(
     update: UserSettingsUpdate,
+    user: CurrentUserJWTDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    user_id: str = "default",
 ) -> UserSettingsResponse:
-    """Update user settings."""
-    settings = await get_or_create_settings(db, user_id)
+    """Update settings for the authenticated user."""
+    settings = await get_or_create_settings(db, str(user.id))
 
     for field, value in update.model_dump(exclude_unset=True).items():
         setattr(settings, field, value)

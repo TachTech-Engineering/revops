@@ -1,9 +1,9 @@
-from typing import Any, Optional, Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.api.v1.deps import ConverterServiceDep
+from app.api.v1.deps import ConverterServiceDep, OrgUserDep
 from app.services.converter_service import SourceFormat
 
 router = APIRouter()
@@ -11,10 +11,11 @@ router = APIRouter()
 
 class ConvertRequest(BaseModel):
     """Request to convert a detection rule to Panther format."""
+
     spl: str  # Named 'spl' for backwards compatibility, but accepts any source
     ruleId: str
-    className: Optional[str] = None
-    severity: Optional[str] = None
+    className: str | None = None
+    severity: str | None = None
     sourceFormat: Literal["spl", "yaral", "aql"] = "spl"
     targetFormat: Literal["python", "sql"] = "python"  # Target output format (for AQL)
 
@@ -30,6 +31,7 @@ class SPLBatchConvertRequest(BaseModel):
 
 class ValidateRequest(BaseModel):
     """Request to validate a detection rule."""
+
     spl: str  # Named 'spl' for backwards compatibility
     sourceFormat: Literal["spl", "yaral", "aql"] = "spl"
 
@@ -41,6 +43,7 @@ SPLValidateRequest = ValidateRequest
 @router.get("/formats")
 async def get_supported_formats(
     converter: ConverterServiceDep,
+    user: OrgUserDep,
 ) -> list[dict[str, Any]]:
     """
     Get list of supported source formats for conversion.
@@ -54,6 +57,7 @@ async def get_supported_formats(
 async def convert_rule(
     request: ConvertRequest,
     converter: ConverterServiceDep,
+    user: OrgUserDep,
 ) -> dict[str, Any]:
     """
     Convert a detection rule to Panther format.
@@ -85,6 +89,7 @@ async def convert_rule(
 async def batch_convert_spl(
     request: SPLBatchConvertRequest,
     converter: ConverterServiceDep,
+    user: OrgUserDep,
 ) -> dict[str, Any]:
     """
     Convert multiple SPL queries to Panther rules.
@@ -106,6 +111,7 @@ async def batch_convert_spl(
 async def validate_rule(
     request: ValidateRequest,
     converter: ConverterServiceDep,
+    user: OrgUserDep,
 ) -> dict[str, Any]:
     """
     Validate detection rule syntax without full conversion.

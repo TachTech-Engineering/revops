@@ -1,14 +1,24 @@
-from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+from pydantic import model_validator
+from pydantic_settings import BaseSettings
+
+# Known-insecure default, only acceptable in development environments.
+# NOTE: encryption_service.py also derives Fernet keys from secret_key,
+# so rotating it invalidates encrypted credentials.
+INSECURE_DEFAULT_SECRET_KEY = "dev-secret-key-change-in-production"
 
 
 class Settings(BaseSettings):
+    # Deployment environment: development, staging, production
+    environment: str = "development"
+
     # Panther API Configuration
     panther_api_host: str = ""
     panther_api_token: str = ""
 
     # Application Configuration
-    secret_key: str = "dev-secret-key-change-in-production"
+    secret_key: str = INSECURE_DEFAULT_SECRET_KEY
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
 
@@ -113,6 +123,23 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = False
+
+    @property
+    def is_development(self) -> bool:
+        return self.environment.strip().lower() in ("development", "dev", "local", "test")
+
+    @model_validator(mode="after")
+    def validate_secret_key(self) -> "Settings":
+        """Refuse to boot outside development with a default or blank secret key."""
+        if not self.is_development and (
+            not self.secret_key or self.secret_key == INSECURE_DEFAULT_SECRET_KEY
+        ):
+            raise ValueError(
+                "SECRET_KEY must be set to a strong, unique value when "
+                f"ENVIRONMENT={self.environment!r}. Refusing to start with the "
+                "default development secret key."
+            )
+        return self
 
     @property
     def cors_origins_list(self) -> list[str]:

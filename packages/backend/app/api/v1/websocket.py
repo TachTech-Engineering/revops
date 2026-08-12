@@ -1,28 +1,32 @@
-import json
 import asyncio
+import json
 import logging
-from typing import Set
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
+from app.api.v1.deps import get_user_from_token
+from app.db import User
+from app.db.session import AsyncSessionLocal
 from app.services.notification_service import notification_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Custom close code for authentication failures (4000-4999 is the app-defined range)
+WS_CLOSE_UNAUTHORIZED = 4401
+
 
 class ConnectionManager:
     """Manages WebSocket connections."""
 
     def __init__(self):
-        self.active_connections: Set[WebSocket] = set()
+        self.active_connections: set[WebSocket] = set()
         self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket) -> None:
-        """Accept and register a new connection."""
-        await websocket.accept()
+        """Register an already-accepted connection."""
         async with self._lock:
             self.active_connections.add(websocket)
         logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
@@ -63,9 +67,39 @@ async def handle_redis_message(data: dict) -> None:
     await manager.broadcast(data)
 
 
+async def authenticate_websocket(websocket: WebSocket) -> User | None:
+    """
+    Authenticate a WebSocket connection via a `token` query parameter
+    (browsers cannot set headers on WebSocket connections).
+
+    Accepts the connection, then closes it with code 4401 if the token
+    is missing or invalid. Returns the authenticated user, or None if
+    the connection was rejected.
+    """
+    await websocket.accept()
+
+    token = websocket.query_params.get("token")
+    if not token:
+        await websocket.close(code=WS_CLOSE_UNAUTHORIZED, reason="Missing authentication token")
+        return None
+
+    async with AsyncSessionLocal() as db:
+        user = await get_user_from_token(db, token)
+
+    if not user:
+        await websocket.close(code=WS_CLOSE_UNAUTHORIZED, reason="Invalid or expired token")
+        return None
+
+    return user
+
+
 @router.websocket("/ws/alerts")
 async def websocket_alerts(websocket: WebSocket):
-    """WebSocket endpoint for real-time alert notifications."""
+    """WebSocket endpoint for real-time alert notifications. Requires a valid JWT via ?token=."""
+    user = await authenticate_websocket(websocket)
+    if not user:
+        return
+
     await manager.connect(websocket)
 
     # Subscribe to alerts channel - the service handles the listener internally
@@ -90,7 +124,7 @@ async def websocket_alerts(websocket: WebSocket):
                         await websocket.send_text(json.dumps({"type": "pong"}))
                 except json.JSONDecodeError:
                     pass
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Send heartbeat
                 try:
                     if websocket.client_state == WebSocketState.CONNECTED:
@@ -115,7 +149,11 @@ async def websocket_alerts(websocket: WebSocket):
 
 @router.websocket("/ws/notifications")
 async def websocket_notifications(websocket: WebSocket):
-    """WebSocket endpoint for general notifications."""
+    """WebSocket endpoint for general notifications. Requires a valid JWT via ?token=."""
+    user = await authenticate_websocket(websocket)
+    if not user:
+        return
+
     await manager.connect(websocket)
 
     try:
@@ -136,7 +174,7 @@ async def websocket_notifications(websocket: WebSocket):
                         await websocket.send_text(json.dumps({"type": "pong"}))
                 except json.JSONDecodeError:
                     pass
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 try:
                     if websocket.client_state == WebSocketState.CONNECTED:
                         await websocket.send_text(json.dumps({"type": "heartbeat"}))

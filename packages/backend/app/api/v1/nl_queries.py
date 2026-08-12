@@ -2,23 +2,20 @@
 Natural Language Queries API - Feature 4
 "Show failed logins last week" → SQL/filters.
 """
-import re
+
+import logging
 import time
-from datetime import datetime
-from typing import Optional, Tuple
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc, text
+from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import OrgUserDep, OrgIdDep
-from app.db import get_db, NLQueryHistory
+from app.api.v1.deps import OrgIdDep, OrgUserDep
 from app.config import settings
-from fastapi import Depends
-import logging
+from app.db import NLQueryHistory, get_db
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +23,26 @@ router = APIRouter()
 
 # SQL Safety validation
 DANGEROUS_KEYWORDS = [
-    "DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE", "TRUNCATE",
-    "GRANT", "REVOKE", "EXEC", "EXECUTE", "MERGE", "CALL", "COPY",
-    "pg_", "information_schema", "--", "/*", "*/", ";"
+    "DROP",
+    "DELETE",
+    "INSERT",
+    "UPDATE",
+    "ALTER",
+    "CREATE",
+    "TRUNCATE",
+    "GRANT",
+    "REVOKE",
+    "EXEC",
+    "EXECUTE",
+    "MERGE",
+    "CALL",
+    "COPY",
+    "pg_",
+    "information_schema",
+    "--",
+    "/*",
+    "*/",
+    ";",
 ]
 
 
@@ -41,21 +55,21 @@ class NLQueryResponse(BaseModel):
     id: str
     natural_query: str
     generated_sql: str
-    explanation: Optional[str]
-    results: Optional[list] = None
-    row_count: Optional[int] = None
-    execution_time_ms: Optional[int] = None
-    error_message: Optional[str] = None
+    explanation: str | None
+    results: list | None = None
+    row_count: int | None = None
+    execution_time_ms: int | None = None
+    error_message: str | None = None
 
 
 class NLQueryHistoryResponse(BaseModel):
     id: str
     natural_query: str
     generated_sql: str
-    explanation: Optional[str]
+    explanation: str | None
     was_executed: bool
-    row_count: Optional[int]
-    was_helpful: Optional[bool]
+    row_count: int | None
+    was_helpful: bool | None
     created_at: str
 
     class Config:
@@ -65,19 +79,44 @@ class NLQueryHistoryResponse(BaseModel):
 class FeedbackRequest(BaseModel):
     query_id: str
     was_helpful: bool
-    feedback_comment: Optional[str] = None
+    feedback_comment: str | None = None
 
 
 # Example queries for natural language to SQL translation
 EXAMPLE_QUERIES = [
-    {"nl": "Show failed logins from yesterday", "sql": "SELECT * FROM normalized_alerts WHERE title ILIKE '%failed login%' AND created_at_source >= NOW() - INTERVAL '1 day'"},
-    {"nl": "Count alerts by severity this week", "sql": "SELECT severity, COUNT(*) as count FROM normalized_alerts WHERE created_at_source >= NOW() - INTERVAL '7 days' GROUP BY severity"},
-    {"nl": "Find critical alerts from last 24 hours", "sql": "SELECT * FROM normalized_alerts WHERE severity = 'critical' AND created_at_source >= NOW() - INTERVAL '24 hours' ORDER BY created_at_source DESC"},
-    {"nl": "Show top 10 rules by alert count", "sql": "SELECT rule_id, rule_name, COUNT(*) as alert_count FROM normalized_alerts GROUP BY rule_id, rule_name ORDER BY alert_count DESC LIMIT 10"},
+    {
+        "nl": "Show failed logins from yesterday",
+        "sql": (
+            "SELECT * FROM normalized_alerts WHERE title ILIKE '%failed login%' "
+            "AND created_at_source >= NOW() - INTERVAL '1 day'"
+        ),
+    },
+    {
+        "nl": "Count alerts by severity this week",
+        "sql": (
+            "SELECT severity, COUNT(*) as count FROM normalized_alerts "
+            "WHERE created_at_source >= NOW() - INTERVAL '7 days' GROUP BY severity"
+        ),
+    },
+    {
+        "nl": "Find critical alerts from last 24 hours",
+        "sql": (
+            "SELECT * FROM normalized_alerts WHERE severity = 'critical' "
+            "AND created_at_source >= NOW() - INTERVAL '24 hours' "
+            "ORDER BY created_at_source DESC"
+        ),
+    },
+    {
+        "nl": "Show top 10 rules by alert count",
+        "sql": (
+            "SELECT rule_id, rule_name, COUNT(*) as alert_count FROM normalized_alerts "
+            "GROUP BY rule_id, rule_name ORDER BY alert_count DESC LIMIT 10"
+        ),
+    },
 ]
 
 
-def validate_sql_safety(sql: str, org_id: UUID) -> Tuple[bool, str]:
+def validate_sql_safety(sql: str, org_id: UUID) -> tuple[bool, str]:
     """
     Validate that SQL is safe to execute.
 
@@ -106,7 +145,7 @@ def validate_sql_safety(sql: str, org_id: UUID) -> Tuple[bool, str]:
     return True, ""
 
 
-async def translate_nl_to_sql_llm(natural_query: str, org_id: UUID) -> Tuple[str, str]:
+async def translate_nl_to_sql_llm(natural_query: str, org_id: UUID) -> tuple[str, str]:
     """
     Translate natural language to SQL using Anthropic API.
 
@@ -121,14 +160,17 @@ async def translate_nl_to_sql_llm(natural_query: str, org_id: UUID) -> Tuple[str
         # Fall back to pattern matching if no API key
         return translate_nl_to_sql_fallback(natural_query, org_id)
 
-    system_prompt = """You are a SQL query generator for a security operations center (SOC) platform.
+    system_prompt = """You are a SQL query generator for a security operations center (SOC)
+platform.
 You translate natural language queries into PostgreSQL queries.
 
 Available tables and their key columns:
-- normalized_alerts: id, organization_id, title, description, severity (critical/high/medium/low/info),
+- normalized_alerts: id, organization_id, title, description,
+  severity (critical/high/medium/low/info),
   status (open/acknowledged/resolved/closed), source_type, rule_id, rule_name, tags,
   mitre_tactics, mitre_techniques, created_at_source, ingested_at
-- incidents: id, organization_id, title, description, status (open/investigating/contained/resolved/closed),
+- incidents: id, organization_id, title, description,
+  status (open/investigating/contained/resolved/closed),
   severity (critical/high/medium/low), assignee, tags, created_by, created_at, updated_at
 - cases: id, organization_id, case_number, title, description, status, priority, assignee, tags,
   incident_ids, created_by, closed_at, created_at
@@ -162,9 +204,7 @@ Respond with ONLY a JSON object containing:
                     "model": settings.anthropic_model or "claude-sonnet-4-20250514",
                     "max_tokens": 1000,
                     "system": system_prompt,
-                    "messages": [
-                        {"role": "user", "content": user_prompt}
-                    ],
+                    "messages": [{"role": "user", "content": user_prompt}],
                 },
                 timeout=30.0,
             )
@@ -178,6 +218,7 @@ Respond with ONLY a JSON object containing:
 
             # Parse JSON response
             import json
+
             try:
                 result = json.loads(content)
                 sql = result.get("sql", "")
@@ -200,7 +241,7 @@ Respond with ONLY a JSON object containing:
         return translate_nl_to_sql_fallback(natural_query, org_id)
 
 
-def translate_nl_to_sql_fallback(natural_query: str, org_id: UUID) -> Tuple[str, str]:
+def translate_nl_to_sql_fallback(natural_query: str, org_id: UUID) -> tuple[str, str]:
     """
     Fallback pattern-matching for NL to SQL translation.
     Used when LLM is unavailable.
@@ -210,29 +251,61 @@ def translate_nl_to_sql_fallback(natural_query: str, org_id: UUID) -> Tuple[str,
 
     if "failed login" in query_lower:
         if "yesterday" in query_lower:
-            sql = f"SELECT * FROM normalized_alerts WHERE {org_filter} AND title ILIKE '%failed login%' AND created_at_source >= NOW() - INTERVAL '1 day' ORDER BY created_at_source DESC LIMIT 100"
-            explanation = "Searching for alerts with 'failed login' in the title from the last 24 hours"
+            sql = (
+                f"SELECT * FROM normalized_alerts WHERE {org_filter} "
+                "AND title ILIKE '%failed login%' "
+                "AND created_at_source >= NOW() - INTERVAL '1 day' "
+                "ORDER BY created_at_source DESC LIMIT 100"
+            )
+            explanation = (
+                "Searching for alerts with 'failed login' in the title from the last 24 hours"
+            )
         elif "last week" in query_lower or "past week" in query_lower:
-            sql = f"SELECT * FROM normalized_alerts WHERE {org_filter} AND title ILIKE '%failed login%' AND created_at_source >= NOW() - INTERVAL '7 days' ORDER BY created_at_source DESC LIMIT 100"
-            explanation = "Searching for alerts with 'failed login' in the title from the last 7 days"
+            sql = (
+                f"SELECT * FROM normalized_alerts WHERE {org_filter} "
+                "AND title ILIKE '%failed login%' "
+                "AND created_at_source >= NOW() - INTERVAL '7 days' "
+                "ORDER BY created_at_source DESC LIMIT 100"
+            )
+            explanation = (
+                "Searching for alerts with 'failed login' in the title from the last 7 days"
+            )
         else:
-            sql = f"SELECT * FROM normalized_alerts WHERE {org_filter} AND title ILIKE '%failed login%' ORDER BY created_at_source DESC LIMIT 100"
+            sql = (
+                f"SELECT * FROM normalized_alerts WHERE {org_filter} "
+                "AND title ILIKE '%failed login%' ORDER BY created_at_source DESC LIMIT 100"
+            )
             explanation = "Searching for recent alerts with 'failed login' in the title"
 
     elif "critical" in query_lower and "alert" in query_lower:
         if "today" in query_lower or "24 hour" in query_lower:
-            sql = f"SELECT * FROM normalized_alerts WHERE {org_filter} AND severity = 'critical' AND created_at_source >= NOW() - INTERVAL '24 hours' ORDER BY created_at_source DESC LIMIT 100"
+            sql = (
+                f"SELECT * FROM normalized_alerts WHERE {org_filter} "
+                "AND severity = 'critical' "
+                "AND created_at_source >= NOW() - INTERVAL '24 hours' "
+                "ORDER BY created_at_source DESC LIMIT 100"
+            )
             explanation = "Finding critical severity alerts from the last 24 hours"
         else:
-            sql = f"SELECT * FROM normalized_alerts WHERE {org_filter} AND severity = 'critical' ORDER BY created_at_source DESC LIMIT 100"
+            sql = (
+                f"SELECT * FROM normalized_alerts WHERE {org_filter} "
+                "AND severity = 'critical' ORDER BY created_at_source DESC LIMIT 100"
+            )
             explanation = "Finding recent critical severity alerts"
 
     elif "count" in query_lower and "severity" in query_lower:
         if "week" in query_lower:
-            sql = f"SELECT severity, COUNT(*) as count FROM normalized_alerts WHERE {org_filter} AND created_at_source >= NOW() - INTERVAL '7 days' GROUP BY severity ORDER BY count DESC"
+            sql = (
+                f"SELECT severity, COUNT(*) as count FROM normalized_alerts WHERE {org_filter} "
+                "AND created_at_source >= NOW() - INTERVAL '7 days' "
+                "GROUP BY severity ORDER BY count DESC"
+            )
             explanation = "Counting alerts by severity for the past week"
         else:
-            sql = f"SELECT severity, COUNT(*) as count FROM normalized_alerts WHERE {org_filter} GROUP BY severity ORDER BY count DESC"
+            sql = (
+                f"SELECT severity, COUNT(*) as count FROM normalized_alerts WHERE {org_filter} "
+                "GROUP BY severity ORDER BY count DESC"
+            )
             explanation = "Counting all alerts by severity"
 
     elif "top" in query_lower and "rule" in query_lower:
@@ -241,16 +314,26 @@ def translate_nl_to_sql_fallback(natural_query: str, org_id: UUID) -> Tuple[str,
             if word.isdigit():
                 limit = int(word)
                 break
-        sql = f"SELECT rule_id, rule_name, COUNT(*) as alert_count FROM normalized_alerts WHERE {org_filter} GROUP BY rule_id, rule_name ORDER BY alert_count DESC LIMIT {limit}"
+        sql = (
+            "SELECT rule_id, rule_name, COUNT(*) as alert_count FROM normalized_alerts "
+            f"WHERE {org_filter} "
+            f"GROUP BY rule_id, rule_name ORDER BY alert_count DESC LIMIT {limit}"
+        )
         explanation = f"Finding the top {limit} rules by alert count"
 
     elif "open" in query_lower and "alert" in query_lower:
-        sql = f"SELECT * FROM normalized_alerts WHERE {org_filter} AND status = 'open' ORDER BY created_at_source DESC LIMIT 100"
+        sql = (
+            f"SELECT * FROM normalized_alerts WHERE {org_filter} "
+            "AND status = 'open' ORDER BY created_at_source DESC LIMIT 100"
+        )
         explanation = "Finding alerts with open status"
 
     elif "incident" in query_lower:
         if "open" in query_lower:
-            sql = f"SELECT * FROM incidents WHERE {org_filter} AND status = 'open' ORDER BY created_at DESC LIMIT 50"
+            sql = (
+                f"SELECT * FROM incidents WHERE {org_filter} "
+                "AND status = 'open' ORDER BY created_at DESC LIMIT 50"
+            )
             explanation = "Finding open incidents"
         else:
             sql = f"SELECT * FROM incidents WHERE {org_filter} ORDER BY created_at DESC LIMIT 50"
@@ -261,10 +344,16 @@ def translate_nl_to_sql_fallback(natural_query: str, org_id: UUID) -> Tuple[str,
         search_terms = [w for w in natural_query.split() if len(w) > 3]
         if search_terms:
             conditions = " OR ".join([f"title ILIKE '%{term}%'" for term in search_terms[:3]])
-            sql = f"SELECT * FROM normalized_alerts WHERE {org_filter} AND ({conditions}) ORDER BY created_at_source DESC LIMIT 100"
+            sql = (
+                f"SELECT * FROM normalized_alerts WHERE {org_filter} AND ({conditions}) "
+                "ORDER BY created_at_source DESC LIMIT 100"
+            )
             explanation = f"Searching for alerts containing: {', '.join(search_terms[:3])}"
         else:
-            sql = f"SELECT * FROM normalized_alerts WHERE {org_filter} ORDER BY created_at_source DESC LIMIT 50"
+            sql = (
+                f"SELECT * FROM normalized_alerts WHERE {org_filter} "
+                "ORDER BY created_at_source DESC LIMIT 50"
+            )
             explanation = "Showing recent alerts"
 
     return sql, explanation
@@ -307,16 +396,17 @@ async def execute_natural_query(
             # Execute the query with timeout
             try:
                 # Use a raw connection for the query with statement timeout
-                result = await db.execute(
-                    text(f"SET statement_timeout = '30s'; {generated_sql}")
-                )
+                result = await db.execute(text(f"SET statement_timeout = '30s'; {generated_sql}"))
                 rows = result.fetchall()
 
                 # Convert to list of dicts
                 if rows:
                     columns = result.keys()
                     results = [
-                        {col: (str(val) if val is not None else None) for col, val in zip(columns, row)}
+                        {
+                            col: (str(val) if val is not None else None)
+                            for col, val in zip(columns, row)
+                        }
                         for row in rows[:100]  # Limit to 100 results
                     ]
                 else:
@@ -421,7 +511,7 @@ async def submit_query_feedback(
 
 
 @router.get("/natural/examples")
-async def get_example_queries():
+async def get_example_queries(user: OrgUserDep):
     """Get example natural language queries."""
     return {
         "examples": EXAMPLE_QUERIES,

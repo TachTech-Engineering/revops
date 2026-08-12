@@ -5,26 +5,28 @@ Endpoints for managing data pipelines that transform, filter, and route
 security events from connectors to destinations.
 """
 
-from typing import Annotated, Optional
-from uuid import UUID, uuid4
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.v1.deps import OrgIdDep, OrgAnalystDep
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
 from app.db import (
-    get_db,
     Pipeline,
-    PipelineStage,
-    PipelineEdge as PipelineEdgeModel,
     PipelineExecution,
+    PipelineExecutionStatus,
+    PipelineStage,
     PipelineStatus,
     StageCategory,
-    PipelineExecutionStatus,
+    get_db,
+)
+from app.db import (
+    PipelineEdge as PipelineEdgeModel,
 )
 
 router = APIRouter()
@@ -41,29 +43,38 @@ STAGE_TYPES = [
         "stage_type": "ocsf_transform",
         "display_name": "OCSF Transform",
         "category": "transform",
-        "description": "Transform raw events to Open Cybersecurity Schema Framework (OCSF) format for normalization across different sources.",
+        "description": "Transform raw events to Open Cybersecurity Schema Framework (OCSF) "
+        "format for normalization across different sources.",
         "config_schema": {
             "properties": {
                 "source_type": {
                     "type": "string",
                     "title": "Source Type",
                     "description": "The source log type to transform",
-                    "enum": ["crowdstrike", "aws_cloudtrail", "okta", "google_workspace", "azure_ad", "generic"]
+                    "enum": [
+                        "crowdstrike",
+                        "aws_cloudtrail",
+                        "okta",
+                        "google_workspace",
+                        "azure_ad",
+                        "generic",
+                    ],
                 },
                 "preserve_original": {
                     "type": "boolean",
                     "title": "Preserve Original",
-                    "description": "Keep the original event data alongside the transformed data"
-                }
+                    "description": "Keep the original event data alongside the transformed data",
+                },
             },
-            "required": ["source_type"]
-        }
+            "required": ["source_type"],
+        },
     },
     {
         "stage_type": "field_mapper",
         "display_name": "Field Mapper",
         "category": "transform",
-        "description": "Map fields from source to target using custom mappings. Supports nested field access with dot notation.",
+        "description": "Map fields from source to target using custom mappings. "
+        "Supports nested field access with dot notation.",
         "config_schema": {
             "properties": {
                 "mappings": {
@@ -72,19 +83,16 @@ STAGE_TYPES = [
                     "description": "List of source to target field mappings",
                     "items": {
                         "type": "object",
-                        "properties": {
-                            "source": {"type": "string"},
-                            "target": {"type": "string"}
-                        }
-                    }
+                        "properties": {"source": {"type": "string"}, "target": {"type": "string"}},
+                    },
                 },
                 "drop_unmapped": {
                     "type": "boolean",
                     "title": "Drop Unmapped Fields",
-                    "description": "Remove fields that are not explicitly mapped"
-                }
+                    "description": "Remove fields that are not explicitly mapped",
+                },
             }
-        }
+        },
     },
     {
         "stage_type": "parse_json",
@@ -96,56 +104,64 @@ STAGE_TYPES = [
                 "source_field": {
                     "type": "string",
                     "title": "Source Field",
-                    "description": "Field containing JSON string to parse"
+                    "description": "Field containing JSON string to parse",
                 },
                 "target_field": {
                     "type": "string",
                     "title": "Target Field",
-                    "description": "Field to store parsed result (leave empty to merge into root)"
-                }
+                    "description": "Field to store parsed result (leave empty to merge into root)",
+                },
             },
-            "required": ["source_field"]
-        }
+            "required": ["source_field"],
+        },
     },
     # Filter Stages
     {
         "stage_type": "condition_filter",
         "display_name": "Condition Filter",
         "category": "filter",
-        "description": "Filter events based on field conditions. Events matching the condition are kept or dropped based on action.",
+        "description": "Filter events based on field conditions. "
+        "Events matching the condition are kept or dropped based on action.",
         "config_schema": {
             "properties": {
-                "field": {
-                    "type": "string",
-                    "title": "Field",
-                    "description": "Field to evaluate"
-                },
+                "field": {"type": "string", "title": "Field", "description": "Field to evaluate"},
                 "operator": {
                     "type": "string",
                     "title": "Operator",
                     "description": "Comparison operator",
-                    "enum": ["equals", "not_equals", "contains", "not_contains", "greater_than", "less_than", "exists", "not_exists", "matches_regex"]
+                    "enum": [
+                        "equals",
+                        "not_equals",
+                        "contains",
+                        "not_contains",
+                        "greater_than",
+                        "less_than",
+                        "exists",
+                        "not_exists",
+                        "matches_regex",
+                    ],
                 },
                 "value": {
                     "type": "string",
                     "title": "Value",
-                    "description": "Value to compare against"
+                    "description": "Value to compare against",
                 },
                 "action": {
                     "type": "string",
                     "title": "Action",
                     "description": "What to do with matching events",
-                    "enum": ["keep", "drop"]
-                }
+                    "enum": ["keep", "drop"],
+                },
             },
-            "required": ["field", "operator", "action"]
-        }
+            "required": ["field", "operator", "action"],
+        },
     },
     {
         "stage_type": "sample",
         "display_name": "Sample",
         "category": "filter",
-        "description": "Statistically sample events to reduce volume. Useful for high-volume, low-value data.",
+        "description": "Statistically sample events to reduce volume. "
+        "Useful for high-volume, low-value data.",
         "config_schema": {
             "properties": {
                 "rate": {
@@ -153,16 +169,16 @@ STAGE_TYPES = [
                     "title": "Sample Rate",
                     "description": "Percentage of events to keep (0.0 to 1.0)",
                     "minimum": 0,
-                    "maximum": 1
+                    "maximum": 1,
                 },
                 "seed": {
                     "type": "integer",
                     "title": "Random Seed",
-                    "description": "Optional seed for reproducible sampling"
-                }
+                    "description": "Optional seed for reproducible sampling",
+                },
             },
-            "required": ["rate"]
-        }
+            "required": ["rate"],
+        },
     },
     {
         "stage_type": "dedupe",
@@ -175,25 +191,26 @@ STAGE_TYPES = [
                     "type": "array",
                     "title": "Dedup Fields",
                     "description": "Fields to use for deduplication",
-                    "items": {"type": "string"}
+                    "items": {"type": "string"},
                 },
                 "window_seconds": {
                     "type": "integer",
                     "title": "Time Window (seconds)",
                     "description": "Time window for deduplication",
                     "minimum": 1,
-                    "maximum": 86400
-                }
+                    "maximum": 86400,
+                },
             },
-            "required": ["fields", "window_seconds"]
-        }
+            "required": ["fields", "window_seconds"],
+        },
     },
     # Route Stages
     {
         "stage_type": "route",
         "display_name": "Route",
         "category": "route",
-        "description": "Route events to different destinations based on conditions. Events can be sent to multiple destinations.",
+        "description": "Route events to different destinations based on conditions. "
+        "Events can be sent to multiple destinations.",
         "config_schema": {
             "properties": {
                 "rules": {
@@ -203,23 +220,28 @@ STAGE_TYPES = [
                     "items": {
                         "type": "object",
                         "properties": {
-                            "condition": {"type": "string", "description": "Condition expression (e.g., severity == 'critical')"},
-                            "destination": {"type": "string", "description": "Destination name"}
-                        }
-                    }
+                            "condition": {
+                                "type": "string",
+                                "description": "Condition expression "
+                                "(e.g., severity == 'critical')",
+                            },
+                            "destination": {"type": "string", "description": "Destination name"},
+                        },
+                    },
                 },
                 "default_destination": {
                     "type": "string",
                     "title": "Default Destination",
-                    "description": "Destination for events that don't match any rule"
-                }
+                    "description": "Destination for events that don't match any rule",
+                },
             }
-        }
+        },
     },
 ]
 
 
 # ==================== Request/Response Models ====================
+
 
 class StageCreate(BaseModel):
     node_key: str
@@ -236,13 +258,13 @@ class EdgeCreate(BaseModel):
     source_handle: str = "default"
     target_node_key: str
     target_handle: str = "default"
-    condition: Optional[str] = None
-    label: Optional[str] = None
+    condition: str | None = None
+    label: str | None = None
 
 
 class PipelineCreate(BaseModel):
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     source_connector_ids: list[str] = []
     batch_size: int = 1000
     stages: list[StageCreate] = []
@@ -251,14 +273,14 @@ class PipelineCreate(BaseModel):
 
 
 class PipelineUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[PipelineStatus] = None
-    source_connector_ids: Optional[list[str]] = None
-    batch_size: Optional[int] = None
-    stages: Optional[list[StageCreate]] = None
-    edges: Optional[list[EdgeCreate]] = None
-    viewport: Optional[dict] = None
+    name: str | None = None
+    description: str | None = None
+    status: PipelineStatus | None = None
+    source_connector_ids: list[str] | None = None
+    batch_size: int | None = None
+    stages: list[StageCreate] | None = None
+    edges: list[EdgeCreate] | None = None
+    viewport: dict | None = None
 
 
 class StageResponse(BaseModel):
@@ -278,8 +300,8 @@ class EdgeResponse(BaseModel):
     source_handle: str
     target_node_key: str
     target_handle: str
-    condition: Optional[str]
-    label: Optional[str]
+    condition: str | None
+    label: str | None
 
 
 class PipelineMetrics(BaseModel):
@@ -287,17 +309,17 @@ class PipelineMetrics(BaseModel):
     reduction_percentage: float = 0.0
     avg_processing_ms: float = 0.0
     error_rate: float = 0.0
-    last_execution: Optional[str] = None
+    last_execution: str | None = None
 
 
 class PipelineResponse(BaseModel):
     id: str
     name: str
-    description: Optional[str]
+    description: str | None
     status: PipelineStatus
     source_connector_ids: list[str]
     batch_size: int
-    metrics: Optional[PipelineMetrics]
+    metrics: PipelineMetrics | None
     created_at: str
     updated_at: str
 
@@ -309,7 +331,7 @@ class PipelineDetailResponse(PipelineResponse):
 
 
 class ExecuteRequest(BaseModel):
-    events: Optional[list[dict]] = None
+    events: list[dict] | None = None
 
 
 class ExecutionResponse(BaseModel):
@@ -330,6 +352,7 @@ class StageTypeResponse(BaseModel):
 
 
 # ==================== Helper Functions ====================
+
 
 def _get_stage_category(stage_type: str) -> StageCategory:
     """Determine stage category from stage type."""
@@ -352,7 +375,9 @@ def _pipeline_to_response(pipeline: Pipeline, include_details: bool = False) -> 
             events_last_24h=pipeline.events_last_24h,
             reduction_percentage=pipeline.reduction_percentage,
             avg_processing_ms=pipeline.avg_processing_ms,
-        ) if pipeline.events_last_24h > 0 else None,
+        )
+        if pipeline.events_last_24h > 0
+        else None,
         "created_at": pipeline.created_at.isoformat(),
         "updated_at": pipeline.updated_at.isoformat(),
     }
@@ -390,8 +415,9 @@ def _pipeline_to_response(pipeline: Pipeline, include_details: bool = False) -> 
 
 # ==================== Endpoints ====================
 
+
 @router.get("/stage-types", response_model=list[StageTypeResponse])
-async def list_stage_types():
+async def list_stage_types(user: OrgUserDep):
     """Get all available pipeline stage types with their configuration schemas."""
     return STAGE_TYPES
 
@@ -400,7 +426,7 @@ async def list_stage_types():
 async def list_pipelines(
     org_id: OrgIdDep,
     db: DbDep,
-    status: Optional[PipelineStatus] = None,
+    status: PipelineStatus | None = None,
 ):
     """List all pipelines for the organization."""
     query = (
@@ -597,9 +623,8 @@ async def delete_pipeline(
     db: DbDep,
 ):
     """Delete a pipeline."""
-    query = (
-        select(Pipeline)
-        .where(Pipeline.id == pipeline_id, Pipeline.organization_id == user.organization_id)
+    query = select(Pipeline).where(
+        Pipeline.id == pipeline_id, Pipeline.organization_id == user.organization_id
     )
 
     result = await db.execute(query)
@@ -662,8 +687,8 @@ async def execute_pipeline(
         events_received=events_count,
         events_output=output_count,
         events_filtered=filtered_count,
-        started_at=datetime.now(timezone.utc),
-        completed_at=datetime.now(timezone.utc),
+        started_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
         duration_ms=duration_ms,
         triggered_by=user.email,
     )

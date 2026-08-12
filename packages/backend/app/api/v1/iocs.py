@@ -1,18 +1,19 @@
 """
 IOC Management API endpoints.
 """
+
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.db.models import IOCSeverity, IOCType
 from app.db.session import get_db
-from app.db.models import IOCType, IOCSeverity
 from app.services.ioc_service import ioc_service
-from app.api.v1.deps import get_current_user_email
 
 router = APIRouter()
 
@@ -22,17 +23,17 @@ class IOCCreate(BaseModel):
     ioc_type: IOCType
     value: str = Field(..., min_length=1, max_length=2000)
     severity: IOCSeverity = IOCSeverity.MEDIUM
-    description: Optional[str] = None
-    tags: Optional[list[str]] = None
-    expires_at: Optional[datetime] = None
+    description: str | None = None
+    tags: list[str] | None = None
+    expires_at: datetime | None = None
 
 
 class IOCUpdate(BaseModel):
-    severity: Optional[IOCSeverity] = None
-    description: Optional[str] = None
-    tags: Optional[list[str]] = None
-    is_active: Optional[bool] = None
-    expires_at: Optional[datetime] = None
+    severity: IOCSeverity | None = None
+    description: str | None = None
+    tags: list[str] | None = None
+    is_active: bool | None = None
+    expires_at: datetime | None = None
 
 
 class IOCResponse(BaseModel):
@@ -41,13 +42,13 @@ class IOCResponse(BaseModel):
     value: str
     severity: str
     source: str
-    feed_id: Optional[str] = None
-    description: Optional[str] = None
+    feed_id: str | None = None
+    description: str | None = None
     tags: list[str]
     first_seen: datetime
     last_seen: datetime
     is_active: bool
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
     created_by: str
     created_at: datetime
     updated_at: datetime
@@ -103,14 +104,16 @@ def ioc_to_response(ioc) -> IOCResponse:
 
 @router.get("", response_model=IOCListResponse)
 async def list_iocs(
-    query: Optional[str] = Query(None, description="Search query"),
-    ioc_type: Optional[IOCType] = Query(None, description="Filter by IOC type"),
-    severity: Optional[IOCSeverity] = Query(None, description="Filter by severity"),
-    source: Optional[str] = Query(None, description="Filter by source"),
-    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    query: str | None = Query(None, description="Search query"),
+    ioc_type: IOCType | None = Query(None, description="Filter by IOC type"),
+    severity: IOCSeverity | None = Query(None, description="Filter by severity"),
+    source: str | None = Query(None, description="Filter by source"),
+    is_active: bool | None = Query(None, description="Filter by active status"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
 ):
     """List IOCs with filters and pagination."""
     iocs, total = await ioc_service.search(
@@ -122,6 +125,7 @@ async def list_iocs(
         is_active=is_active,
         page=page,
         page_size=page_size,
+        organization_id=org_id,
     )
 
     return IOCListResponse(
@@ -133,9 +137,13 @@ async def list_iocs(
 
 
 @router.get("/stats", response_model=IOCStatsResponse)
-async def get_ioc_stats(db: AsyncSession = Depends(get_db)):
+async def get_ioc_stats(
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
     """Get IOC statistics."""
-    return await ioc_service.get_stats(db)
+    return await ioc_service.get_stats(db, organization_id=org_id)
 
 
 @router.get("/types")
@@ -147,10 +155,11 @@ async def get_ioc_types():
 @router.post("", response_model=IOCResponse)
 async def create_ioc(
     ioc_create: IOCCreate,
-    db: AsyncSession = Depends(get_db),
-    user_email: str = Depends(get_current_user_email),
+    analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Create a new IOC."""
+    """Create a new IOC. Requires analyst role."""
     ioc = await ioc_service.create_ioc(
         db,
         ioc_type=ioc_create.ioc_type,
@@ -160,7 +169,8 @@ async def create_ioc(
         tags=ioc_create.tags,
         expires_at=ioc_create.expires_at,
         source="Manual",
-        created_by=user_email,
+        created_by=analyst.email,
+        organization_id=org_id,
     )
     return ioc_to_response(ioc)
 
@@ -168,10 +178,11 @@ async def create_ioc(
 @router.post("/bulk", response_model=BulkImportResponse)
 async def bulk_import_iocs(
     request: BulkImportRequest,
-    db: AsyncSession = Depends(get_db),
-    user_email: str = Depends(get_current_user_email),
+    analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Bulk import IOCs from JSON array."""
+    """Bulk import IOCs from JSON array. Requires analyst role."""
     iocs_data = [
         {
             "ioc_type": ioc.ioc_type,
@@ -188,7 +199,8 @@ async def bulk_import_iocs(
         db,
         iocs=iocs_data,
         source="Bulk Import",
-        created_by=user_email,
+        created_by=analyst.email,
+        organization_id=org_id,
     )
     return BulkImportResponse(**result)
 
@@ -196,16 +208,18 @@ async def bulk_import_iocs(
 @router.post("/import/stix", response_model=BulkImportResponse)
 async def import_stix_bundle(
     request: STIXImportRequest,
-    db: AsyncSession = Depends(get_db),
-    user_email: str = Depends(get_current_user_email),
+    analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Import IOCs from a STIX 2.1 bundle."""
+    """Import IOCs from a STIX 2.1 bundle. Requires analyst role."""
     try:
         result = await ioc_service.import_stix(
             db,
             bundle_data=request.bundle,
             source="STIX Import",
-            created_by=user_email,
+            created_by=analyst.email,
+            organization_id=org_id,
         )
         return BulkImportResponse(**result)
     except ValueError as e:
@@ -214,30 +228,36 @@ async def import_stix_bundle(
 
 @router.get("/export/stix")
 async def export_stix_bundle(
-    ioc_type: Optional[IOCType] = Query(None, description="Filter by IOC type"),
-    is_active: Optional[bool] = Query(True, description="Filter by active status"),
-    db: AsyncSession = Depends(get_db),
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ioc_type: IOCType | None = Query(None, description="Filter by IOC type"),
+    is_active: bool | None = Query(True, description="Filter by active status"),
 ):
     """Export IOCs as STIX 2.1 bundle."""
     bundle = await ioc_service.export_stix(
         db,
         ioc_type=ioc_type,
         is_active=is_active,
+        organization_id=org_id,
     )
     return bundle
 
 
 @router.get("/export/csv")
 async def export_csv(
-    ioc_type: Optional[IOCType] = Query(None, description="Filter by IOC type"),
-    is_active: Optional[bool] = Query(True, description="Filter by active status"),
-    db: AsyncSession = Depends(get_db),
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    ioc_type: IOCType | None = Query(None, description="Filter by IOC type"),
+    is_active: bool | None = Query(True, description="Filter by active status"),
 ):
     """Export IOCs as CSV."""
     csv_content = await ioc_service.export_csv(
         db,
         ioc_type=ioc_type,
         is_active=is_active,
+        organization_id=org_id,
     )
     return Response(
         content=csv_content,
@@ -249,10 +269,12 @@ async def export_csv(
 @router.get("/{ioc_id}", response_model=IOCResponse)
 async def get_ioc(
     ioc_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get a single IOC by ID."""
-    ioc = await ioc_service.get_ioc(db, ioc_id)
+    ioc = await ioc_service.get_ioc(db, ioc_id, organization_id=org_id)
     if not ioc:
         raise HTTPException(status_code=404, detail="IOC not found")
     return ioc_to_response(ioc)
@@ -262,11 +284,13 @@ async def get_ioc(
 async def update_ioc(
     ioc_id: uuid.UUID,
     ioc_update: IOCUpdate,
-    db: AsyncSession = Depends(get_db),
+    analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Update an IOC."""
+    """Update an IOC. Requires analyst role."""
     updates = ioc_update.model_dump(exclude_none=True)
-    ioc = await ioc_service.update_ioc(db, ioc_id, **updates)
+    ioc = await ioc_service.update_ioc(db, ioc_id, organization_id=org_id, **updates)
     if not ioc:
         raise HTTPException(status_code=404, detail="IOC not found")
     return ioc_to_response(ioc)
@@ -275,10 +299,12 @@ async def update_ioc(
 @router.delete("/{ioc_id}")
 async def delete_ioc(
     ioc_id: uuid.UUID,
-    db: AsyncSession = Depends(get_db),
+    analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Delete an IOC."""
-    success = await ioc_service.delete_ioc(db, ioc_id)
+    """Delete an IOC. Requires analyst role."""
+    success = await ioc_service.delete_ioc(db, ioc_id, organization_id=org_id)
     if not success:
         raise HTTPException(status_code=404, detail="IOC not found")
     return {"status": "deleted"}

@@ -1,14 +1,13 @@
-from typing import Annotated, Optional
+from typing import Annotated
 from uuid import UUID
-from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import select, desc
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db import get_db, Playbook, PlaybookExecution, PlaybookStatus, ExecutionStatus
-from app.api.v1.deps import RequireAnalystDep, CurrentUserDep
+from app.api.v1.deps import OrgAnalystDep, OrgUserDep
+from app.db import ExecutionStatus, Playbook, PlaybookExecution, PlaybookStatus, get_db
 from app.services.playbook_service import PlaybookService
 
 router = APIRouter()
@@ -16,38 +15,38 @@ router = APIRouter()
 
 class ActionConfig(BaseModel):
     type: str
-    name: Optional[str] = None
+    name: str | None = None
     config: dict = {}
     stop_on_failure: bool = False
 
 
 class TriggerConditions(BaseModel):
-    severities: Optional[list[str]] = None
-    rule_ids: Optional[list[str]] = None
-    title_pattern: Optional[str] = None
+    severities: list[str] | None = None
+    rule_ids: list[str] | None = None
+    title_pattern: str | None = None
 
 
 class PlaybookCreate(BaseModel):
     name: str
-    description: Optional[str] = None
-    trigger_conditions: Optional[TriggerConditions] = None
+    description: str | None = None
+    trigger_conditions: TriggerConditions | None = None
     actions: list[ActionConfig]
     auto_execute: bool = False
 
 
 class PlaybookUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    trigger_conditions: Optional[TriggerConditions] = None
-    actions: Optional[list[ActionConfig]] = None
-    status: Optional[PlaybookStatus] = None
-    auto_execute: Optional[bool] = None
+    name: str | None = None
+    description: str | None = None
+    trigger_conditions: TriggerConditions | None = None
+    actions: list[ActionConfig] | None = None
+    status: PlaybookStatus | None = None
+    auto_execute: bool | None = None
 
 
 class PlaybookResponse(BaseModel):
     id: UUID
     name: str
-    description: Optional[str]
+    description: str | None
     trigger_conditions: dict
     actions: list[dict]
     status: PlaybookStatus
@@ -65,10 +64,10 @@ class ExecutionResponse(BaseModel):
     playbook_id: UUID
     alert_id: str
     status: ExecutionStatus
-    started_at: Optional[str]
-    completed_at: Optional[str]
+    started_at: str | None
+    completed_at: str | None
     action_results: list[dict]
-    error_message: Optional[str]
+    error_message: str | None
     triggered_by: str
     created_at: str
 
@@ -78,14 +77,14 @@ class ExecutionResponse(BaseModel):
 
 class ExecutePlaybookRequest(BaseModel):
     alert_id: str
-    alert_data: Optional[dict] = None
+    alert_data: dict | None = None
 
 
 @router.get("")
 async def list_playbooks(
-    user: CurrentUserDep,
+    user: OrgUserDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    status: Optional[PlaybookStatus] = None,
+    status: PlaybookStatus | None = None,
 ) -> list[PlaybookResponse]:
     """List all playbooks."""
     query = select(Playbook).order_by(desc(Playbook.created_at))
@@ -115,7 +114,7 @@ async def list_playbooks(
 @router.get("/{playbook_id}")
 async def get_playbook(
     playbook_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlaybookResponse:
     """Get a playbook by ID."""
@@ -141,7 +140,7 @@ async def get_playbook(
 @router.post("")
 async def create_playbook(
     playbook: PlaybookCreate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlaybookResponse:
     """Create a new playbook. Requires analyst role."""
@@ -150,7 +149,9 @@ async def create_playbook(
     db_playbook = Playbook(
         name=playbook.name,
         description=playbook.description,
-        trigger_conditions=playbook.trigger_conditions.model_dump() if playbook.trigger_conditions else {},
+        trigger_conditions=playbook.trigger_conditions.model_dump()
+        if playbook.trigger_conditions
+        else {},
         actions=[a.model_dump() for a in playbook.actions],
         auto_execute=playbook.auto_execute,
         status=PlaybookStatus.DRAFT,
@@ -178,7 +179,7 @@ async def create_playbook(
 async def update_playbook(
     playbook_id: UUID,
     update: PlaybookUpdate,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlaybookResponse:
     """Update a playbook. Requires analyst role."""
@@ -217,7 +218,7 @@ async def update_playbook(
 @router.delete("/{playbook_id}")
 async def delete_playbook(
     playbook_id: UUID,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete a playbook. Requires analyst role."""
@@ -234,7 +235,7 @@ async def delete_playbook(
 async def execute_playbook(
     playbook_id: UUID,
     request: ExecutePlaybookRequest,
-    analyst: RequireAnalystDep,
+    analyst: OrgAnalystDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ExecutionResponse:
     """Execute a playbook for an alert. Requires analyst role."""
@@ -274,7 +275,7 @@ async def execute_playbook(
 @router.get("/{playbook_id}/executions")
 async def list_playbook_executions(
     playbook_id: UUID,
-    user: CurrentUserDep,
+    user: OrgUserDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -283,8 +284,10 @@ async def list_playbook_executions(
     from sqlalchemy import func
 
     # Count total
-    count_query = select(func.count()).select_from(PlaybookExecution).where(
-        PlaybookExecution.playbook_id == playbook_id
+    count_query = (
+        select(func.count())
+        .select_from(PlaybookExecution)
+        .where(PlaybookExecution.playbook_id == playbook_id)
     )
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
@@ -324,16 +327,12 @@ async def list_playbook_executions(
 
 @router.get("/executions/recent")
 async def list_recent_executions(
-    user: CurrentUserDep,
+    user: OrgUserDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = Query(10, ge=1, le=50),
 ) -> list[ExecutionResponse]:
     """List recent playbook executions across all playbooks."""
-    query = (
-        select(PlaybookExecution)
-        .order_by(desc(PlaybookExecution.created_at))
-        .limit(limit)
-    )
+    query = select(PlaybookExecution).order_by(desc(PlaybookExecution.created_at)).limit(limit)
     result = await db.execute(query)
     executions = result.scalars().all()
 

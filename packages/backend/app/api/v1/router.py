@@ -1,72 +1,74 @@
 from fastapi import APIRouter
 
 from app.api.v1 import (
-    auth,
-    sso_config,
-    users,
-    alerts,
-    rules,
-    converter,
-    migrate,
-    health,
-    queries,
-    analytics,
-    saved_queries,
-    suppression,
-    settings,
-    webhooks,
-    ioc_search,
-    threat_intel,
-    roles,
-    audit,
-    websocket,
-    playbooks,
-    scheduled_reports,
-    incidents,
-    correlation_rules,
-    cases,
-    enrichment,
-    dashboards,
-    mitre,
-    sla,
-    notes,
-    notifications,
     # Phase 5: Advanced Features
     ai,
-    recommendations,
-    simulations,
+    alert_clusters,
+    alerts,
+    analytics,
+    audit,
+    auth,
+    cases,
+    compliance,
     # SecOps Platform: Connector Framework, Pipelines & Workflows
     connectors,
-    pipelines,
-    workflows,
-    # New Features: Rule Management, Triage, Clustering, Escalation, On-Call, Trends
-    rule_versions,
-    rule_health,
-    triage,
-    nl_queries,
-    alert_clusters,
-    playbook_templates,
+    converter,
+    correlation_rules,
+    dashboards,
+    enrichment,
     escalation,
-    oncall,
-    trend_analytics,
-    fonoster,
-    twilio_webhook,
-    # SOC Collaboration Features
-    shift_handoff,
-    presence,
-    # Threat Hunting
-    threat_hunting,
+    executive_summary,
     # Other
     feeds,
-    compliance,
+    fonoster,
+    health,
+    incidents,
+    ioc_search,
     iocs,
-    executive_summary,
+    migrate,
+    mitre,
+    nl_queries,
+    notes,
+    notifications,
+    oncall,
+    pipelines,
+    playbook_templates,
+    playbooks,
+    presence,
+    queries,
+    recommendations,
+    roles,
+    rule_health,
+    # New Features: Rule Management, Triage, Clustering, Escalation, On-Call, Trends
+    rule_versions,
+    rules,
+    saved_queries,
+    scheduled_reports,
+    settings,
+    # SOC Collaboration Features
+    shift_handoff,
+    simulations,
+    sla,
+    sso_config,
+    suppression,
+    # Threat Hunting
+    threat_hunting,
+    threat_intel,
+    trend_analytics,
+    triage,
+    twilio_webhook,
+    users,
+    webhooks,
+    websocket,
+    workflows,
 )
 
 api_router = APIRouter()
 
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
-api_router.include_router(sso_config.router, prefix="/organizations/{organization_id}/sso", tags=["sso-config"])
+api_router.include_router(
+    sso_config.router, prefix="/organizations/{organization_id}/sso", tags=["sso-config"]
+)
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(health.router, tags=["health"])
 api_router.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
@@ -86,10 +88,19 @@ api_router.include_router(threat_intel.router, prefix="/threat-intel", tags=["th
 api_router.include_router(roles.router, prefix="/roles", tags=["roles"])
 api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
 api_router.include_router(websocket.router, tags=["websocket"])
+# Note: playbook_templates must be registered BEFORE playbooks to avoid
+# playbooks' GET /{playbook_id} catching /templates and /suggestions
+api_router.include_router(
+    playbook_templates.router, prefix="/playbooks", tags=["playbook-templates"]
+)
 api_router.include_router(playbooks.router, prefix="/playbooks", tags=["playbooks"])
-api_router.include_router(scheduled_reports.router, prefix="/scheduled-reports", tags=["scheduled-reports"])
+api_router.include_router(
+    scheduled_reports.router, prefix="/scheduled-reports", tags=["scheduled-reports"]
+)
 api_router.include_router(incidents.router, prefix="/incidents", tags=["incidents"])
-api_router.include_router(correlation_rules.router, prefix="/correlation-rules", tags=["correlation-rules"])
+api_router.include_router(
+    correlation_rules.router, prefix="/correlation-rules", tags=["correlation-rules"]
+)
 api_router.include_router(cases.router, prefix="/cases", tags=["cases"])
 api_router.include_router(enrichment.router, prefix="/enrichment", tags=["enrichment"])
 api_router.include_router(dashboards.router, prefix="/dashboards", tags=["dashboards"])
@@ -100,7 +111,9 @@ api_router.include_router(notifications.router, prefix="/notifications", tags=["
 
 # Phase 5: Advanced Features
 api_router.include_router(ai.router, prefix="/ai", tags=["ai"])
-api_router.include_router(recommendations.router, prefix="/recommendations", tags=["recommendations"])
+api_router.include_router(
+    recommendations.router, prefix="/recommendations", tags=["recommendations"]
+)
 api_router.include_router(simulations.router, prefix="/simulations", tags=["simulations"])
 
 # SecOps Platform: Connector Framework, Pipelines & Workflows
@@ -113,7 +126,6 @@ api_router.include_router(rule_versions.router, prefix="/rules", tags=["rule-ver
 api_router.include_router(triage.router, prefix="/triage", tags=["triage"])
 api_router.include_router(nl_queries.router, prefix="/queries", tags=["nl-queries"])
 api_router.include_router(alert_clusters.router, prefix="/alert-clusters", tags=["alert-clusters"])
-api_router.include_router(playbook_templates.router, prefix="/playbooks", tags=["playbook-templates"])
 api_router.include_router(escalation.router, prefix="/escalation-policies", tags=["escalation"])
 api_router.include_router(oncall.router, prefix="/oncall", tags=["oncall"])
 api_router.include_router(trend_analytics.router, prefix="/analytics", tags=["trend-analytics"])

@@ -1,13 +1,11 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Set
 from uuid import UUID
 
+from app.db.session import AsyncSessionLocal
 from app.services.notification_service import notification_service
 from app.services.panther_service import PantherService
-from app.config import settings
-from app.db.session import async_session_maker
 
 logger = logging.getLogger(__name__)
 
@@ -16,18 +14,18 @@ class AlertPoller:
     """Polls Panther for new alerts and broadcasts them via WebSocket."""
 
     def __init__(self):
-        self._last_poll_time: Optional[datetime] = None
-        self._seen_alert_ids: Set[str] = set()
+        self._last_poll_time: datetime | None = None
+        self._seen_alert_ids: set[str] = set()
         self._max_seen_ids = 10000  # Limit memory usage
         self._running = False
-        self._organization_id: Optional[UUID] = None
+        self._organization_id: UUID | None = None
 
     async def start(
         self,
         panther_host: str,
         panther_token: str,
         interval_seconds: int = 30,
-        organization_id: Optional[str] = None,
+        organization_id: str | None = None,
     ):
         """Start polling for alerts."""
         if self._running:
@@ -79,13 +77,13 @@ class AlertPoller:
             # Trim seen IDs if too large
             if len(self._seen_alert_ids) > self._max_seen_ids:
                 # Keep only the most recent half
-                self._seen_alert_ids = set(list(self._seen_alert_ids)[self._max_seen_ids // 2:])
+                self._seen_alert_ids = set(list(self._seen_alert_ids)[self._max_seen_ids // 2 :])
 
             # Broadcast new alerts and trigger escalations
             for alert in new_alerts:
                 title = alert.get("title", "")
                 description = alert.get("description", "")
-                
+
                 # Infer source type
                 source_type = "panther"
                 if "cloudflare" in title.lower() or "cloudflare" in description.lower():
@@ -101,7 +99,8 @@ class AlertPoller:
                     "severity": alert.get("severity"),
                     "status": alert.get("status"),
                     "createdAt": alert.get("createdAt"),
-                    "ruleName": alert.get("rule", {}).get("displayName") or alert.get("rule", {}).get("id"),
+                    "ruleName": alert.get("rule", {}).get("displayName")
+                    or alert.get("rule", {}).get("id"),
                     "description": description,
                     "sourceType": source_type,
                 }
@@ -128,14 +127,16 @@ class AlertPoller:
         try:
             from app.services.escalation_service import trigger_escalation_for_alert
 
-            async with async_session_maker() as db:
+            async with AsyncSessionLocal() as db:
                 escalation = await trigger_escalation_for_alert(
                     db=db,
                     organization_id=self._organization_id,
                     alert=alert_data,
                 )
                 if escalation:
-                    logger.info(f"Triggered escalation {escalation.id} for alert {alert_data.get('id')}")
+                    logger.info(
+                        f"Triggered escalation {escalation.id} for alert {alert_data.get('id')}"
+                    )
         except Exception as e:
             logger.error(f"Failed to trigger escalation for alert {alert_data.get('id')}: {e}")
 

@@ -9,49 +9,59 @@ import asyncio
 import logging
 import re
 from datetime import datetime
-from typing import Optional
-import uuid
 
-from sqlalchemy import select, and_
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models import Connector, ConnectorCategory, ConnectorStatus, NormalizedAlert
 from app.db.session import AsyncSessionLocal
-from app.db.models import Connector, NormalizedAlert, ConnectorStatus, ConnectorCategory
-from app.services.connectors.data_sources.unifi_syslog import (
-    UniFiSyslogConnector,
-    parse_unifi_syslog,
-)
+from app.services.connectors.data_sources.unifi_syslog import UniFiSyslogConnector
 
 logger = logging.getLogger(__name__)
 
 # Syslog priority/facility parsing
 SYSLOG_PATTERN = re.compile(
-    r'^<(?P<priority>\d{1,3})>'
-    r'(?:(?P<version>\d)\s+)?'
-    r'(?P<timestamp>\S+)\s+'
-    r'(?P<hostname>\S+)\s+'
-    r'(?P<appname>\S+)?'
-    r'(?:\s+(?P<procid>\S+))?'
-    r'(?:\s+(?P<msgid>\S+))?'
-    r'(?:\s+-\s+)?'
-    r'(?P<message>.*)',
-    re.DOTALL
+    r"^<(?P<priority>\d{1,3})>"
+    r"(?:(?P<version>\d)\s+)?"
+    r"(?P<timestamp>\S+)\s+"
+    r"(?P<hostname>\S+)\s+"
+    r"(?P<appname>\S+)?"
+    r"(?:\s+(?P<procid>\S+))?"
+    r"(?:\s+(?P<msgid>\S+))?"
+    r"(?:\s+-\s+)?"
+    r"(?P<message>.*)",
+    re.DOTALL,
 )
 
 # Simple BSD syslog format
 BSD_SYSLOG_PATTERN = re.compile(
-    r'^<(?P<priority>\d{1,3})>'
-    r'(?P<timestamp>\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+'
-    r'(?P<hostname>\S+)\s+'
-    r'(?P<message>.*)',
-    re.DOTALL
+    r"^<(?P<priority>\d{1,3})>"
+    r"(?P<timestamp>\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+"
+    r"(?P<hostname>\S+)\s+"
+    r"(?P<message>.*)",
+    re.DOTALL,
 )
+
+
+def parse_unifi_message(message: str) -> tuple[str, dict]:
+    """
+    Classify a UniFi syslog message body using the connector's known patterns.
+
+    Returns a tuple of (event_type, parsed_fields). Falls back to
+    ("unknown", {}) when no pattern matches.
+    """
+    for event_type, pattern in UniFiSyslogConnector.PATTERNS.items():
+        match = pattern.search(message)
+        if match:
+            parsed = {k: v for k, v in match.groupdict().items() if v is not None}
+            return event_type, parsed
+    return "unknown", {}
 
 
 class SyslogProtocol(asyncio.DatagramProtocol):
     """UDP protocol handler for syslog messages."""
 
-    def __init__(self, server: 'SyslogServer'):
+    def __init__(self, server: "SyslogServer"):
         self.server = server
         self.transport = None
 
@@ -63,7 +73,7 @@ class SyslogProtocol(asyncio.DatagramProtocol):
         """Handle incoming syslog datagram."""
         source_ip = addr[0]
         try:
-            message = data.decode('utf-8', errors='replace').strip()
+            message = data.decode("utf-8", errors="replace").strip()
             logger.debug(f"Received syslog from {source_ip}: {message[:200]}")
 
             # Queue the message for async processing
@@ -145,7 +155,7 @@ class SyslogServer:
 
     async def get_connector_for_source(
         self, source_ip: str, db: AsyncSession
-    ) -> Optional[tuple[Connector, dict]]:
+    ) -> tuple[Connector, dict] | None:
         """
         Find the connector configured to receive from this source IP.
 
@@ -204,7 +214,7 @@ class SyslogServer:
                 message_content = syslog_parts.get("message", raw_message)
 
                 # Parse the UniFi-specific content
-                event_type, parsed_data = parse_unifi_syslog(message_content)
+                event_type, parsed_data = parse_unifi_message(message_content)
 
                 # Check if this event type should be processed based on categories
                 categories = config.get("categories", [])
@@ -212,15 +222,20 @@ class SyslogServer:
                     logger.debug(f"Event {event_type} doesn't match configured categories")
                     return
 
-                # Build the raw alert data
+                # Build the raw alert data in the shape normalize_alert expects:
+                # parsed fields at the top level, syslog envelope under "syslog"
                 raw_alert = {
                     "event_type": event_type,
-                    "parsed": parsed_data,
+                    **parsed_data,
                     "raw_message": raw_message,
                     "source_ip": source_ip,
-                    "timestamp": self._parse_timestamp(syslog_parts.get("timestamp")),
-                    "hostname": syslog_parts.get("hostname", "unknown"),
-                    "priority": syslog_parts.get("priority", "14"),
+                    "syslog": {
+                        "timestamp": self._parse_timestamp(
+                            syslog_parts.get("timestamp")
+                        ).isoformat(),
+                        "hostname": syslog_parts.get("hostname", "unknown"),
+                        "priority": syslog_parts.get("priority", "14"),
+                    },
                 }
 
                 # Create the connector instance for normalization
@@ -238,13 +253,15 @@ class SyslogServer:
 
                 # Check for duplicates (same external_id within a short window)
                 existing = await db.execute(
-                    select(NormalizedAlert.id).where(
+                    select(NormalizedAlert.id)
+                    .where(
                         and_(
                             NormalizedAlert.organization_id == connector.organization_id,
                             NormalizedAlert.connector_id == connector.id,
                             NormalizedAlert.external_id == alert.external_id,
                         )
-                    ).limit(1)
+                    )
+                    .limit(1)
                 )
 
                 if existing.scalar():
@@ -267,7 +284,12 @@ class SyslogServer:
     def _event_matches_categories(self, event_type: str, categories: list[str]) -> bool:
         """Check if event type matches configured categories."""
         category_map = {
-            "System": ["firmware_update", "device_adopted", "device_disconnected", "device_reconnected"],
+            "System": [
+                "firmware_update",
+                "device_adopted",
+                "device_disconnected",
+                "device_reconnected",
+            ],
             "Updates": ["firmware_update"],
             "Admins": ["admin_login", "admin_logout", "admin_login_failed", "config_changed"],
             "Backups": ["backup_completed", "backup_failed"],
@@ -286,7 +308,7 @@ class SyslogServer:
 
         return False
 
-    def _parse_timestamp(self, timestamp_str: Optional[str]) -> datetime:
+    def _parse_timestamp(self, timestamp_str: str | None) -> datetime:
         """Parse syslog timestamp to datetime."""
         if not timestamp_str:
             return datetime.utcnow()
@@ -316,7 +338,7 @@ class SyslogServer:
 
 
 # Global server instance
-_syslog_server: Optional[SyslogServer] = None
+_syslog_server: SyslogServer | None = None
 
 
 def get_syslog_server() -> SyslogServer:

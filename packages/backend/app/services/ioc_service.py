@@ -1,16 +1,16 @@
 """
 IOC Management Service for creating, searching, importing, and exporting IOCs.
 """
+
 import csv
 import io
 import uuid
 from datetime import datetime
-from typing import Optional
 
-from sqlalchemy import select, and_, or_, func
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import IOC, IOCType, IOCSeverity
+from app.db.models import IOC, IOCSeverity, IOCType
 from app.services.stix_service import stix_service
 
 
@@ -25,13 +25,15 @@ class IOCService:
         source: str,
         created_by: str,
         severity: IOCSeverity = IOCSeverity.MEDIUM,
-        description: Optional[str] = None,
-        tags: Optional[list[str]] = None,
-        feed_id: Optional[uuid.UUID] = None,
-        expires_at: Optional[datetime] = None,
+        description: str | None = None,
+        tags: list[str] | None = None,
+        feed_id: uuid.UUID | None = None,
+        expires_at: datetime | None = None,
+        organization_id: uuid.UUID | None = None,
     ) -> IOC:
         """Create a single IOC."""
         ioc = IOC(
+            organization_id=organization_id,
             ioc_type=ioc_type,
             value=value,
             severity=severity,
@@ -47,19 +49,28 @@ class IOCService:
         await db.refresh(ioc)
         return ioc
 
-    async def get_ioc(self, db: AsyncSession, ioc_id: uuid.UUID) -> Optional[IOC]:
-        """Get an IOC by ID."""
-        result = await db.execute(select(IOC).where(IOC.id == ioc_id))
+    async def get_ioc(
+        self,
+        db: AsyncSession,
+        ioc_id: uuid.UUID,
+        organization_id: uuid.UUID | None = None,
+    ) -> IOC | None:
+        """Get an IOC by ID, optionally scoped to an organization."""
+        query = select(IOC).where(IOC.id == ioc_id)
+        if organization_id is not None:
+            query = query.where(IOC.organization_id == organization_id)
+        result = await db.execute(query)
         return result.scalar_one_or_none()
 
     async def update_ioc(
         self,
         db: AsyncSession,
         ioc_id: uuid.UUID,
-        **updates
-    ) -> Optional[IOC]:
+        organization_id: uuid.UUID | None = None,
+        **updates,
+    ) -> IOC | None:
         """Update an IOC."""
-        ioc = await self.get_ioc(db, ioc_id)
+        ioc = await self.get_ioc(db, ioc_id, organization_id=organization_id)
         if not ioc:
             return None
 
@@ -72,9 +83,14 @@ class IOCService:
         await db.refresh(ioc)
         return ioc
 
-    async def delete_ioc(self, db: AsyncSession, ioc_id: uuid.UUID) -> bool:
+    async def delete_ioc(
+        self,
+        db: AsyncSession,
+        ioc_id: uuid.UUID,
+        organization_id: uuid.UUID | None = None,
+    ) -> bool:
         """Delete an IOC."""
-        ioc = await self.get_ioc(db, ioc_id)
+        ioc = await self.get_ioc(db, ioc_id, organization_id=organization_id)
         if not ioc:
             return False
 
@@ -85,17 +101,21 @@ class IOCService:
     async def search(
         self,
         db: AsyncSession,
-        query: Optional[str] = None,
-        ioc_type: Optional[IOCType] = None,
-        severity: Optional[IOCSeverity] = None,
-        source: Optional[str] = None,
-        is_active: Optional[bool] = None,
-        tags: Optional[list[str]] = None,
+        query: str | None = None,
+        ioc_type: IOCType | None = None,
+        severity: IOCSeverity | None = None,
+        source: str | None = None,
+        is_active: bool | None = None,
+        tags: list[str] | None = None,
         page: int = 1,
         page_size: int = 50,
+        organization_id: uuid.UUID | None = None,
     ) -> tuple[list[IOC], int]:
         """Search IOCs with filters."""
         conditions = []
+
+        if organization_id is not None:
+            conditions.append(IOC.organization_id == organization_id)
 
         if query:
             conditions.append(IOC.value.ilike(f"%{query}%"))
@@ -143,7 +163,8 @@ class IOCService:
         iocs: list[dict],
         source: str,
         created_by: str,
-        feed_id: Optional[uuid.UUID] = None,
+        feed_id: uuid.UUID | None = None,
+        organization_id: uuid.UUID | None = None,
     ) -> dict:
         """
         Bulk import IOCs.
@@ -168,11 +189,10 @@ class IOCService:
                     continue
 
             # Check if IOC already exists
-            result = await db.execute(
-                select(IOC).where(
-                    and_(IOC.ioc_type == ioc_type, IOC.value == value)
-                )
-            )
+            existing_conditions = [IOC.ioc_type == ioc_type, IOC.value == value]
+            if organization_id is not None:
+                existing_conditions.append(IOC.organization_id == organization_id)
+            result = await db.execute(select(IOC).where(and_(*existing_conditions)))
             existing = result.scalar_one_or_none()
 
             if existing:
@@ -199,6 +219,7 @@ class IOCService:
                         severity = IOCSeverity.MEDIUM
 
                 new_ioc = IOC(
+                    organization_id=organization_id,
                     ioc_type=ioc_type,
                     value=value,
                     severity=severity,
@@ -222,19 +243,24 @@ class IOCService:
         bundle_data: dict,
         source: str,
         created_by: str,
+        organization_id: uuid.UUID | None = None,
     ) -> dict:
         """Import IOCs from a STIX 2.1 bundle."""
         iocs = stix_service.parse_bundle(bundle_data)
-        return await self.bulk_import(db, iocs, source, created_by)
+        return await self.bulk_import(db, iocs, source, created_by, organization_id=organization_id)
 
     async def export_stix(
         self,
         db: AsyncSession,
-        ioc_type: Optional[IOCType] = None,
-        is_active: Optional[bool] = True,
+        ioc_type: IOCType | None = None,
+        is_active: bool | None = True,
+        organization_id: uuid.UUID | None = None,
     ) -> dict:
         """Export IOCs as a STIX 2.1 bundle."""
         conditions = []
+
+        if organization_id is not None:
+            conditions.append(IOC.organization_id == organization_id)
 
         if ioc_type:
             conditions.append(IOC.ioc_type == ioc_type)
@@ -252,29 +278,35 @@ class IOCService:
         # Convert ORM objects to dictionaries
         ioc_dicts = []
         for ioc in iocs:
-            ioc_dicts.append({
-                "id": str(ioc.id),
-                "ioc_type": ioc.ioc_type,
-                "value": ioc.value,
-                "severity": ioc.severity,
-                "description": ioc.description,
-                "tags": ioc.tags,
-                "source": ioc.source,
-                "first_seen": ioc.first_seen,
-                "expires_at": ioc.expires_at,
-                "created_at": ioc.created_at,
-            })
+            ioc_dicts.append(
+                {
+                    "id": str(ioc.id),
+                    "ioc_type": ioc.ioc_type,
+                    "value": ioc.value,
+                    "severity": ioc.severity,
+                    "description": ioc.description,
+                    "tags": ioc.tags,
+                    "source": ioc.source,
+                    "first_seen": ioc.first_seen,
+                    "expires_at": ioc.expires_at,
+                    "created_at": ioc.created_at,
+                }
+            )
 
         return stix_service.create_bundle(ioc_dicts)
 
     async def export_csv(
         self,
         db: AsyncSession,
-        ioc_type: Optional[IOCType] = None,
-        is_active: Optional[bool] = True,
+        ioc_type: IOCType | None = None,
+        is_active: bool | None = True,
+        organization_id: uuid.UUID | None = None,
     ) -> str:
         """Export IOCs as CSV."""
         conditions = []
+
+        if organization_id is not None:
+            conditions.append(IOC.organization_id == organization_id)
 
         if ioc_type:
             conditions.append(IOC.ioc_type == ioc_type)
@@ -293,50 +325,76 @@ class IOCService:
         writer = csv.writer(output)
 
         # Write header
-        writer.writerow([
-            "type", "value", "severity", "source", "description",
-            "tags", "first_seen", "last_seen", "expires_at", "is_active"
-        ])
+        writer.writerow(
+            [
+                "type",
+                "value",
+                "severity",
+                "source",
+                "description",
+                "tags",
+                "first_seen",
+                "last_seen",
+                "expires_at",
+                "is_active",
+            ]
+        )
 
         # Write data
         for ioc in iocs:
-            writer.writerow([
-                ioc.ioc_type.value,
-                ioc.value,
-                ioc.severity.value,
-                ioc.source,
-                ioc.description or "",
-                ",".join(ioc.tags or []),
-                ioc.first_seen.isoformat() if ioc.first_seen else "",
-                ioc.last_seen.isoformat() if ioc.last_seen else "",
-                ioc.expires_at.isoformat() if ioc.expires_at else "",
-                str(ioc.is_active),
-            ])
+            writer.writerow(
+                [
+                    ioc.ioc_type.value,
+                    ioc.value,
+                    ioc.severity.value,
+                    ioc.source,
+                    ioc.description or "",
+                    ",".join(ioc.tags or []),
+                    ioc.first_seen.isoformat() if ioc.first_seen else "",
+                    ioc.last_seen.isoformat() if ioc.last_seen else "",
+                    ioc.expires_at.isoformat() if ioc.expires_at else "",
+                    str(ioc.is_active),
+                ]
+            )
 
         return output.getvalue()
 
-    async def get_stats(self, db: AsyncSession) -> dict:
+    async def get_stats(
+        self,
+        db: AsyncSession,
+        organization_id: uuid.UUID | None = None,
+    ) -> dict:
         """Get IOC statistics."""
+        org_conditions = []
+        if organization_id is not None:
+            org_conditions.append(IOC.organization_id == organization_id)
+
         # Total count
-        total_result = await db.execute(select(func.count()).select_from(IOC))
+        total_query = select(func.count()).select_from(IOC)
+        if org_conditions:
+            total_query = total_query.where(*org_conditions)
+        total_result = await db.execute(total_query)
         total = total_result.scalar() or 0
 
         # Active count
-        active_result = await db.execute(
-            select(func.count()).select_from(IOC).where(IOC.is_active == True)
-        )
+        active_query = select(func.count()).select_from(IOC).where(IOC.is_active.is_(True))
+        if org_conditions:
+            active_query = active_query.where(*org_conditions)
+        active_result = await db.execute(active_query)
         active = active_result.scalar() or 0
 
         # By type
-        type_result = await db.execute(
-            select(IOC.ioc_type, func.count()).group_by(IOC.ioc_type)
-        )
+        type_query = select(IOC.ioc_type, func.count()).group_by(IOC.ioc_type)
+        if org_conditions:
+            type_query = type_query.where(*org_conditions)
+        type_result = await db.execute(type_query)
         by_type = {str(row[0].value): row[1] for row in type_result.all()}
 
         # By severity
-        severity_result = await db.execute(
-            select(IOC.severity, func.count()).group_by(IOC.severity)
-        )
+        severity_query = select(IOC.severity, func.count()).group_by(IOC.severity)
+        if org_conditions:
+            severity_query = severity_query.where(*org_conditions)
+        severity_result = await db.execute(severity_query)
         by_severity = {str(row[0].value): row[1] for row in severity_result.all()}
 
         return {
