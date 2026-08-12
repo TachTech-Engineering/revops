@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backend-migrate
+  labels:
+    app: backend-migrate
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: backend-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend:latest
+          command: ["python", "-m", "app.db.run_migrations"]
+          envFrom:
+            - configMapRef:
+                name: backend-config
+            - secretRef:
+                name: backend-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

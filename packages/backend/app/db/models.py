@@ -1,50 +1,51 @@
+import enum
+import uuid
 from datetime import datetime
 from typing import Optional
-import uuid
 
-from sqlalchemy import String, Text, Boolean, Integer, DateTime, JSON, Enum as SQLEnum, ForeignKey, Index
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Enum as SQLEnum
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-import enum
 
 
 class Base(DeclarativeBase):
     pass
 
 
-class UserRoleType(str, enum.Enum):
+class UserRoleType(enum.StrEnum):
     ADMIN = "admin"
     ANALYST = "analyst"
     VIEWER = "viewer"
 
 
-class SSOProvider(str, enum.Enum):
+class SSOProvider(enum.StrEnum):
     GOOGLE = "google"
     OKTA = "okta"
     AZURE_AD = "azure_ad"
     SAML = "saml"  # Generic SAML 2.0
 
 
-class ReportFrequency(str, enum.Enum):
+class ReportFrequency(enum.StrEnum):
     DAILY = "daily"
     WEEKLY = "weekly"
     MONTHLY = "monthly"
 
 
-class WebhookType(str, enum.Enum):
+class WebhookType(enum.StrEnum):
     SLACK = "slack"
     TEAMS = "teams"
     PAGERDUTY = "pagerduty"
     GENERIC = "generic"
 
 
-class PlaybookStatus(str, enum.Enum):
+class PlaybookStatus(enum.StrEnum):
     ACTIVE = "active"
     INACTIVE = "inactive"
     DRAFT = "draft"
 
 
-class ExecutionStatus(str, enum.Enum):
+class ExecutionStatus(enum.StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     SUCCESS = "success"
@@ -52,7 +53,7 @@ class ExecutionStatus(str, enum.Enum):
     PARTIAL = "partial"
 
 
-class ActionType(str, enum.Enum):
+class ActionType(enum.StrEnum):
     WEBHOOK = "webhook"
     JIRA_TICKET = "jira_ticket"
     SERVICENOW_TICKET = "servicenow_ticket"
@@ -64,7 +65,7 @@ class ActionType(str, enum.Enum):
     SOAR_TRIGGER = "soar_trigger"
 
 
-class IncidentStatus(str, enum.Enum):
+class IncidentStatus(enum.StrEnum):
     OPEN = "open"
     INVESTIGATING = "investigating"
     CONTAINED = "contained"
@@ -72,14 +73,14 @@ class IncidentStatus(str, enum.Enum):
     CLOSED = "closed"
 
 
-class IncidentSeverity(str, enum.Enum):
+class IncidentSeverity(enum.StrEnum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
 
 
-class CaseStatus(str, enum.Enum):
+class CaseStatus(enum.StrEnum):
     OPEN = "open"
     IN_PROGRESS = "in_progress"
     PENDING = "pending"
@@ -87,14 +88,14 @@ class CaseStatus(str, enum.Enum):
     CLOSED = "closed"
 
 
-class CasePriority(str, enum.Enum):
+class CasePriority(enum.StrEnum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
 
 
-class CaseActivityType(str, enum.Enum):
+class CaseActivityType(enum.StrEnum):
     CREATED = "created"
     STATUS_CHANGED = "status_changed"
     PRIORITY_CHANGED = "priority_changed"
@@ -106,7 +107,7 @@ class CaseActivityType(str, enum.Enum):
     UPDATED = "updated"
 
 
-class EnrichmentType(str, enum.Enum):
+class EnrichmentType(enum.StrEnum):
     IP_GEOLOCATION = "ip_geolocation"
     IP_REPUTATION = "ip_reputation"
     DOMAIN_WHOIS = "domain_whois"
@@ -117,7 +118,7 @@ class EnrichmentType(str, enum.Enum):
     CUSTOM_API = "custom_api"
 
 
-class WidgetType(str, enum.Enum):
+class WidgetType(enum.StrEnum):
     ALERT_SUMMARY = "alert_summary"
     ALERTS_BY_SEVERITY = "alerts_by_severity"
     ALERTS_BY_STATUS = "alerts_by_status"
@@ -130,7 +131,7 @@ class WidgetType(str, enum.Enum):
     CUSTOM_QUERY = "custom_query"
 
 
-class MitreTactic(str, enum.Enum):
+class MitreTactic(enum.StrEnum):
     RECONNAISSANCE = "reconnaissance"
     RESOURCE_DEVELOPMENT = "resource-development"
     INITIAL_ACCESS = "initial-access"
@@ -147,13 +148,14 @@ class MitreTactic(str, enum.Enum):
     IMPACT = "impact"
 
 
-class SLAStatus(str, enum.Enum):
+class SLAStatus(enum.StrEnum):
     ON_TRACK = "on_track"
     AT_RISK = "at_risk"
     BREACHED = "breached"
 
 
 # ==================== Authentication Models ====================
+
 
 class Organization(Base):
     __tablename__ = "organizations"
@@ -162,13 +164,17 @@ class Organization(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    settings: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
+    settings: Mapped[dict | None] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationships
     users: Mapped[list["User"]] = relationship("User", back_populates="organization")
-    sso_configs: Mapped[list["OrganizationSSO"]] = relationship("OrganizationSSO", back_populates="organization", cascade="all, delete-orphan")
+    sso_configs: Mapped[list["OrganizationSSO"]] = relationship(
+        "OrganizationSSO", back_populates="organization", cascade="all, delete-orphan"
+    )
 
 
 class OrganizationSSO(Base):
@@ -176,17 +182,21 @@ class OrganizationSSO(Base):
     Per-organization SSO configuration.
     Allows each tenant to configure their own identity provider.
     """
+
     __tablename__ = "organization_sso"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     provider: Mapped[SSOProvider] = mapped_column(SQLEnum(SSOProvider), nullable=False)
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Display name for the login button (e.g., "Sign in with Acme Corp")
-    display_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # OAuth2/OIDC Configuration (encrypted credentials stored separately)
     client_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -196,36 +206,43 @@ class OrganizationSSO(Base):
     # For Okta: domain (e.g., "acme.okta.com")
     # For Azure AD: tenant_id
     # For SAML: metadata_url or entity_id
-    domain: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    tenant_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    domain: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    tenant_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # SAML-specific fields
-    metadata_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    entity_id: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
-    sso_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    certificate: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # PEM format, encrypted
-    # Additional SAML settings as JSON (idp_entity_id, idp_sso_url, idp_slo_url, idp_x509_cert, etc.)
-    saml_settings: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    metadata_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    entity_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    sso_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    certificate: Mapped[str | None] = mapped_column(Text, nullable=True)  # PEM format, encrypted
+    # Additional SAML settings as JSON
+    # (idp_entity_id, idp_sso_url, idp_slo_url, idp_x509_cert, etc.)
+    saml_settings: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
     # Email domain restrictions (comma-separated, e.g., "acme.com,acme.org")
     # If set, only users with these email domains can use this SSO
-    allowed_email_domains: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    allowed_email_domains: Mapped[str | None] = mapped_column(String(1000), nullable=True)
 
     # Auto-provisioning settings
     auto_create_users: Mapped[bool] = mapped_column(Boolean, default=True)
-    default_role: Mapped[UserRoleType] = mapped_column(SQLEnum(UserRoleType), default=UserRoleType.VIEWER)
+    default_role: Mapped[UserRoleType] = mapped_column(
+        SQLEnum(UserRoleType), default=UserRoleType.VIEWER
+    )
 
     # Audit
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationships
-    organization: Mapped["Organization"] = relationship("Organization", back_populates="sso_configs")
+    organization: Mapped["Organization"] = relationship(
+        "Organization", back_populates="sso_configs"
+    )
 
     __table_args__ = (
         # Each org can only have one config per provider
-        Index('ix_org_sso_org_provider', 'organization_id', 'provider', unique=True),
+        Index("ix_org_sso_org_provider", "organization_id", "provider", unique=True),
     )
 
 
@@ -235,11 +252,15 @@ class OrganizationAPIKeys(Base):
     Allows each tenant to configure their own API keys.
     Keys are encrypted using Fernet symmetric encryption.
     """
+
     __tablename__ = "organization_api_keys"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
     # Provider name (e.g., "openai", "anthropic")
@@ -249,21 +270,23 @@ class OrganizationAPIKeys(Base):
     api_key_encrypted: Mapped[bytes] = mapped_column(nullable=False)
 
     # Optional model override (if not set, uses system default)
-    model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # Key status
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    last_error: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Audit
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     __table_args__ = (
         # Each org can only have one key per provider
-        Index('ix_org_api_keys_org_provider', 'organization_id', 'provider', unique=True),
+        Index("ix_org_api_keys_org_provider", "organization_id", "provider", unique=True),
     )
 
 
@@ -272,35 +295,45 @@ class User(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
-    hashed_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Nullable for SSO-only users
-    name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    hashed_password: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )  # Nullable for SSO-only users
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[UserRoleType] = mapped_column(SQLEnum(UserRoleType), default=UserRoleType.VIEWER)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    organization_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True
     )
 
     # SSO fields
-    sso_provider: Mapped[Optional[SSOProvider]] = mapped_column(SQLEnum(SSOProvider), nullable=True)
-    sso_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Provider's unique user ID
+    sso_provider: Mapped[SSOProvider | None] = mapped_column(SQLEnum(SSOProvider), nullable=True)
+    sso_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )  # Provider's unique user ID
 
-    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationships
-    organization: Mapped[Optional["Organization"]] = relationship("Organization", back_populates="users")
+    organization: Mapped[Optional["Organization"]] = relationship(
+        "Organization", back_populates="users"
+    )
 
 
 class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+    )
     token_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     user: Mapped["User"] = relationship("User")
@@ -308,6 +341,7 @@ class RefreshToken(Base):
 
 # ==================== Tenant-Scoped Models ====================
 # All models below include organization_id for multi-tenancy
+
 
 class SavedQuery(Base):
     __tablename__ = "saved_queries"
@@ -317,12 +351,14 @@ class SavedQuery(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     sql: Mapped[str] = mapped_column(Text, nullable=False)
     is_shared: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str] = mapped_column(String(255), default="default")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class ScheduledReport(Base):
@@ -333,16 +369,22 @@ class ScheduledReport(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    report_type: Mapped[str] = mapped_column(String(50), nullable=False)  # alert_summary, sla_metrics, etc.
-    frequency: Mapped[ReportFrequency] = mapped_column(SQLEnum(ReportFrequency), default=ReportFrequency.DAILY)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    report_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # alert_summary, sla_metrics, etc.
+    frequency: Mapped[ReportFrequency] = mapped_column(
+        SQLEnum(ReportFrequency), default=ReportFrequency.DAILY
+    )
     recipients: Mapped[list] = mapped_column(JSON, default=list)  # List of email addresses
     filters: Mapped[dict] = mapped_column(JSON, default=dict)  # Report-specific filters
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class SuppressionRule(Base):
@@ -353,15 +395,21 @@ class SuppressionRule(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    rule_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Specific rule to suppress
-    severity: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # Suppress by severity
-    title_pattern: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Regex pattern for title
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rule_id: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )  # Specific rule to suppress
+    severity: Mapped[str | None] = mapped_column(String(50), nullable=True)  # Suppress by severity
+    title_pattern: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )  # Regex pattern for title
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), default="default")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class UserSettings(Base):
@@ -373,10 +421,14 @@ class UserSettings(Base):
     default_time_range: Mapped[int] = mapped_column(Integer, default=7)  # Days
     alerts_per_page: Mapped[int] = mapped_column(Integer, default=50)
     notifications_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    notification_severities: Mapped[list] = mapped_column(JSON, default=lambda: ["CRITICAL", "HIGH"])
+    notification_severities: Mapped[list] = mapped_column(
+        JSON, default=lambda: ["CRITICAL", "HIGH"]
+    )
     keyboard_shortcuts_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class WebhookConfig(Base):
@@ -387,35 +439,40 @@ class WebhookConfig(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    webhook_type: Mapped[WebhookType] = mapped_column(SQLEnum(WebhookType), default=WebhookType.GENERIC)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    webhook_type: Mapped[WebhookType] = mapped_column(
+        SQLEnum(WebhookType), default=WebhookType.GENERIC
+    )
     url: Mapped[str] = mapped_column(Text, nullable=False)
-    secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    secret: Mapped[str | None] = mapped_column(String(255), nullable=True)
     headers: Mapped[dict] = mapped_column(JSON, default=dict)
     severity_filter: Mapped[list] = mapped_column(JSON, default=lambda: ["CRITICAL", "HIGH"])
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_triggered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class UserRole(Base):
     """Legacy role assignment - prefer using User.role instead"""
+
     __tablename__ = "user_roles"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organization_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=True, index=True
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRoleType] = mapped_column(SQLEnum(UserRoleType), default=UserRoleType.VIEWER)
     created_by: Mapped[str] = mapped_column(String(255), default="system")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    __table_args__ = (
-        Index('ix_user_roles_org_email', 'organization_id', 'email', unique=True),
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+    __table_args__ = (Index("ix_user_roles_org_email", "organization_id", "email", unique=True),)
 
 
 class AuditLog(Base):
@@ -428,10 +485,10 @@ class AuditLog(Base):
     user_email: Mapped[str] = mapped_column(String(255), nullable=False)
     action: Mapped[str] = mapped_column(String(100), nullable=False)
     resource_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    resource_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    resource_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     details: Mapped[dict] = mapped_column(JSON, default=dict)
-    ip_address: Mapped[Optional[str]] = mapped_column(String(45), nullable=True)
-    user_agent: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -443,14 +500,18 @@ class Playbook(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     trigger_conditions: Mapped[dict] = mapped_column(JSON, default=dict)  # severity, rule_id, etc.
     actions: Mapped[list] = mapped_column(JSON, default=list)  # List of action configs
-    status: Mapped[PlaybookStatus] = mapped_column(SQLEnum(PlaybookStatus), default=PlaybookStatus.DRAFT)
+    status: Mapped[PlaybookStatus] = mapped_column(
+        SQLEnum(PlaybookStatus), default=PlaybookStatus.DRAFT
+    )
     auto_execute: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str] = mapped_column(String(255), default="system")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class PlaybookExecution(Base):
@@ -462,11 +523,13 @@ class PlaybookExecution(Base):
     )
     playbook_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     alert_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    status: Mapped[ExecutionStatus] = mapped_column(SQLEnum(ExecutionStatus), default=ExecutionStatus.PENDING)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    status: Mapped[ExecutionStatus] = mapped_column(
+        SQLEnum(ExecutionStatus), default=ExecutionStatus.PENDING
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     action_results: Mapped[list] = mapped_column(JSON, default=list)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     triggered_by: Mapped[str] = mapped_column(String(255), default="system")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -479,14 +542,20 @@ class Incident(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[IncidentStatus] = mapped_column(SQLEnum(IncidentStatus), default=IncidentStatus.OPEN)
-    severity: Mapped[IncidentSeverity] = mapped_column(SQLEnum(IncidentSeverity), default=IncidentSeverity.MEDIUM)
-    assignee: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[IncidentStatus] = mapped_column(
+        SQLEnum(IncidentStatus), default=IncidentStatus.OPEN
+    )
+    severity: Mapped[IncidentSeverity] = mapped_column(
+        SQLEnum(IncidentSeverity), default=IncidentSeverity.MEDIUM
+    )
+    assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     created_by: Mapped[str] = mapped_column(String(255), default="system")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class IncidentAlert(Base):
@@ -510,13 +579,15 @@ class CorrelationRule(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     conditions: Mapped[dict] = mapped_column(JSON, default=dict)  # time_window, field_matches, etc.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_create_incident: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str] = mapped_column(String(255), default="system")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class Case(Base):
@@ -528,20 +599,22 @@ class Case(Base):
     )
     case_number: Mapped[str] = mapped_column(String(50), nullable=False)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[CaseStatus] = mapped_column(SQLEnum(CaseStatus), default=CaseStatus.OPEN)
-    priority: Mapped[CasePriority] = mapped_column(SQLEnum(CasePriority), default=CasePriority.MEDIUM)
-    assignee: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    priority: Mapped[CasePriority] = mapped_column(
+        SQLEnum(CasePriority), default=CasePriority.MEDIUM
+    )
+    assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     incident_ids: Mapped[list] = mapped_column(JSON, default=list)  # Linked incidents
     created_by: Mapped[str] = mapped_column(String(255), default="system")
-    closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    __table_args__ = (
-        Index('ix_cases_org_number', 'organization_id', 'case_number', unique=True),
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+    __table_args__ = (Index("ix_cases_org_number", "organization_id", "case_number", unique=True),)
 
 
 class CaseActivity(Base):
@@ -552,10 +625,12 @@ class CaseActivity(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     case_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    activity_type: Mapped[CaseActivityType] = mapped_column(SQLEnum(CaseActivityType), nullable=False)
+    activity_type: Mapped[CaseActivityType] = mapped_column(
+        SQLEnum(CaseActivityType), nullable=False
+    )
     description: Mapped[str] = mapped_column(Text, nullable=False)
-    old_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    new_value: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_email: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -584,20 +659,32 @@ class EnrichmentPipeline(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     enrichment_type: Mapped[EnrichmentType] = mapped_column(SQLEnum(EnrichmentType), nullable=False)
-    source_field: Mapped[str] = mapped_column(String(255), nullable=False)  # Field to extract value from alert
-    target_field: Mapped[str] = mapped_column(String(255), nullable=False)  # Field to store enrichment result
-    api_endpoint: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # For custom API enrichments
+    source_field: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )  # Field to extract value from alert
+    target_field: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )  # Field to store enrichment result
+    api_endpoint: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )  # For custom API enrichments
     api_headers: Mapped[dict] = mapped_column(JSON, default=dict)
-    api_key_env: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Environment variable for API key
+    api_key_env: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )  # Environment variable for API key
     cache_ttl_minutes: Mapped[int] = mapped_column(Integer, default=60)  # Cache duration
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_enrich: Mapped[bool] = mapped_column(Boolean, default=False)  # Auto-run on new alerts
-    severity_filter: Mapped[list] = mapped_column(JSON, default=list)  # Only enrich alerts with these severities
+    severity_filter: Mapped[list] = mapped_column(
+        JSON, default=list
+    )  # Only enrich alerts with these severities
     created_by: Mapped[str] = mapped_column(String(255), default="system")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class EnrichmentCache(Base):
@@ -608,10 +695,14 @@ class EnrichmentCache(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     pipeline_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    input_value: Mapped[str] = mapped_column(String(1000), nullable=False)  # The value that was enriched
-    input_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)  # SHA256 of input for lookup
+    input_value: Mapped[str] = mapped_column(
+        String(1000), nullable=False
+    )  # The value that was enriched
+    input_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, index=True
+    )  # SHA256 of input for lookup
     result: Mapped[dict] = mapped_column(JSON, default=dict)  # Enrichment result
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -640,14 +731,16 @@ class CustomDashboard(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     is_shared: Mapped[bool] = mapped_column(Boolean, default=False)
     layout: Mapped[list] = mapped_column(JSON, default=list)  # react-grid-layout format
     widgets: Mapped[list] = mapped_column(JSON, default=list)  # Widget configurations
     owner_email: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class MitreMapping(Base):
@@ -661,13 +754,17 @@ class MitreMapping(Base):
     rule_name: Mapped[str] = mapped_column(String(500), nullable=False)
     technique_id: Mapped[str] = mapped_column(String(20), nullable=False)  # e.g., T1059
     technique_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    subtechnique_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # e.g., T1059.001
-    subtechnique_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    subtechnique_id: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )  # e.g., T1059.001
+    subtechnique_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tactic: Mapped[MitreTactic] = mapped_column(SQLEnum(MitreTactic), nullable=False)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class SLAPolicy(Base):
@@ -678,7 +775,7 @@ class SLAPolicy(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Time to acknowledge (minutes) by severity
     ack_time_critical: Mapped[int] = mapped_column(Integer, default=15)  # 15 minutes
     ack_time_high: Mapped[int] = mapped_column(Integer, default=60)  # 1 hour
@@ -695,7 +792,9 @@ class SLAPolicy(Base):
     rule_ids: Mapped[list] = mapped_column(JSON, default=list)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class SLAMetric(Base):
@@ -710,29 +809,33 @@ class SLAMetric(Base):
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
     # Timestamps
     alert_created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # SLA targets (copied from policy at creation time)
     ack_target_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     resolve_target_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     # SLA status
     ack_status: Mapped[SLAStatus] = mapped_column(SQLEnum(SLAStatus), default=SLAStatus.ON_TRACK)
-    resolve_status: Mapped[SLAStatus] = mapped_column(SQLEnum(SLAStatus), default=SLAStatus.ON_TRACK)
+    resolve_status: Mapped[SLAStatus] = mapped_column(
+        SQLEnum(SLAStatus), default=SLAStatus.ON_TRACK
+    )
     # Actual times (in minutes)
-    ack_time_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    resolve_time_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ack_time_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    resolve_time_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
-class NoteResourceType(str, enum.Enum):
+class NoteResourceType(enum.StrEnum):
     ALERT = "alert"
     INCIDENT = "incident"
     CASE = "case"
     RULE = "rule"
 
 
-class NotificationType(str, enum.Enum):
+class NotificationType(enum.StrEnum):
     MENTION = "mention"
     ALERT_ASSIGNED = "alert_assigned"
     INCIDENT_ASSIGNED = "incident_assigned"
@@ -745,7 +848,7 @@ class NotificationType(str, enum.Enum):
 
 
 # Phase 5: IOC Types
-class IOCType(str, enum.Enum):
+class IOCType(enum.StrEnum):
     IP_ADDRESS = "ip_address"
     DOMAIN = "domain"
     URL = "url"
@@ -755,7 +858,7 @@ class IOCType(str, enum.Enum):
     EMAIL = "email"
 
 
-class IOCSeverity(str, enum.Enum):
+class IOCSeverity(enum.StrEnum):
     CRITICAL = "critical"
     HIGH = "high"
     MEDIUM = "medium"
@@ -764,7 +867,7 @@ class IOCSeverity(str, enum.Enum):
 
 
 # Phase 5: Threat Feed Types
-class FeedType(str, enum.Enum):
+class FeedType(enum.StrEnum):
     OTX = "otx"
     ABUSECH_FEODO = "abusech_feodo"
     ABUSECH_URLHAUS = "abusech_urlhaus"
@@ -772,19 +875,19 @@ class FeedType(str, enum.Enum):
     CUSTOM_STIX = "custom_stix"
 
 
-class FeedStatus(str, enum.Enum):
+class FeedStatus(enum.StrEnum):
     ACTIVE = "active"
     PAUSED = "paused"
     ERROR = "error"
 
 
 # Phase 5: Simulation Types
-class SimulationFramework(str, enum.Enum):
+class SimulationFramework(enum.StrEnum):
     ATOMIC_RED_TEAM = "atomic"
     STRATUS_RED_TEAM = "stratus"
 
 
-class SimulationStatus(str, enum.Enum):
+class SimulationStatus(enum.StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -792,44 +895,46 @@ class SimulationStatus(str, enum.Enum):
 
 
 # Phase 5: Recommendation Status
-class RecommendationStatus(str, enum.Enum):
+class RecommendationStatus(enum.StrEnum):
     PENDING = "pending"
     ACCEPTED = "accepted"
     DISMISSED = "dismissed"
 
 
 # Phase 5: LLM Provider
-class LLMProvider(str, enum.Enum):
+class LLMProvider(enum.StrEnum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
 
 
 # ==================== CONNECTOR FRAMEWORK ENUMS ====================
 
-class ConnectorCategory(str, enum.Enum):
+
+class ConnectorCategory(enum.StrEnum):
     DATA_SOURCE = "data_source"  # Ingest alerts/detections
-    ACTION = "action"            # Execute response actions
+    ACTION = "action"  # Execute response actions
 
 
-class DataSourceCategory(str, enum.Enum):
+class DataSourceCategory(enum.StrEnum):
     """Categories for data source connectors."""
-    SIEM = "siem"                    # Security Information & Event Management
-    EDR = "edr"                      # Endpoint Detection & Response
-    XDR = "xdr"                      # Extended Detection & Response
+
+    SIEM = "siem"  # Security Information & Event Management
+    EDR = "edr"  # Endpoint Detection & Response
+    XDR = "xdr"  # Extended Detection & Response
     CLOUD_SECURITY = "cloud_security"  # Cloud Security Posture Management
-    IDENTITY = "identity"            # Identity & Access Management
+    IDENTITY = "identity"  # Identity & Access Management
     EMAIL_SECURITY = "email_security"  # Email Security Gateways
-    NETWORK = "network"              # Network Detection & Response
+    NETWORK = "network"  # Network Detection & Response
 
 
-class ConnectorStatus(str, enum.Enum):
+class ConnectorStatus(enum.StrEnum):
     CONNECTED = "connected"
     ERROR = "error"
     DISABLED = "disabled"
     PENDING = "pending"
 
 
-class DataSourceType(str, enum.Enum):
+class DataSourceType(enum.StrEnum):
     # SIEM
     PANTHER = "panther"
     GOOGLE_SECOPS = "google_secops"
@@ -903,7 +1008,7 @@ DATA_SOURCE_CATEGORIES: dict[DataSourceType, DataSourceCategory] = {
 }
 
 
-class ActionConnectorType(str, enum.Enum):
+class ActionConnectorType(enum.StrEnum):
     JIRA = "jira"
     SLACK = "slack"
     PAGERDUTY = "pagerduty"
@@ -917,13 +1022,14 @@ class ActionConnectorType(str, enum.Enum):
 
 # ==================== WORKFLOW ENGINE ENUMS ====================
 
-class WorkflowStatus(str, enum.Enum):
+
+class WorkflowStatus(enum.StrEnum):
     DRAFT = "draft"
     ACTIVE = "active"
     INACTIVE = "inactive"
 
 
-class NodeType(str, enum.Enum):
+class NodeType(enum.StrEnum):
     # Triggers
     TRIGGER_ALERT = "trigger_alert"
     TRIGGER_SCHEDULE = "trigger_schedule"
@@ -941,7 +1047,7 @@ class NodeType(str, enum.Enum):
     SET_VARIABLE = "set_variable"
 
 
-class WorkflowExecutionStatus(str, enum.Enum):
+class WorkflowExecutionStatus(enum.StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -956,15 +1062,21 @@ class Note(Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
-    resource_type: Mapped[NoteResourceType] = mapped_column(SQLEnum(NoteResourceType), nullable=False)
+    resource_type: Mapped[NoteResourceType] = mapped_column(
+        SQLEnum(NoteResourceType), nullable=False
+    )
     resource_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     mentions: Mapped[list] = mapped_column(JSON, default=list)  # List of mentioned user emails
     is_edited: Mapped[bool] = mapped_column(Boolean, default=False)
-    parent_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)  # For replies
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )  # For replies
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class Notification(Base):
@@ -975,14 +1087,18 @@ class Notification(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     user_email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    notification_type: Mapped[NotificationType] = mapped_column(SQLEnum(NotificationType), nullable=False)
+    notification_type: Mapped[NotificationType] = mapped_column(
+        SQLEnum(NotificationType), nullable=False
+    )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
-    resource_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    resource_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    resource_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    resource_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
-    read_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    created_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # Who triggered the notification
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )  # Who triggered the notification
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -998,16 +1114,18 @@ class IOC(Base):
     value: Mapped[str] = mapped_column(String(2000), nullable=False, index=True)
     severity: Mapped[IOCSeverity] = mapped_column(SQLEnum(IOCSeverity), default=IOCSeverity.MEDIUM)
     source: Mapped[str] = mapped_column(String(255), nullable=False)  # Manual, feed name, etc.
-    feed_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    feed_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     first_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 # Phase 5: Threat Feed Models
@@ -1023,13 +1141,15 @@ class ThreatFeed(Base):
     feed_type: Mapped[FeedType] = mapped_column(SQLEnum(FeedType), nullable=False)
     status: Mapped[FeedStatus] = mapped_column(SQLEnum(FeedStatus), default=FeedStatus.ACTIVE)
     update_interval_minutes: Mapped[int] = mapped_column(Integer, default=60)
-    last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    next_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     ioc_count: Mapped[int] = mapped_column(Integer, default=0)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class FeedSyncLog(Base):
@@ -1044,7 +1164,7 @@ class FeedSyncLog(Base):
     iocs_added: Mapped[int] = mapped_column(Integer, default=0)
     iocs_updated: Mapped[int] = mapped_column(Integer, default=0)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
-    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -1079,12 +1199,16 @@ class RuleRecommendation(Base):
     rule_name: Mapped[str] = mapped_column(String(500), nullable=False)
     rule_id: Mapped[str] = mapped_column(String(255), nullable=False)  # From catalog
     rule_code: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     mitre_techniques: Mapped[list] = mapped_column(JSONB, default=list)
     confidence_score: Mapped[float] = mapped_column(default=0.8)
-    status: Mapped[RecommendationStatus] = mapped_column(SQLEnum(RecommendationStatus), default=RecommendationStatus.PENDING)
+    status: Mapped[RecommendationStatus] = mapped_column(
+        SQLEnum(RecommendationStatus), default=RecommendationStatus.PENDING
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class RuleRecommendationDismissal(Base):
@@ -1096,7 +1220,7 @@ class RuleRecommendationDismissal(Base):
     )
     recommendation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     dismissed_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     dismissed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -1106,33 +1230,49 @@ class SimulationTemplate(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     # Note: SimulationTemplate is system-wide (catalog), not per-org
-    framework: Mapped[SimulationFramework] = mapped_column(SQLEnum(SimulationFramework), nullable=False)
-    technique_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)  # e.g., atomic-T1003-0
-    mitre_technique_id: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # e.g., T1003
+    framework: Mapped[SimulationFramework] = mapped_column(
+        SQLEnum(SimulationFramework), nullable=False
+    )
+    technique_id: Mapped[str] = mapped_column(
+        String(100), nullable=False, unique=True
+    )  # e.g., atomic-T1003-0
+    mitre_technique_id: Mapped[str | None] = mapped_column(String(50), nullable=True)  # e.g., T1003
     name: Mapped[str] = mapped_column(String(500), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     mitre_tactic: Mapped[str] = mapped_column(String(100), nullable=False, default="Unknown")
     mitre_technique: Mapped[str] = mapped_column(String(255), nullable=False, default="Unknown")
-    platforms: Mapped[list] = mapped_column(JSON, default=list)  # windows, linux, macos, aws, azure, gcp
+    platforms: Mapped[list] = mapped_column(
+        JSON, default=list
+    )  # windows, linux, macos, aws, azure, gcp
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Atomic Red Team specific fields
-    executor_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # powershell, cmd, bash, sh, manual
-    executor_command: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Command to execute
-    executor_cleanup: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Cleanup command
-    input_arguments: Mapped[dict] = mapped_column(JSON, default=dict)  # Input arguments with defaults
+    executor_type: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )  # powershell, cmd, bash, sh, manual
+    executor_command: Mapped[str | None] = mapped_column(Text, nullable=True)  # Command to execute
+    executor_cleanup: Mapped[str | None] = mapped_column(Text, nullable=True)  # Cleanup command
+    input_arguments: Mapped[dict] = mapped_column(
+        JSON, default=dict
+    )  # Input arguments with defaults
     dependencies: Mapped[list] = mapped_column(JSON, default=list)  # Dependencies to check
 
     # Stratus Red Team specific fields
-    cloud_provider: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)  # aws, azure, gcp
+    cloud_provider: Mapped[str | None] = mapped_column(String(20), nullable=True)  # aws, azure, gcp
     cloud_permissions: Mapped[list] = mapped_column(JSON, default=list)  # Required IAM permissions
-    detonation_command: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Stratus detonation
-    cleanup_command: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Stratus cleanup
+    detonation_command: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )  # Stratus detonation
+    cleanup_command: Mapped[str | None] = mapped_column(Text, nullable=True)  # Stratus cleanup
 
     # General fields
-    test_data: Mapped[dict] = mapped_column(JSON, default=dict)  # Additional framework-specific data
+    test_data: Mapped[dict] = mapped_column(
+        JSON, default=dict
+    )  # Additional framework-specific data
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class SimulationRun(Base):
@@ -1143,15 +1283,17 @@ class SimulationRun(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     template_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    status: Mapped[SimulationStatus] = mapped_column(SQLEnum(SimulationStatus), default=SimulationStatus.PENDING)
+    status: Mapped[SimulationStatus] = mapped_column(
+        SQLEnum(SimulationStatus), default=SimulationStatus.PENDING
+    )
     targets: Mapped[list] = mapped_column(JSON, default=list)  # List of target identifiers
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     detection_expected: Mapped[bool] = mapped_column(Boolean, default=True)
     detection_found: Mapped[bool] = mapped_column(Boolean, default=False)
-    detection_rule_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    detection_rule_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     triggered_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -1165,19 +1307,21 @@ class SimulationResult(Base):
     run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     target: Mapped[str] = mapped_column(String(500), nullable=False)
     success: Mapped[bool] = mapped_column(Boolean, default=False)
-    output: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    detected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     detection_details: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 # ==================== CONNECTOR FRAMEWORK MODELS ====================
 
+
 class Connector(Base):
     """
     Unified connector model for both data sources (SIEMs) and action connectors.
     Supports multi-SIEM alert ingestion and response action execution.
     """
+
     __tablename__ = "connectors"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1185,30 +1329,38 @@ class Connector(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[ConnectorCategory] = mapped_column(SQLEnum(ConnectorCategory), nullable=False)
-    connector_type: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g., "panther", "jira", "slack"
-    status: Mapped[ConnectorStatus] = mapped_column(SQLEnum(ConnectorStatus), default=ConnectorStatus.PENDING)
+    connector_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # e.g., "panther", "jira", "slack"
+    status: Mapped[ConnectorStatus] = mapped_column(
+        SQLEnum(ConnectorStatus), default=ConnectorStatus.PENDING
+    )
 
     # Encrypted credentials (use Fernet encryption)
-    credentials_encrypted: Mapped[Optional[bytes]] = mapped_column(nullable=True)
+    credentials_encrypted: Mapped[bytes | None] = mapped_column(nullable=True)
 
     # Non-sensitive configuration (JSON)
     config: Mapped[dict] = mapped_column(JSON, default=dict)
 
     # Health tracking
-    last_health_check: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_health_check: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # For data sources: sync configuration
     sync_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     sync_interval_minutes: Mapped[int] = mapped_column(Integer, default=5)
-    last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    last_sync_cursor: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # Pagination cursor
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_sync_cursor: Mapped[str | None] = mapped_column(
+        String(500), nullable=True
+    )  # Pagination cursor
 
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class NormalizedAlert(Base):
@@ -1216,6 +1368,7 @@ class NormalizedAlert(Base):
     Normalized alert model for unified view across all SIEM sources.
     All alerts are mapped to a common schema regardless of origin.
     """
+
     __tablename__ = "normalized_alerts"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1223,22 +1376,30 @@ class NormalizedAlert(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     connector_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    source_type: Mapped[str] = mapped_column(String(50), nullable=False)  # panther, splunk, sentinel, etc.
-    external_id: Mapped[str] = mapped_column(String(500), nullable=False)  # Original alert ID from source
+    source_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # panther, splunk, sentinel, etc.
+    external_id: Mapped[str] = mapped_column(
+        String(500), nullable=False
+    )  # Original alert ID from source
 
     # Normalized fields (consistent across all sources)
     title: Mapped[str] = mapped_column(String(1000), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    severity: Mapped[str] = mapped_column(String(20), nullable=False)  # critical, high, medium, low, info
-    status: Mapped[str] = mapped_column(String(50), nullable=False)  # open, acknowledged, resolved, closed
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    severity: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # critical, high, medium, low, info
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # open, acknowledged, resolved, closed
 
     # Timestamps from source
     created_at_source: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    updated_at_source: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    updated_at_source: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Detection information
-    rule_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    rule_name: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    rule_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    rule_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Enrichment and classification (using JSONB for better PostgreSQL support)
     tags: Mapped[list] = mapped_column(JSONB, default=list)
@@ -1250,21 +1411,25 @@ class NormalizedAlert(Base):
 
     # Local timestamps
     ingested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     __table_args__ = (
-        Index('ix_normalized_alerts_org_connector', 'organization_id', 'connector_id'),
-        Index('ix_normalized_alerts_org_external', 'organization_id', 'external_id'),
+        Index("ix_normalized_alerts_org_connector", "organization_id", "connector_id"),
+        Index("ix_normalized_alerts_org_external", "organization_id", "external_id"),
     )
 
 
 # ==================== WORKFLOW ENGINE MODELS ====================
+
 
 class Workflow(Base):
     """
     Visual workflow definition with Tines-like automation capabilities.
     Supports drag-and-drop builder with branching, loops, and templating.
     """
+
     __tablename__ = "workflows"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1272,11 +1437,15 @@ class Workflow(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[WorkflowStatus] = mapped_column(SQLEnum(WorkflowStatus), default=WorkflowStatus.DRAFT)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[WorkflowStatus] = mapped_column(
+        SQLEnum(WorkflowStatus), default=WorkflowStatus.DRAFT
+    )
 
     # Trigger configuration
-    trigger_type: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # alert, schedule, webhook, manual
+    trigger_type: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )  # alert, schedule, webhook, manual
     trigger_config: Mapped[dict] = mapped_column(JSON, default=dict)  # Trigger-specific config
 
     # React Flow viewport state
@@ -1290,7 +1459,9 @@ class Workflow(Base):
 
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class WorkflowNode(Base):
@@ -1299,11 +1470,19 @@ class WorkflowNode(Base):
     Represents triggers, actions, conditions, transforms, loops, etc.
     Note: organization_id is derived from workflow relationship.
     """
+
     __tablename__ = "workflow_nodes"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    workflow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False, index=True)
-    node_key: Mapped[str] = mapped_column(String(100), nullable=False)  # Unique key within workflow, e.g., "step_1"
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    node_key: Mapped[str] = mapped_column(
+        String(100), nullable=False
+    )  # Unique key within workflow, e.g., "step_1"
     node_type: Mapped[NodeType] = mapped_column(SQLEnum(NodeType), nullable=False)
     label: Mapped[str] = mapped_column(String(255), nullable=False)  # Display label
 
@@ -1316,16 +1495,20 @@ class WorkflowNode(Base):
 
     # Error handling
     on_error: Mapped[str] = mapped_column(String(50), default="fail")  # fail, continue, goto_node
-    error_handler_node: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)  # Node key to goto on error
+    error_handler_node: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )  # Node key to goto on error
 
     # Timeout
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     __table_args__ = (
-        Index('ix_workflow_nodes_workflow_key', 'workflow_id', 'node_key', unique=True),
+        Index("ix_workflow_nodes_workflow_key", "workflow_id", "node_key", unique=True),
     )
 
 
@@ -1335,19 +1518,27 @@ class WorkflowEdge(Base):
     Supports conditional branching with source handles (true/false, loop_item/loop_complete).
     Note: organization_id is derived from workflow relationship.
     """
+
     __tablename__ = "workflow_edges"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    workflow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False, index=True)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflows.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     source_node_key: Mapped[str] = mapped_column(String(100), nullable=False)
-    source_handle: Mapped[str] = mapped_column(String(50), default="default")  # default, true, false, loop_item, loop_complete
+    source_handle: Mapped[str] = mapped_column(
+        String(50), default="default"
+    )  # default, true, false, loop_item, loop_complete
     target_node_key: Mapped[str] = mapped_column(String(100), nullable=False)
 
     # Optional condition expression for conditional edges
-    condition: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    condition: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Edge styling/metadata
-    label: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    label: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -1357,6 +1548,7 @@ class WorkflowExecution(Base):
     Execution instance of a workflow.
     Tracks overall status, trigger data, and accumulated context.
     """
+
     __tablename__ = "workflow_executions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1364,7 +1556,9 @@ class WorkflowExecution(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     workflow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
-    workflow_version: Mapped[int] = mapped_column(Integer, default=1)  # Version at time of execution
+    workflow_version: Mapped[int] = mapped_column(
+        Integer, default=1
+    )  # Version at time of execution
     status: Mapped[WorkflowExecutionStatus] = mapped_column(
         SQLEnum(WorkflowExecutionStatus), default=WorkflowExecutionStatus.PENDING
     )
@@ -1379,12 +1573,12 @@ class WorkflowExecution(Base):
     variables: Mapped[dict] = mapped_column(JSON, default=dict)
 
     # Timing
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Error tracking
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    failed_node_key: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    failed_node_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     triggered_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -1396,45 +1590,54 @@ class WorkflowStepExecution(Base):
     Tracks inputs, outputs, timing, and errors for each step.
     Note: organization_id is derived from execution relationship.
     """
+
     __tablename__ = "workflow_step_executions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    execution_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("workflow_executions.id", ondelete="CASCADE"), nullable=False, index=True)
+    execution_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workflow_executions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     node_key: Mapped[str] = mapped_column(String(100), nullable=False)
     node_type: Mapped[str] = mapped_column(String(50), nullable=False)
 
     # Execution status
-    status: Mapped[str] = mapped_column(String(50), nullable=False)  # pending, running, completed, failed, skipped
+    status: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # pending, running, completed, failed, skipped
 
     # I/O data
     input_data: Mapped[dict] = mapped_column(JSON, default=dict)
     output_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
     # Error tracking
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Timing
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Loop tracking
-    loop_index: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    loop_item: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    loop_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    loop_item: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 # ==================== DATA PIPELINE ENUMS ====================
 
-class PipelineStatus(str, enum.Enum):
+
+class PipelineStatus(enum.StrEnum):
     DRAFT = "draft"
     ACTIVE = "active"
     INACTIVE = "inactive"
     ERROR = "error"
 
 
-class StageType(str, enum.Enum):
+class StageType(enum.StrEnum):
     # Transform stages
     OCSF_TRANSFORM = "ocsf_transform"
     FIELD_MAPPER = "field_mapper"
@@ -1447,20 +1650,20 @@ class StageType(str, enum.Enum):
     ROUTE = "route"
 
 
-class StageCategory(str, enum.Enum):
+class StageCategory(enum.StrEnum):
     TRANSFORM = "transform"
     FILTER = "filter"
     ROUTE = "route"
 
 
-class PipelineExecutionStatus(str, enum.Enum):
+class PipelineExecutionStatus(enum.StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
 
 
-class DestinationType(str, enum.Enum):
+class DestinationType(enum.StrEnum):
     DATABASE = "database"
     S3 = "s3"
     WEBHOOK = "webhook"
@@ -1470,11 +1673,13 @@ class DestinationType(str, enum.Enum):
 
 # ==================== DATA PIPELINE MODELS ====================
 
+
 class Pipeline(Base):
     """
     Data Pipeline for processing raw log data through configurable stages.
     Transform → Filter → Route pipeline architecture.
     """
+
     __tablename__ = "pipelines"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1482,11 +1687,15 @@ class Pipeline(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    status: Mapped[PipelineStatus] = mapped_column(SQLEnum(PipelineStatus), default=PipelineStatus.DRAFT)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[PipelineStatus] = mapped_column(
+        SQLEnum(PipelineStatus), default=PipelineStatus.DRAFT
+    )
 
     # Source configuration
-    source_connector_ids: Mapped[list] = mapped_column(JSON, default=list)  # Which connectors feed this
+    source_connector_ids: Mapped[list] = mapped_column(
+        JSON, default=list
+    )  # Which connectors feed this
     source_log_types: Mapped[list] = mapped_column(JSON, default=list)  # Filter by log type
 
     # React Flow viewport state
@@ -1502,11 +1711,17 @@ class Pipeline(Base):
 
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationships
-    stages: Mapped[list["PipelineStage"]] = relationship("PipelineStage", back_populates="pipeline", cascade="all, delete-orphan")
-    edges: Mapped[list["PipelineEdge"]] = relationship("PipelineEdge", back_populates="pipeline", cascade="all, delete-orphan")
+    stages: Mapped[list["PipelineStage"]] = relationship(
+        "PipelineStage", back_populates="pipeline", cascade="all, delete-orphan"
+    )
+    edges: Mapped[list["PipelineEdge"]] = relationship(
+        "PipelineEdge", back_populates="pipeline", cascade="all, delete-orphan"
+    )
 
 
 class PipelineStage(Base):
@@ -1514,15 +1729,21 @@ class PipelineStage(Base):
     Individual stage in a data pipeline.
     Represents transform, filter, or route operations.
     """
+
     __tablename__ = "pipeline_stages"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     pipeline_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("pipelines.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("pipelines.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
     node_key: Mapped[str] = mapped_column(String(100), nullable=False)  # React Flow node ID
-    stage_type: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g., ocsf_transform, condition_filter
+    stage_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # e.g., ocsf_transform, condition_filter
     category: Mapped[StageCategory] = mapped_column(SQLEnum(StageCategory), nullable=False)
     label: Mapped[str] = mapped_column(String(255), nullable=False)
 
@@ -1535,16 +1756,20 @@ class PipelineStage(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
 
     # Multiple output handles (for route stages)
-    output_handles: Mapped[list] = mapped_column(JSON, default=list)  # [{"id": "match", "label": "Match"}, ...]
+    output_handles: Mapped[list] = mapped_column(
+        JSON, default=list
+    )  # [{"id": "match", "label": "Match"}, ...]
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationship
     pipeline: Mapped["Pipeline"] = relationship("Pipeline", back_populates="stages")
 
     __table_args__ = (
-        Index('ix_pipeline_stages_pipeline_key', 'pipeline_id', 'node_key', unique=True),
+        Index("ix_pipeline_stages_pipeline_key", "pipeline_id", "node_key", unique=True),
     )
 
 
@@ -1552,11 +1777,15 @@ class PipelineEdge(Base):
     """
     Connection between pipeline stages defining data flow.
     """
+
     __tablename__ = "pipeline_edges"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     pipeline_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("pipelines.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("pipelines.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
     source_node_key: Mapped[str] = mapped_column(String(100), nullable=False)
@@ -1564,7 +1793,7 @@ class PipelineEdge(Base):
     target_node_key: Mapped[str] = mapped_column(String(100), nullable=False)
 
     # Optional condition for conditional routing
-    condition: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    condition: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -1576,6 +1805,7 @@ class PipelineDestination(Base):
     """
     Destination configuration for pipeline output routing.
     """
+
     __tablename__ = "pipeline_destinations"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1583,15 +1813,19 @@ class PipelineDestination(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    destination_type: Mapped[DestinationType] = mapped_column(SQLEnum(DestinationType), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    destination_type: Mapped[DestinationType] = mapped_column(
+        SQLEnum(DestinationType), nullable=False
+    )
     config: Mapped[dict] = mapped_column(JSON, default=dict)
-    credentials_encrypted: Mapped[Optional[bytes]] = mapped_column(nullable=True)
+    credentials_encrypted: Mapped[bytes | None] = mapped_column(nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="pending")
 
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class PipelineExecution(Base):
@@ -1599,6 +1833,7 @@ class PipelineExecution(Base):
     Execution record for a pipeline run.
     Tracks metrics and status for each execution.
     """
+
     __tablename__ = "pipeline_executions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1619,12 +1854,12 @@ class PipelineExecution(Base):
     bytes_output: Mapped[int] = mapped_column(Integer, default=0)
 
     # Timing
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Error tracking
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     triggered_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -1632,7 +1867,8 @@ class PipelineExecution(Base):
 
 # ==================== FEATURE 1: RULE VERSION HISTORY ====================
 
-class RuleChangeType(str, enum.Enum):
+
+class RuleChangeType(enum.StrEnum):
     CREATED = "created"
     UPDATED = "updated"
     ENABLED = "enabled"
@@ -1645,6 +1881,7 @@ class RuleVersion(Base):
     Tracks version history for detection rules.
     Stores complete snapshots for rollback capability.
     """
+
     __tablename__ = "rule_versions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1662,23 +1899,27 @@ class RuleVersion(Base):
     changed_fields: Mapped[list] = mapped_column(JSON, default=list)
 
     # AI-generated change summary
-    change_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    change_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     changed_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
-        Index('ix_rule_versions_rule_version', 'organization_id', 'rule_id', 'version', unique=True),
+        Index(
+            "ix_rule_versions_rule_version", "organization_id", "rule_id", "version", unique=True
+        ),
     )
 
 
 # ==================== FEATURE 2: STALE RULE DETECTION ====================
+
 
 class RuleHealth(Base):
     """
     Tracks health metrics for detection rules.
     Used for stale rule detection and health monitoring.
     """
+
     __tablename__ = "rule_health"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1689,7 +1930,7 @@ class RuleHealth(Base):
     rule_name: Mapped[str] = mapped_column(String(500), nullable=False)
 
     # Trigger statistics
-    last_triggered_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     trigger_count_7d: Mapped[int] = mapped_column(Integer, default=0)
     trigger_count_30d: Mapped[int] = mapped_column(Integer, default=0)
     trigger_count_90d: Mapped[int] = mapped_column(Integer, default=0)
@@ -1697,29 +1938,31 @@ class RuleHealth(Base):
     # Health assessment
     is_stale: Mapped[bool] = mapped_column(Boolean, default=False)
     health_score: Mapped[float] = mapped_column(default=100.0)  # 0-100 score
-    stale_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    stale_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     # Rule metadata
     is_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    severity: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    owner_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    severity: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    owner_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     last_checked_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
-    __table_args__ = (
-        Index('ix_rule_health_org_rule', 'organization_id', 'rule_id', unique=True),
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
+
+    __table_args__ = (Index("ix_rule_health_org_rule", "organization_id", "rule_id", unique=True),)
 
 
 # ==================== FEATURE 3: AUTO-TRIAGE SUGGESTIONS ====================
+
 
 class TriageSuggestion(Base):
     """
     AI-generated triage suggestions for alerts.
     Includes severity/priority recommendations with confidence scores.
     """
+
     __tablename__ = "triage_suggestions"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1738,9 +1981,9 @@ class TriageSuggestion(Base):
     contributing_factors: Mapped[list] = mapped_column(JSON, default=list)
 
     # Feedback tracking
-    was_accepted: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    feedback_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    feedback_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    was_accepted: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    feedback_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    feedback_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -1750,6 +1993,7 @@ class AssetCriticality(Base):
     Asset importance rules for triage prioritization.
     Matches by hostname, IP, user, service patterns.
     """
+
     __tablename__ = "asset_criticality"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1757,32 +2001,38 @@ class AssetCriticality(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Matching criteria (regex patterns)
-    match_type: Mapped[str] = mapped_column(String(50), nullable=False)  # hostname, ip, user, service
+    match_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # hostname, ip, user, service
     match_pattern: Mapped[str] = mapped_column(String(500), nullable=False)
 
     # Criticality level (1-10, 10 being most critical)
     criticality_level: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # Optional business context
-    business_unit: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    data_classification: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    business_unit: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    data_classification: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 # ==================== FEATURE 4: NATURAL LANGUAGE QUERIES ====================
+
 
 class NLQueryHistory(Base):
     """
     History of natural language queries and their translations.
     Used for learning and improving query translations.
     """
+
     __tablename__ = "nl_query_history"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1794,24 +2044,25 @@ class NLQueryHistory(Base):
     # Query details
     natural_query: Mapped[str] = mapped_column(Text, nullable=False)
     generated_sql: Mapped[str] = mapped_column(Text, nullable=False)
-    explanation: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Execution details
     was_executed: Mapped[bool] = mapped_column(Boolean, default=False)
-    row_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    execution_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    execution_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Feedback for learning
-    was_helpful: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
-    feedback_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    was_helpful: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    feedback_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 # ==================== FEATURE 5: AI ALERT CLUSTERING ====================
 
-class AlertClusterStatus(str, enum.Enum):
+
+class AlertClusterStatus(enum.StrEnum):
     OPEN = "open"
     INVESTIGATING = "investigating"
     RESOLVED = "resolved"
@@ -1823,6 +2074,7 @@ class AlertCluster(Base):
     Groups similar alerts to reduce analyst fatigue.
     AI-generated cluster with summary and metadata.
     """
+
     __tablename__ = "alert_clusters"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1834,11 +2086,15 @@ class AlertCluster(Base):
     name: Mapped[str] = mapped_column(String(500), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
-    status: Mapped[AlertClusterStatus] = mapped_column(SQLEnum(AlertClusterStatus), default=AlertClusterStatus.OPEN)
+    status: Mapped[AlertClusterStatus] = mapped_column(
+        SQLEnum(AlertClusterStatus), default=AlertClusterStatus.OPEN
+    )
 
     # Clustering criteria
-    primary_rule_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    cluster_type: Mapped[str] = mapped_column(String(50), nullable=False)  # rule_based, entity_based, time_based
+    primary_rule_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cluster_type: Mapped[str] = mapped_column(
+        String(50), nullable=False
+    )  # rule_based, entity_based, time_based
 
     # Statistics
     alert_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -1848,15 +2104,18 @@ class AlertCluster(Base):
     # Common entities across alerts
     common_entities: Mapped[dict] = mapped_column(JSON, default=dict)
 
-    assignee: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class AlertClusterMember(Base):
     """
     Links alerts to clusters with similarity score.
     """
+
     __tablename__ = "alert_cluster_members"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1864,7 +2123,10 @@ class AlertClusterMember(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     cluster_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("alert_clusters.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("alert_clusters.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     alert_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
 
@@ -1872,16 +2134,18 @@ class AlertClusterMember(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
-        Index('ix_cluster_members_cluster_alert', 'cluster_id', 'alert_id', unique=True),
+        Index("ix_cluster_members_cluster_alert", "cluster_id", "alert_id", unique=True),
     )
 
 
 # ==================== FEATURE 6: AI PLAYBOOK GENERATION ====================
 
+
 class PlaybookTemplate(Base):
     """
     AI-generated playbook templates from incident resolution patterns.
     """
+
     __tablename__ = "playbook_templates"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1889,7 +2153,7 @@ class PlaybookTemplate(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Template content
     trigger_conditions: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -1902,14 +2166,18 @@ class PlaybookTemplate(Base):
 
     # Approval status
     is_approved: Mapped[bool] = mapped_column(Boolean, default=False)
-    approved_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Converted to playbook?
-    converted_playbook_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    converted_playbook_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 class IncidentResolutionPattern(Base):
@@ -1917,6 +2185,7 @@ class IncidentResolutionPattern(Base):
     Extracted resolution steps from closed incidents.
     Used to train playbook generation.
     """
+
     __tablename__ = "incident_resolution_patterns"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1926,7 +2195,7 @@ class IncidentResolutionPattern(Base):
     incident_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
 
     # Pattern metadata
-    alert_type: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    alert_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
 
     # Extracted steps
@@ -1938,12 +2207,15 @@ class IncidentResolutionPattern(Base):
     occurrence_count: Mapped[int] = mapped_column(Integer, default=1)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 # ==================== FEATURE 7: ESCALATION POLICIES ====================
 
-class EscalationNotificationType(str, enum.Enum):
+
+class EscalationNotificationType(enum.StrEnum):
     EMAIL = "email"
     SLACK = "slack"
     PAGERDUTY = "pagerduty"
@@ -1957,6 +2229,7 @@ class EscalationPolicy(Base):
     """
     Time-based escalation chains for unacknowledged alerts.
     """
+
     __tablename__ = "escalation_policies"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -1964,7 +2237,7 @@ class EscalationPolicy(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Matching criteria
     severity_filter: Mapped[list] = mapped_column(JSON, default=list)  # Empty = all severities
@@ -1973,42 +2246,54 @@ class EscalationPolicy(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Custom message templates for notifications
     # Supports placeholders: {title}, {severity}, {id}, {description}, {rule}, {time}, {source}
-    call_message_template: Mapped[Optional[str]] = mapped_column(
+    call_message_template: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
-        default="Alert from {source}: {title}. Severity: {severity}. {description}"
+        default="Alert from {source}: {title}. Severity: {severity}. {description}",
     )
-    sms_message_template: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-        default="[{source}] {severity} Alert: {title}. ID: {id}"
+    sms_message_template: Mapped[str | None] = mapped_column(
+        Text, nullable=True, default="[{source}] {severity} Alert: {title}. ID: {id}"
     )
 
     # Webhook configuration
-    webhook_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # HMAC-SHA256 signing secret
-    webhook_headers: Mapped[dict] = mapped_column(JSON, default=dict)  # Custom headers for webhook requests
+    webhook_secret: Mapped[str | None] = mapped_column(
+        String(255), nullable=True
+    )  # HMAC-SHA256 signing secret
+    webhook_headers: Mapped[dict] = mapped_column(
+        JSON, default=dict
+    )  # Custom headers for webhook requests
 
     # Relationship
-    steps: Mapped[list["EscalationStep"]] = relationship("EscalationStep", back_populates="policy", cascade="all, delete-orphan")
+    steps: Mapped[list["EscalationStep"]] = relationship(
+        "EscalationStep", back_populates="policy", cascade="all, delete-orphan"
+    )
 
 
 class EscalationStep(Base):
     """
     Individual step in an escalation chain.
     """
+
     __tablename__ = "escalation_steps"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     policy_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("escalation_policies.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("escalation_policies.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
     step_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    delay_minutes: Mapped[int] = mapped_column(Integer, nullable=False)  # Minutes after previous step
+    delay_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False
+    )  # Minutes after previous step
 
     notification_type: Mapped[EscalationNotificationType] = mapped_column(
         SQLEnum(EscalationNotificationType), nullable=False
@@ -2019,7 +2304,7 @@ class EscalationStep(Base):
 
     # Optional: use on-call schedule instead of fixed targets
     use_oncall_schedule: Mapped[bool] = mapped_column(Boolean, default=False)
-    oncall_schedule_id: Mapped[Optional[uuid.UUID]] = mapped_column(UUID(as_uuid=True), nullable=True)
+    oncall_schedule_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -2027,11 +2312,11 @@ class EscalationStep(Base):
     policy: Mapped["EscalationPolicy"] = relationship("EscalationPolicy", back_populates="steps")
 
     __table_args__ = (
-        Index('ix_escalation_steps_policy_order', 'policy_id', 'step_order', unique=True),
+        Index("ix_escalation_steps_policy_order", "policy_id", "step_order", unique=True),
     )
 
 
-class EscalationStatus(str, enum.Enum):
+class EscalationStatus(enum.StrEnum):
     PENDING = "pending"
     ACTIVE = "active"
     ACKNOWLEDGED = "acknowledged"
@@ -2043,6 +2328,7 @@ class AlertEscalation(Base):
     """
     Tracks active escalations per alert.
     """
+
     __tablename__ = "alert_escalations"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2052,31 +2338,36 @@ class AlertEscalation(Base):
     alert_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     policy_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
-    status: Mapped[EscalationStatus] = mapped_column(SQLEnum(EscalationStatus), default=EscalationStatus.PENDING)
+    status: Mapped[EscalationStatus] = mapped_column(
+        SQLEnum(EscalationStatus), default=EscalationStatus.PENDING
+    )
     current_step: Mapped[int] = mapped_column(Integer, default=0)
 
     # Timing
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    next_escalation_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    acknowledged_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    next_escalation_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    acknowledged_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # History of sent notifications
     notification_history: Mapped[list] = mapped_column(JSON, default=list)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 # ==================== FEATURE 8: ON-CALL SCHEDULING ====================
 
-class RotationType(str, enum.Enum):
+
+class RotationType(enum.StrEnum):
     DAILY = "daily"
     WEEKLY = "weekly"
     CUSTOM = "custom"
 
 
-class OnCallRole(str, enum.Enum):
+class OnCallRole(enum.StrEnum):
     PRIMARY = "primary"
     BACKUP = "backup"
 
@@ -2085,6 +2376,7 @@ class OnCallSchedule(Base):
     """
     On-call rotation schedule.
     """
+
     __tablename__ = "oncall_schedules"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2092,62 +2384,71 @@ class OnCallSchedule(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     timezone: Mapped[str] = mapped_column(String(50), default="UTC")
-    rotation_type: Mapped[RotationType] = mapped_column(SQLEnum(RotationType), default=RotationType.WEEKLY)
+    rotation_type: Mapped[RotationType] = mapped_column(
+        SQLEnum(RotationType), default=RotationType.WEEKLY
+    )
 
     # Handoff configuration
     handoff_time: Mapped[str] = mapped_column(String(10), default="09:00")  # HH:MM format
-    handoff_day: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 0=Monday for weekly
+    handoff_day: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0=Monday for weekly
 
     # Custom rotation length (for custom type)
-    rotation_length_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    rotation_length_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationships
-    members: Mapped[list["OnCallRotationMember"]] = relationship("OnCallRotationMember", back_populates="schedule", cascade="all, delete-orphan")
+    members: Mapped[list["OnCallRotationMember"]] = relationship(
+        "OnCallRotationMember", back_populates="schedule", cascade="all, delete-orphan"
+    )
 
 
 class OnCallRotationMember(Base):
     """
     Member in an on-call rotation.
     """
+
     __tablename__ = "oncall_rotation_members"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     schedule_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("oncall_schedules.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("oncall_schedules.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
     user_email: Mapped[str] = mapped_column(String(255), nullable=False)
-    user_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     rotation_order: Mapped[int] = mapped_column(Integer, nullable=False)
     role: Mapped[OnCallRole] = mapped_column(SQLEnum(OnCallRole), default=OnCallRole.PRIMARY)
 
     # Contact preferences
-    phone_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    slack_user_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    phone_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    slack_user_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationship
     schedule: Mapped["OnCallSchedule"] = relationship("OnCallSchedule", back_populates="members")
 
-    __table_args__ = (
-        Index('ix_oncall_members_schedule_order', 'schedule_id', 'rotation_order'),
-    )
+    __table_args__ = (Index("ix_oncall_members_schedule_order", "schedule_id", "rotation_order"),)
 
 
 class OnCallOverride(Base):
     """
     Temporary schedule override/swap.
     """
+
     __tablename__ = "oncall_overrides"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2158,12 +2459,12 @@ class OnCallOverride(Base):
 
     # Override details
     override_user_email: Mapped[str] = mapped_column(String(255), nullable=False)
-    original_user_email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    original_user_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     end_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
-    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -2171,10 +2472,12 @@ class OnCallOverride(Base):
 
 # ==================== FEATURE 9: TREND ANALYSIS ====================
 
+
 class AlertTrendCache(Base):
     """
     Pre-computed trend data by time bucket.
     """
+
     __tablename__ = "alert_trend_cache"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2194,16 +2497,22 @@ class AlertTrendCache(Base):
     by_rule: Mapped[dict] = mapped_column(JSON, default=dict)
 
     # Trend indicators
-    change_from_previous: Mapped[Optional[float]] = mapped_column(nullable=True)  # Percentage change
+    change_from_previous: Mapped[float | None] = mapped_column(nullable=True)  # Percentage change
 
     computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
-        Index('ix_trend_cache_org_bucket', 'organization_id', 'bucket_type', 'bucket_start', unique=True),
+        Index(
+            "ix_trend_cache_org_bucket",
+            "organization_id",
+            "bucket_type",
+            "bucket_start",
+            unique=True,
+        ),
     )
 
 
-class AnomalyType(str, enum.Enum):
+class AnomalyType(enum.StrEnum):
     VOLUME_SPIKE = "volume_spike"
     VOLUME_DROP = "volume_drop"
     NEW_RULE_ACTIVITY = "new_rule_activity"
@@ -2215,6 +2524,7 @@ class AnomalyDetection(Base):
     """
     Detected anomalies in alert patterns.
     """
+
     __tablename__ = "anomaly_detections"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2238,19 +2548,21 @@ class AnomalyDetection(Base):
 
     # Status
     is_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
-    acknowledged_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    acknowledged_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     detected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 # ==================== FEATURE: SHIFT HANDOFF ====================
 
+
 class ShiftHandoff(Base):
     """
     Shift handoff notes for SOC team transitions.
     Allows outgoing shift to document ongoing investigations and priorities.
     """
+
     __tablename__ = "shift_handoffs"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2261,13 +2573,17 @@ class ShiftHandoff(Base):
     # Shift details
     shift_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     outgoing_analyst: Mapped[str] = mapped_column(String(255), nullable=False)
-    incoming_analyst: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    incoming_analyst: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Handoff content
     summary: Mapped[str] = mapped_column(Text, nullable=False)  # High-level summary
-    ongoing_investigations: Mapped[list] = mapped_column(JSON, default=list)  # List of alert/case IDs being worked
-    priority_items: Mapped[list] = mapped_column(JSON, default=list)  # High priority items for next shift
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # Additional notes
+    ongoing_investigations: Mapped[list] = mapped_column(
+        JSON, default=list
+    )  # List of alert/case IDs being worked
+    priority_items: Mapped[list] = mapped_column(
+        JSON, default=list
+    )  # High priority items for next shift
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)  # Additional notes
 
     # Related alerts/cases
     open_alerts_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -2276,20 +2592,24 @@ class ShiftHandoff(Base):
 
     # Acknowledgment
     is_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
-    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    acknowledged_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    acknowledged_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
 
 # ==================== FEATURE: REAL-TIME PRESENCE ====================
+
 
 class AlertPresence(Base):
     """
     Tracks which users are currently viewing an alert.
     Used for real-time collaboration awareness.
     """
+
     __tablename__ = "alert_presence"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2300,7 +2620,7 @@ class AlertPresence(Base):
     alert_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     user_email: Mapped[str] = mapped_column(String(255), nullable=False)
-    user_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Presence tracking
     started_viewing_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -2314,11 +2634,13 @@ class AlertPresence(Base):
 
 # ==================== FEATURE: CORRELATION TIME WINDOWS ====================
 
+
 class AlertCorrelationWindow(Base):
     """
     Tracks multi-alert correlation windows for threshold-based rules.
     Used by correlation service to track alert counts within time windows.
     """
+
     __tablename__ = "alert_correlation_windows"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2326,14 +2648,18 @@ class AlertCorrelationWindow(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     rule_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
-    window_key: Mapped[str] = mapped_column(String(500), nullable=False)  # Hash of aggregation fields
+    window_key: Mapped[str] = mapped_column(
+        String(500), nullable=False
+    )  # Hash of aggregation fields
     alert_count: Mapped[int] = mapped_column(Integer, default=0)
     alert_ids: Mapped[list] = mapped_column(JSON, default=list)
     first_alert_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     last_alert_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     triggered: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     __table_args__ = (
         Index("ix_correlation_windows_org_rule", "organization_id", "rule_id"),
@@ -2343,7 +2669,8 @@ class AlertCorrelationWindow(Base):
 
 # ==================== FEATURE: COMPLIANCE DASHBOARD ====================
 
-class ComplianceStatus(str, enum.Enum):
+
+class ComplianceStatus(enum.StrEnum):
     NOT_IMPLEMENTED = "not_implemented"
     PARTIAL = "partial"
     IMPLEMENTED = "implemented"
@@ -2354,6 +2681,7 @@ class ComplianceFramework(Base):
     """
     Compliance framework definition (e.g., SOC2, ISO 27001, HIPAA, PCI DSS).
     """
+
     __tablename__ = "compliance_frameworks"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2361,17 +2689,19 @@ class ComplianceFramework(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     total_controls: Mapped[int] = mapped_column(Integer, default=0)
     implemented_controls: Mapped[int] = mapped_column(Integer, default=0)
     coverage_percentage: Mapped[float] = mapped_column(default=0.0)
-    last_assessment_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    next_assessment_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_assessment_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    next_assessment_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationships
     controls: Mapped[list["ComplianceControl"]] = relationship(
@@ -2386,6 +2716,7 @@ class ComplianceControl(Base):
     """
     Individual compliance control within a framework.
     """
+
     __tablename__ = "compliance_controls"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2393,26 +2724,33 @@ class ComplianceControl(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     framework_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("compliance_frameworks.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("compliance_frameworks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     control_id: Mapped[str] = mapped_column(String(50), nullable=False)  # e.g., "CC1.1"
     title: Mapped[str] = mapped_column(String(500), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[ComplianceStatus] = mapped_column(
         SQLEnum(ComplianceStatus), default=ComplianceStatus.NOT_IMPLEMENTED
     )
-    evidence: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
     evidence_links: Mapped[list] = mapped_column(JSON, default=list)
-    owner: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    due_date: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    last_reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    reviewed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    owner: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationship
-    framework: Mapped["ComplianceFramework"] = relationship("ComplianceFramework", back_populates="controls")
+    framework: Mapped["ComplianceFramework"] = relationship(
+        "ComplianceFramework", back_populates="controls"
+    )
 
     __table_args__ = (
         Index("ix_compliance_controls_framework", "framework_id"),
@@ -2424,6 +2762,7 @@ class ComplianceAssessment(Base):
     """
     Point-in-time compliance assessment for a framework.
     """
+
     __tablename__ = "compliance_assessments"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2431,7 +2770,10 @@ class ComplianceAssessment(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     framework_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("compliance_frameworks.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("compliance_frameworks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     assessment_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     coverage_score: Mapped[float] = mapped_column(default=0.0)
@@ -2439,17 +2781,20 @@ class ComplianceAssessment(Base):
     implemented_count: Mapped[int] = mapped_column(Integer, default=0)
     partial_count: Mapped[int] = mapped_column(Integer, default=0)
     not_implemented_count: Mapped[int] = mapped_column(Integer, default=0)
-    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    assessor: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assessor: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationship
-    framework: Mapped["ComplianceFramework"] = relationship("ComplianceFramework", back_populates="assessments")
+    framework: Mapped["ComplianceFramework"] = relationship(
+        "ComplianceFramework", back_populates="assessments"
+    )
 
 
 # ==================== FEATURE: THREAT HUNTING ====================
 
-class HuntStatus(str, enum.Enum):
+
+class HuntStatus(enum.StrEnum):
     DRAFT = "draft"
     ACTIVE = "active"
     COMPLETED = "completed"
@@ -2460,6 +2805,7 @@ class ThreatHunt(Base):
     """
     Threat hunting hypothesis and investigation.
     """
+
     __tablename__ = "threat_hunts"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2468,49 +2814,61 @@ class ThreatHunt(Base):
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     hypothesis: Mapped[str] = mapped_column(Text, nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     mitre_techniques: Mapped[list] = mapped_column(JSONB, default=list)
     data_sources: Mapped[list] = mapped_column(JSONB, default=list)
     status: Mapped[HuntStatus] = mapped_column(SQLEnum(HuntStatus), default=HuntStatus.DRAFT)
     priority: Mapped[str] = mapped_column(String(20), default="medium")
     findings_count: Mapped[int] = mapped_column(Integer, default=0)
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    assigned_to: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    assigned_to: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tags: Mapped[list] = mapped_column(JSONB, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationships
-    queries: Mapped[list["HuntQuery"]] = relationship("HuntQuery", back_populates="hunt", cascade="all, delete-orphan")
-    results: Mapped[list["HuntResult"]] = relationship("HuntResult", back_populates="hunt", cascade="all, delete-orphan")
+    queries: Mapped[list["HuntQuery"]] = relationship(
+        "HuntQuery", back_populates="hunt", cascade="all, delete-orphan"
+    )
+    results: Mapped[list["HuntResult"]] = relationship(
+        "HuntResult", back_populates="hunt", cascade="all, delete-orphan"
+    )
 
 
 class HuntQuery(Base):
     """
     Query associated with a threat hunt.
     """
+
     __tablename__ = "hunt_queries"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     hunt_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("threat_hunts.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("threat_hunts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     sql_query: Mapped[str] = mapped_column(Text, nullable=False)
     query_type: Mapped[str] = mapped_column(String(50), default="detection")
-    expected_results: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    expected_results: Mapped[str | None] = mapped_column(Text, nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
 
     # Relationship
     hunt: Mapped["ThreatHunt"] = relationship("ThreatHunt", back_populates="queries")
 
 
-class HuntResultStatus(str, enum.Enum):
+class HuntResultStatus(enum.StrEnum):
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -2521,6 +2879,7 @@ class HuntResult(Base):
     """
     Execution result from a hunt query.
     """
+
     __tablename__ = "hunt_results"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -2528,19 +2887,24 @@ class HuntResult(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
     )
     hunt_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("threat_hunts.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=True),
+        ForeignKey("threat_hunts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
-    query_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+    query_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("hunt_queries.id", ondelete="SET NULL"), nullable=True
     )
-    status: Mapped[HuntResultStatus] = mapped_column(SQLEnum(HuntResultStatus), default=HuntResultStatus.PENDING)
+    status: Mapped[HuntResultStatus] = mapped_column(
+        SQLEnum(HuntResultStatus), default=HuntResultStatus.PENDING
+    )
     results_count: Mapped[int] = mapped_column(Integer, default=0)
     findings: Mapped[list] = mapped_column(JSONB, default=list)
-    raw_results: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    execution_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    executed_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    raw_results: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    execution_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    executed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     # Relationship
