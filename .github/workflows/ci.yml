@@ -63,6 +63,36 @@ jobs:
       - name: Build (strict)
         run: pnpm --filter frontend build:strict
 
+  schema-drift:
+    name: Frontend (OpenAPI schema drift)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable corepack (pnpm)
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Rebuilds the backend image, dumps app.openapi() (no DB needed) into
+      # openapi.json, then regenerates src/api/schema.d.ts from it. Docker is
+      # preinstalled on ubuntu-latest runners.
+      - name: Regenerate OpenAPI types from the backend
+        run: pnpm --filter frontend codegen:all
+
+      # The drift alarm: any backend API change not reflected in the committed
+      # schema.d.ts makes this fail. Fix by running `pnpm codegen:all` in
+      # packages/frontend and committing the updated schema.d.ts.
+      - name: Fail on schema drift
+        run: |
+          git diff --exit-code -- packages/frontend/src/api/schema.d.ts \
+            || { echo "::error::packages/frontend/src/api/schema.d.ts is out of date. Run 'pnpm codegen:all' in packages/frontend and commit the result."; exit 1; }
+
   docker:
     name: Docker images build
     runs-on: ubuntu-latest

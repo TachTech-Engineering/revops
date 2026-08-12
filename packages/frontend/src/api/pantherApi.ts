@@ -12,6 +12,11 @@ import type {
   RuleFilters,
   PaginatedResponse,
 } from '../types'
+// Types generated from the backend's OpenAPI schema (see src/api/schema.d.ts).
+// Proof-of-adoption: the role endpoints below source their types from here
+// instead of hand-written interfaces, so backend drift surfaces at compile time.
+// Regenerate with `pnpm codegen:all`; CI fails if the committed schema drifts.
+import type { components } from './schema'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
@@ -1999,25 +2004,12 @@ export interface UserListFilters {
 }
 
 // User Role Types (role pre-assignments)
-export interface UserRoleResponse {
-  id: string
-  email: string
-  role: 'admin' | 'analyst' | 'viewer'
-  created_by: string
-  created_at: string
-  updated_at: string
-}
-
-export interface CurrentUserRoleResponse {
-  email: string
-  role: 'admin' | 'analyst' | 'viewer'
-  is_admin_whitelisted: boolean
-}
-
-export interface UserRoleCreate {
-  email: string
-  role: 'admin' | 'analyst' | 'viewer'
-}
+// Sourced from the generated OpenAPI schema (single source of truth). If the
+// backend Pydantic models change, `pnpm codegen:all` updates schema.d.ts and any
+// incompatibility here fails `tsc` -- the drift no longer stays silent.
+export type UserRoleResponse = components['schemas']['UserRoleResponse']
+export type CurrentUserRoleResponse = components['schemas']['CurrentUserRoleResponse']
+export type UserRoleCreate = components['schemas']['UserRoleCreate']
 
 // Audit Log Types
 export interface AuditLogResponse {
