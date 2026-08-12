@@ -1,5 +1,5 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react'
-import type { BaseQueryFn, FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query'
+import type { BaseQueryApi, BaseQueryFn, FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query'
 import type { RootState } from '../store'
 import { setTokens, logout } from '../store/authSlice'
 import type {
@@ -30,6 +30,41 @@ const baseQuery = fetchBaseQuery({
   },
 })
 
+// --- Refresh mutex -----------------------------------------------------------
+// The backend ROTATES refresh tokens: every POST /auth/refresh revokes the old
+// token and mints a new one. If N requests 401 at the same time and each fires
+// its own refresh call, all but the first use an already-revoked token and
+// fail, causing a spurious logout. So the first 401 starts the refresh and
+// stashes the in-flight promise here; concurrent 401s await the SAME promise
+// and then retry with the new token. Resolves true if tokens were refreshed.
+let refreshPromise: Promise<boolean> | null = null
+
+const refreshTokens = async (api: BaseQueryApi): Promise<boolean> => {
+  const { refreshToken } = (api.getState() as RootState).auth
+  if (!refreshToken) {
+    return false
+  }
+  try {
+    const response = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    })
+    if (!response.ok) {
+      return false
+    }
+    const data = (await response.json()) as { access_token: string; refresh_token: string }
+    api.dispatch(setTokens({
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+    }))
+    return true
+  } catch {
+    // Network failure etc. -- treat like a failed refresh
+    return false
+  }
+}
+
 // Wrapper that handles token refresh on 401
 const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError> = async (
   args,
@@ -39,32 +74,21 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
   let result = await baseQuery(args, api, extraOptions)
 
   if (result.error && result.error.status === 401) {
-    // Try to refresh the token
-    const state = api.getState() as RootState
-    const refreshToken = state.auth.refreshToken
-
-    if (refreshToken) {
-      const refreshResult = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refresh_token: refreshToken }),
+    if (!refreshPromise) {
+      // First 401 wins: start the refresh and clear the slot when it settles.
+      // refreshTokens never rejects, so .finally is purely cleanup.
+      refreshPromise = refreshTokens(api).finally(() => {
+        refreshPromise = null
       })
+    }
+    const refreshed = await refreshPromise
 
-      if (refreshResult.ok) {
-        const data = await refreshResult.json()
-        // Store the new tokens
-        api.dispatch(setTokens({
-          accessToken: data.access_token,
-          refreshToken: data.refresh_token,
-        }))
-        // Retry the original request with new token
-        result = await baseQuery(args, api, extraOptions)
-      } else {
-        // Refresh failed - log out
-        api.dispatch(logout())
-      }
-    } else {
-      // No refresh token - log out
+    if (refreshed) {
+      // Retry the original request; prepareHeaders picks up the new token
+      result = await baseQuery(args, api, extraOptions)
+    } else if ((api.getState() as RootState).auth.isAuthenticated) {
+      // Refresh failed (or no refresh token) -- log out once; concurrent
+      // awaiters see isAuthenticated === false and skip the dispatch.
       api.dispatch(logout())
     }
   }

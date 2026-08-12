@@ -27,11 +27,63 @@ interface StoredAuth {
   userRole: UserRole
 }
 
+const unauthenticatedState = (): AuthState => ({
+  isAuthenticated: false,
+  userEmail: null,
+  userName: null,
+  userId: null,
+  organizationId: null,
+  organizationName: null,
+  accessToken: null,
+  refreshToken: null,
+  userRole: 'viewer',
+})
+
+// Decode the payload of a JWT (base64url, no signature verification -- we only
+// need the public `exp` claim) and return its expiry as seconds since epoch,
+// or null if the token is not a decodable JWT with a numeric `exp`.
+const getJwtExpiry = (token: string): number | null => {
+  const parts = token.split('.')
+  if (parts.length !== 3) return null
+  try {
+    // base64url -> base64, re-pad to a multiple of 4 for atob
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=')
+    const payload: unknown = JSON.parse(atob(padded))
+    if (payload && typeof payload === 'object' && 'exp' in payload) {
+      const exp = (payload as { exp: unknown }).exp
+      return typeof exp === 'number' ? exp : null
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+// Treat tokens expiring within this window as already expired, so we don't
+// boot the app on a token that dies before the first request lands.
+const EXPIRY_LEEWAY_MS = 30_000
+
 const loadFromStorage = (): AuthState => {
   const stored = localStorage.getItem(STORAGE_KEY)
   if (stored) {
     try {
       const parsed: StoredAuth = JSON.parse(stored)
+
+      // Expiry check on load. The access token is a JWT with an `exp` claim;
+      // the refresh token is an opaque random string (backend mints it with
+      // secrets.token_urlsafe), so its validity CANNOT be verified client-side.
+      // If the access token is expired (or not a decodable JWT) we therefore
+      // start unauthenticated and let the login redirect handle it, rather
+      // than optimistically rendering the authenticated shell on a possibly
+      // dead session. Mid-session access-token expiry is still handled
+      // transparently by the 401 -> /auth/refresh flow in pantherApi.ts.
+      const exp = parsed.accessToken ? getJwtExpiry(parsed.accessToken) : null
+      if (exp === null || exp * 1000 <= Date.now() + EXPIRY_LEEWAY_MS) {
+        localStorage.removeItem(STORAGE_KEY)
+        return unauthenticatedState()
+      }
+
       return {
         isAuthenticated: true,
         userEmail: parsed.userEmail || null,
@@ -44,30 +96,10 @@ const loadFromStorage = (): AuthState => {
         userRole: parsed.userRole || 'viewer',
       }
     } catch {
-      return {
-        isAuthenticated: false,
-        userEmail: null,
-        userName: null,
-        userId: null,
-        organizationId: null,
-        organizationName: null,
-        accessToken: null,
-        refreshToken: null,
-        userRole: 'viewer',
-      }
+      return unauthenticatedState()
     }
   }
-  return {
-    isAuthenticated: false,
-    userEmail: null,
-    userName: null,
-    userId: null,
-    organizationId: null,
-    organizationName: null,
-    accessToken: null,
-    refreshToken: null,
-    userRole: 'viewer',
-  }
+  return unauthenticatedState()
 }
 
 const saveToStorage = (state: AuthState) => {
