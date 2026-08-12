@@ -15,6 +15,7 @@ configMapGenerator:
   - name: backend-config
     behavior: merge
     literals:
+      - CORS_ORIGINS=https://ttrevops.com,https://www.ttrevops.com
       # Production Cloud SQL instance (created by scripts/gke-cloudsql-setup.sh).
       # Distinct from the staging instance.
       - CLOUD_SQL_INSTANCE=revops-486917:us-central1:revops-db

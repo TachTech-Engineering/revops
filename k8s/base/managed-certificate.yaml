@@ -1,0 +1,12 @@
+# Google-managed TLS certificate. Provisioning requires each listed domain's
+# DNS A record to resolve to the ingress static IP (panther-dashboard-ip) first;
+# the cert then provisions automatically (can take ~15-60 min). Base lists the
+# production domains; the staging overlay patches spec.domains.
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: revops-cert
+spec:
+  domains:
+    - ttrevops.com
+    - www.ttrevops.com

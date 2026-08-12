@@ -11,13 +11,35 @@ namePrefix: staging-
 patches:
   - path: frontend-patch.yaml
   - path: backend-patch.yaml
+  # Staging serves a single host; the managed cert covers only it.
+  - target:
+      kind: ManagedCertificate
+      name: revops-cert
+    patch: |-
+      - op: replace
+        path: /spec/domains
+        value:
+          - staging.ttrevops.com
+  # namePrefix renames the cert/FrontendConfig objects to staging-*, but the
+  # ingress annotation values that reference them are not auto-rewritten, so
+  # point them at the prefixed names explicitly.
+  - target:
+      kind: Ingress
+      name: revops-ingress
+    patch: |-
+      - op: replace
+        path: /metadata/annotations/networking.gke.io~1managed-certificates
+        value: staging-revops-cert
+      - op: replace
+        path: /metadata/annotations/networking.gke.io~1v1beta1.FrontendConfig
+        value: staging-revops-frontend-config
 
 configMapGenerator:
   - name: backend-config
     behavior: merge
     literals:
       - LOG_LEVEL=DEBUG
-      - CORS_ORIGINS=https://staging.panther-dashboard.example.com
+      - CORS_ORIGINS=https://staging.ttrevops.com
       # Staging Cloud SQL instance (created by scripts/gke-cloudsql-setup.sh).
       - CLOUD_SQL_INSTANCE=revops-486917:us-central1:revops-staging-db
 

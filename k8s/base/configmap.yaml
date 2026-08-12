@@ -4,7 +4,7 @@ metadata:
   name: backend-config
 data:
   LOG_LEVEL: "INFO"
-  CORS_ORIGINS: "https://panther-dashboard.example.com"
+  CORS_ORIGINS: "https://ttrevops.com,https://www.ttrevops.com"
   REDIS_HOST: "redis"
   REDIS_PORT: "6379"
   # Cloud SQL instance connection name (project:region:instance) consumed by the

@@ -1,0 +1,9 @@
+# Redirects all HTTP traffic to HTTPS at the GCE load balancer. Referenced by
+# the ingress via the networking.gke.io/v1beta1.FrontendConfig annotation.
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: revops-frontend-config
+spec:
+  redirectToHttps:
+    enabled: true
