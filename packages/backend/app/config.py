@@ -44,7 +44,10 @@ class Settings(BaseSettings):
     openai_api_key: str = ""
     openai_model: str = "gpt-4"
     anthropic_api_key: str = ""
-    anthropic_model: str = "claude-3-5-sonnet-latest"
+    # Single source of truth for the default LLM model id. All LLM call sites
+    # resolve their model through llm_service, which falls back to this value
+    # when neither the org key record nor the caller specifies one.
+    default_llm_model: str = "claude-sonnet-4-5"
     default_llm_provider: str = "anthropic"
 
     # Attack Simulation (Phase 5)

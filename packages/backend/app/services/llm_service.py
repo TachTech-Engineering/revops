@@ -6,13 +6,14 @@ Supports both OpenAI and Anthropic providers.
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import httpx
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.time_utils import utcnow
 from app.db.models import AISummaryCache, LLMProvider
 from app.services.encryption_service import decrypt_credential
 
@@ -114,7 +115,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
             "model": result["model"],
             "provider": provider.value,
             "cached": False,
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": utcnow().isoformat(),
             "input_tokens": result.get("input_tokens", 0),
             "output_tokens": result.get("output_tokens", 0),
         }
@@ -180,21 +181,35 @@ Be concise but thorough. This summary should enable quick decision-making."""
             "model": result["model"],
             "provider": provider.value,
             "cached": False,
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": utcnow().isoformat(),
             "input_tokens": result.get("input_tokens", 0),
             "output_tokens": result.get("output_tokens", 0),
         }
 
-    async def _call_llm(self, prompt: str, provider: LLMProvider) -> dict:
-        """Call the appropriate LLM provider."""
+    # Default system prompt used when a caller does not supply one.
+    DEFAULT_SYSTEM_PROMPT = (
+        "You are a security analyst assistant that helps analyze and summarize "
+        "security alerts and incidents."
+    )
+
+    async def _call_llm(
+        self,
+        prompt: str,
+        provider: LLMProvider,
+        system: str | None = None,
+        max_tokens: int = 2000,
+    ) -> dict:
+        """Call the appropriate LLM provider using system (global) keys."""
         if provider == LLMProvider.OPENAI:
-            return await self._call_openai(prompt)
+            return await self._call_openai(prompt, system=system, max_tokens=max_tokens)
         elif provider == LLMProvider.ANTHROPIC:
-            return await self._call_anthropic(prompt)
+            return await self._call_anthropic(prompt, system=system, max_tokens=max_tokens)
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")
 
-    async def _call_openai(self, prompt: str) -> dict:
+    async def _call_openai(
+        self, prompt: str, system: str | None = None, max_tokens: int = 2000
+    ) -> dict:
         """Call OpenAI API."""
         if not settings.openai_api_key:
             raise ValueError("OpenAI API key not configured")
@@ -209,14 +224,10 @@ Be concise but thorough. This summary should enable quick decision-making."""
                 json={
                     "model": settings.openai_model,
                     "messages": [
-                        {
-                            "role": "system",
-                            "content": "You are a security analyst assistant that helps "
-                            "analyze and summarize security alerts and incidents.",
-                        },
+                        {"role": "system", "content": system or self.DEFAULT_SYSTEM_PROMPT},
                         {"role": "user", "content": prompt},
                     ],
-                    "max_tokens": 2000,
+                    "max_tokens": max_tokens,
                     "temperature": 0.3,
                 },
                 timeout=60.0,
@@ -237,7 +248,9 @@ Be concise but thorough. This summary should enable quick decision-making."""
                 "output_tokens": data.get("usage", {}).get("completion_tokens", 0),
             }
 
-    async def _call_anthropic(self, prompt: str) -> dict:
+    async def _call_anthropic(
+        self, prompt: str, system: str | None = None, max_tokens: int = 2000
+    ) -> dict:
         """Call Anthropic API."""
         if not settings.anthropic_api_key:
             raise ValueError("Anthropic API key not configured")
@@ -251,13 +264,12 @@ Be concise but thorough. This summary should enable quick decision-making."""
                     "anthropic-version": "2023-06-01",
                 },
                 json={
-                    "model": settings.anthropic_model,
-                    "max_tokens": 2000,
+                    "model": settings.default_llm_model,
+                    "max_tokens": max_tokens,
                     "messages": [
                         {"role": "user", "content": prompt},
                     ],
-                    "system": "You are a security analyst assistant that helps analyze "
-                    "and summarize security alerts and incidents.",
+                    "system": system or self.DEFAULT_SYSTEM_PROMPT,
                 },
                 timeout=60.0,
             )
@@ -272,7 +284,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
 
             return {
                 "summary": data["content"][0]["text"],
-                "model": settings.anthropic_model,
+                "model": settings.default_llm_model,
                 "input_tokens": data.get("usage", {}).get("input_tokens", 0),
                 "output_tokens": data.get("usage", {}).get("output_tokens", 0),
             }
@@ -289,7 +301,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
                 and_(
                     AISummaryCache.resource_type == resource_type,
                     AISummaryCache.resource_id == resource_id,
-                    AISummaryCache.expires_at > datetime.utcnow(),
+                    AISummaryCache.expires_at > utcnow(),
                 )
             )
         )
@@ -330,7 +342,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
             provider=provider,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            expires_at=datetime.utcnow() + timedelta(hours=ttl_hours),
+            expires_at=utcnow() + timedelta(hours=ttl_hours),
         )
         db.add(cache_entry)
         await db.commit()
@@ -486,15 +498,77 @@ Alerts:
         return {"provider": key_record.provider, "api_key": decrypted, "model": key_record.model}
 
     async def _call_llm_with_key(
-        self, prompt: str, provider: LLMProvider, api_key: str, model: str | None = None
+        self,
+        prompt: str,
+        provider: LLMProvider,
+        api_key: str,
+        model: str | None = None,
+        system: str | None = None,
+        max_tokens: int = 2000,
     ) -> dict:
-        """Call LLM provider with a specific key."""
+        """Call LLM provider with a specific (per-org) key."""
         if provider == LLMProvider.OPENAI:
-            return await self._call_openai_with_key(prompt, api_key, model)
+            return await self._call_openai_with_key(
+                prompt, api_key, model, system=system, max_tokens=max_tokens
+            )
         elif provider == LLMProvider.ANTHROPIC:
-            return await self._call_anthropic_with_key(prompt, api_key, model)
+            return await self._call_anthropic_with_key(
+                prompt, api_key, model, system=system, max_tokens=max_tokens
+            )
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")
+
+    async def generate_completion(
+        self,
+        db: AsyncSession,
+        organization_id: uuid.UUID,
+        prompt: str,
+        system: str | None = None,
+        max_tokens: int = 2000,
+    ) -> str:
+        """Generate a raw text completion for a router/service call site.
+
+        Resolves the organization's encrypted API key first (provider + model
+        come from that record) and falls back to the globally configured
+        provider key only when the org has none. This is the single entry point
+        callers should use instead of constructing provider clients directly.
+
+        Args:
+            db: Database session (required to look up the org's encrypted key).
+            organization_id: Organization whose key/model should be used.
+            prompt: The user prompt.
+            system: Optional system prompt (defaults to the security-analyst prompt).
+            max_tokens: Response token cap.
+
+        Returns:
+            The model's response text.
+
+        Raises:
+            ValueError: If no LLM key is configured (org or system).
+        """
+        key_data = await self._get_org_api_key(db, organization_id)
+        if key_data:
+            result = await self._call_llm_with_key(
+                prompt,
+                LLMProvider(key_data["provider"]),
+                key_data["api_key"],
+                key_data.get("model"),
+                system=system,
+                max_tokens=max_tokens,
+            )
+        else:
+            # Fall back to whichever global provider key is configured.
+            if settings.anthropic_api_key:
+                provider = LLMProvider.ANTHROPIC
+            elif settings.openai_api_key:
+                provider = LLMProvider.OPENAI
+            else:
+                raise ValueError("No LLM keys configured (system or org)")
+            result = await self._call_llm(
+                prompt, provider, system=system, max_tokens=max_tokens
+            )
+
+        return result["summary"]
 
     async def get_settings(self) -> dict:
         """Get current LLM configuration."""
@@ -506,7 +580,7 @@ Alerts:
             },
             "anthropic": {
                 "configured": bool(settings.anthropic_api_key),
-                "model": settings.anthropic_model,
+                "model": settings.default_llm_model,
             },
         }
 
@@ -564,6 +638,8 @@ Alerts:
         prompt: str,
         api_key: str,
         model: str | None = None,
+        system: str | None = None,
+        max_tokens: int = 100,
     ) -> dict:
         """Call OpenAI API with a custom API key."""
         model_to_use = model or settings.openai_model
@@ -578,10 +654,13 @@ Alerts:
                 json={
                     "model": model_to_use,
                     "messages": [
-                        {"role": "system", "content": "You are a security analyst assistant."},
+                        {
+                            "role": "system",
+                            "content": system or "You are a security analyst assistant.",
+                        },
                         {"role": "user", "content": prompt},
                     ],
-                    "max_tokens": 100,
+                    "max_tokens": max_tokens,
                     "temperature": 0.3,
                 },
                 timeout=30.0,
@@ -609,9 +688,11 @@ Alerts:
         prompt: str,
         api_key: str,
         model: str | None = None,
+        system: str | None = None,
+        max_tokens: int = 2000,
     ) -> dict:
         """Call Anthropic API with a custom API key."""
-        model_to_use = model or settings.anthropic_model
+        model_to_use = model or settings.default_llm_model
 
         async def make_request(m):
             async with httpx.AsyncClient() as client:
@@ -624,11 +705,11 @@ Alerts:
                     },
                     json={
                         "model": m,
-                        "max_tokens": 2000,
+                        "max_tokens": max_tokens,
                         "messages": [
                             {"role": "user", "content": prompt},
                         ],
-                        "system": "You are a security analyst assistant.",
+                        "system": system or "You are a security analyst assistant.",
                     },
                     timeout=30.0,
                 )

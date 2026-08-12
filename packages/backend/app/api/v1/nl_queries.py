@@ -7,15 +7,14 @@ import logging
 import time
 from uuid import UUID
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgIdDep, OrgUserDep
-from app.config import settings
 from app.db import NLQueryHistory, get_db
+from app.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -145,21 +144,25 @@ def validate_sql_safety(sql: str, org_id: UUID) -> tuple[bool, str]:
     return True, ""
 
 
-async def translate_nl_to_sql_llm(natural_query: str, org_id: UUID) -> tuple[str, str]:
+async def translate_nl_to_sql_llm(
+    natural_query: str, org_id: UUID, db: AsyncSession
+) -> tuple[str, str]:
     """
-    Translate natural language to SQL using Anthropic API.
+    Translate natural language to SQL via the shared LLM service.
+
+    Routes through llm_service so the organization's encrypted API key/model is
+    used (falling back to the global key only if llm_service does so internally).
+    Degrades to deterministic pattern matching when no key is configured, the LLM
+    call fails, the response is not valid JSON, or the generated SQL is unsafe.
 
     Args:
         natural_query: Natural language query from user
         org_id: Organization ID for filtering
+        db: Database session (needed to resolve the org's encrypted key)
 
     Returns:
         Tuple of (sql_query, explanation)
     """
-    if not settings.anthropic_api_key:
-        # Fall back to pattern matching if no API key
-        return translate_nl_to_sql_fallback(natural_query, org_id)
-
     system_prompt = """You are a SQL query generator for a security operations center (SOC)
 platform.
 You translate natural language queries into PostgreSQL queries.
@@ -192,52 +195,36 @@ Respond with ONLY a JSON object containing:
     user_prompt = f"Translate this to SQL for organization_id = '{org_id}':\n\n{natural_query}"
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": settings.anthropic_api_key,
-                    "Content-Type": "application/json",
-                    "anthropic-version": "2023-06-01",
-                },
-                json={
-                    "model": settings.anthropic_model or "claude-sonnet-4-20250514",
-                    "max_tokens": 1000,
-                    "system": system_prompt,
-                    "messages": [{"role": "user", "content": user_prompt}],
-                },
-                timeout=30.0,
-            )
-
-            if response.status_code != 200:
-                logger.error(f"Anthropic API error: {response.status_code} - {response.text}")
-                return translate_nl_to_sql_fallback(natural_query, org_id)
-
-            data = response.json()
-            content = data.get("content", [{}])[0].get("text", "{}")
-
-            # Parse JSON response
-            import json
-
-            try:
-                result = json.loads(content)
-                sql = result.get("sql", "")
-                explanation = result.get("explanation", "")
-
-                # Validate the generated SQL
-                is_safe, error = validate_sql_safety(sql, org_id)
-                if not is_safe:
-                    logger.warning(f"LLM generated unsafe SQL: {error}")
-                    return translate_nl_to_sql_fallback(natural_query, org_id)
-
-                return sql, explanation
-
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse LLM response: {content}")
-                return translate_nl_to_sql_fallback(natural_query, org_id)
-
+        content = await llm_service.generate_completion(
+            db=db,
+            organization_id=org_id,
+            prompt=user_prompt,
+            system=system_prompt,
+            max_tokens=1000,
+        )
     except Exception as e:
-        logger.error(f"Error calling Anthropic API: {e}")
+        # No key configured (org or system), or the provider call failed.
+        logger.warning("NL->SQL LLM translation unavailable, using fallback: %s", e)
+        return translate_nl_to_sql_fallback(natural_query, org_id)
+
+    # Parse JSON response
+    import json
+
+    try:
+        result = json.loads(content)
+        sql = result.get("sql", "")
+        explanation = result.get("explanation", "")
+
+        # Validate the generated SQL
+        is_safe, error = validate_sql_safety(sql, org_id)
+        if not is_safe:
+            logger.warning(f"LLM generated unsafe SQL: {error}")
+            return translate_nl_to_sql_fallback(natural_query, org_id)
+
+        return sql, explanation
+
+    except json.JSONDecodeError:
+        logger.error("Failed to parse LLM NL->SQL response as JSON")
         return translate_nl_to_sql_fallback(natural_query, org_id)
 
 
@@ -370,7 +357,7 @@ async def execute_natural_query(
     start_time = time.time()
 
     # Translate NL to SQL using LLM
-    generated_sql, explanation = await translate_nl_to_sql_llm(request.query, org_id)
+    generated_sql, explanation = await translate_nl_to_sql_llm(request.query, org_id, db)
 
     # Create history entry
     history = NLQueryHistory(

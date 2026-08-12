@@ -6,7 +6,6 @@ generating AI-powered hypotheses, and managing hunt results.
 """
 
 import logging
-import os
 from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
@@ -17,6 +16,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import get_db
 from app.db.models import (
     HuntQuery,
@@ -25,6 +25,7 @@ from app.db.models import (
     HuntStatus,
     ThreatHunt,
 )
+from app.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/threat-hunting", tags=["threat-hunting"])
@@ -230,12 +231,23 @@ MITRE_TECHNIQUE_MAP = {
 
 
 async def generate_hypothesis_with_llm(
-    description: str, include_mitre: bool, include_queries: bool
+    db: AsyncSession,
+    org_id: UUID,
+    description: str,
+    include_mitre: bool,
+    include_queries: bool,
 ) -> GeneratedHypothesis:
     """
-    Generate a threat hunting hypothesis using LLM.
+    Generate a threat hunting hypothesis using the shared LLM service.
+
+    Routes through llm_service so the organization's encrypted API key (and its
+    configured model/provider) is used, falling back to the globally configured
+    key only when the org has none. On any failure, degrades to the keyword
+    fallback and labels the result generated_by="fallback".
 
     Args:
+        db: Database session (needed to resolve the org's encrypted key).
+        org_id: Authenticated organization id.
         description: Natural language description of the threat
         include_mitre: Whether to include MITRE ATT&CK mappings
         include_queries: Whether to include suggested queries
@@ -244,11 +256,6 @@ async def generate_hypothesis_with_llm(
         Generated hypothesis with all components
     """
     try:
-        import anthropic
-
-        # AsyncAnthropic: a synchronous client here would block the event loop.
-        client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-
         prompt = f"""You are a threat hunting expert. Generate a comprehensive threat hunting
 hypothesis based on the following description:
 
@@ -278,15 +285,14 @@ Respond in JSON format:
     "sql": "SELECT ..."}}]
 }}"""
 
-        response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
+        response_text = await llm_service.generate_completion(
+            db=db,
+            organization_id=org_id,
+            prompt=prompt,
             max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
         )
 
         import json
-
-        response_text = response.content[0].text
 
         # Extract JSON from response
         if "```json" in response_text:
@@ -474,6 +480,8 @@ LIMIT 1000""",
 @router.post("/generate-hypothesis", response_model=GeneratedHypothesis)
 async def generate_hypothesis(
     request: HypothesisGenerationRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    org_id: OrgIdDep,
     user: OrgUserDep,
 ):
     """
@@ -491,6 +499,8 @@ async def generate_hypothesis(
     logger.info(f"Generating hypothesis for: {request.description[:100]}...")
 
     hypothesis = await generate_hypothesis_with_llm(
+        db=db,
+        org_id=org_id,
         description=request.description,
         include_mitre=request.include_mitre,
         include_queries=request.include_queries,
@@ -796,13 +806,13 @@ async def update_hunt(
 
             # Set timestamps based on status
             if new_status == HuntStatus.IN_PROGRESS and hunt.started_at is None:
-                hunt.started_at = datetime.utcnow()
+                hunt.started_at = utcnow()
             elif new_status in [HuntStatus.COMPLETED, HuntStatus.CANCELLED]:
-                hunt.completed_at = datetime.utcnow()
+                hunt.completed_at = utcnow()
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {request.status}")
 
-    hunt.updated_at = datetime.utcnow()
+    hunt.updated_at = utcnow()
 
     await db.commit()
     await db.refresh(hunt)
@@ -959,9 +969,9 @@ async def execute_hunt_query(
     # Update hunt status if starting
     if hunt.status == HuntStatus.DRAFT:
         hunt.status = HuntStatus.IN_PROGRESS
-        hunt.started_at = datetime.utcnow()
+        hunt.started_at = utcnow()
 
-    start_time = datetime.utcnow()
+    start_time = utcnow()
 
     try:
         # Execute the query
@@ -991,7 +1001,7 @@ async def execute_hunt_query(
 
         # This is a placeholder - in production, execute against actual data lake
         # For now, return simulated results
-        execution_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+        execution_time_ms = int((utcnow() - start_time).total_seconds() * 1000)
 
         # Simulated results for demonstration. Every finding is explicitly
         # marked simulated (finding-level flag, raw_results flag, and the
@@ -1002,7 +1012,7 @@ async def execute_hunt_query(
                 "severity": "medium",
                 "description": "[SIMULATED] Placeholder finding - no query was executed "
                 "against a data lake",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": utcnow().isoformat(),
                 "source": "threat_hunt_simulation",
                 "simulated": True,
             }
@@ -1013,7 +1023,7 @@ async def execute_hunt_query(
         result.findings = findings
         result.raw_results = {"simulated": True, "query": sql}
         result.execution_time_ms = execution_time_ms
-        result.executed_at = datetime.utcnow()
+        result.executed_at = utcnow()
 
         # Update hunt findings count
         hunt.findings_count = (hunt.findings_count or 0) + len(findings)
@@ -1022,8 +1032,8 @@ async def execute_hunt_query(
         logger.error(f"Query execution failed: {e}")
         result.status = HuntResultStatus.FAILED
         result.error_message = str(e)
-        result.executed_at = datetime.utcnow()
-        result.execution_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+        result.executed_at = utcnow()
+        result.execution_time_ms = int((utcnow() - start_time).total_seconds() * 1000)
 
     await db.commit()
     await db.refresh(result)

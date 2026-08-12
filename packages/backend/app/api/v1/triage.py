@@ -6,19 +6,19 @@ AI recommends priority/severity with confidence scores.
 import json
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAdminDep, OrgAnalystDep, OrgIdDep, OrgUserDep
-from app.config import settings
+from app.core.time_utils import utcnow
 from app.db import AssetCriticality, NormalizedAlert, TriageSuggestion, get_db
+from app.services.llm_service import llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +154,7 @@ async def get_historical_patterns(
     alert_data.get("source_type", "")
 
     # Get historical suggestions for similar alerts (same rule/source)
-    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    thirty_days_ago = utcnow() - timedelta(days=30)
 
     result = await db.execute(
         select(
@@ -231,7 +231,7 @@ async def generate_triage_suggestion(
         criticality_score * 0.4
         + historical_score * 0.3
         + base_score * 0.2
-        + (7 if datetime.utcnow().hour >= 8 and datetime.utcnow().hour <= 18 else 5) * 0.1
+        + (7 if utcnow().hour >= 8 and utcnow().hour <= 18 else 5) * 0.1
     )
 
     # Map score to severity
@@ -281,14 +281,20 @@ async def generate_triage_suggestion(
         },
         {
             "factor": "time_sensitivity",
-            "value": "business_hours" if 8 <= datetime.utcnow().hour <= 18 else "off_hours",
+            "value": "business_hours" if 8 <= utcnow().hour <= 18 else "off_hours",
             "weight": 0.1,
             "reason": "Current time of day consideration",
         },
     ]
 
     reasoning = await generate_reasoning_with_llm(
-        alert_data, suggested_severity, suggested_priority, confidence, contributing_factors
+        db,
+        org_id,
+        alert_data,
+        suggested_severity,
+        suggested_priority,
+        confidence,
+        contributing_factors,
     )
 
     suggestion = TriageSuggestion(
@@ -305,25 +311,30 @@ async def generate_triage_suggestion(
 
 
 async def generate_reasoning_with_llm(
+    db: AsyncSession,
+    org_id: UUID,
     alert_data: dict[str, Any],
     severity: str,
     priority: str,
     confidence: float,
     factors: list[dict[str, Any]],
 ) -> str:
-    """Generate human-readable reasoning using LLM."""
-    if not settings.anthropic_api_key:
-        # Fallback to template-based reasoning
-        return (
-            "Based on asset criticality analysis and historical patterns, "
-            f"this alert is recommended as {severity.upper()} severity "
-            f"with {priority.upper()} priority. "
-            + f"Confidence: {confidence:.0%}. Key factors: "
-            + ", ".join([f"{f['factor']} ({f['reason']})" for f in factors])
-        )
+    """Generate human-readable reasoning via the shared LLM service.
 
-    try:
-        prompt = f"""Generate a brief (2-3 sentences) triage recommendation for a security analyst.
+    Routes through llm_service so the organization's encrypted key/model is used
+    (falling back to the global key only if llm_service does so internally).
+    Degrades to a deterministic template when no key is configured or the call
+    fails.
+    """
+    template = (
+        "Based on asset criticality analysis and historical patterns, "
+        f"this alert is recommended as {severity.upper()} severity "
+        f"with {priority.upper()} priority. "
+        + f"Confidence: {confidence:.0%}. Key factors: "
+        + ", ".join([f"{f['factor']} ({f['reason']})" for f in factors])
+    )
+
+    prompt = f"""Generate a brief (2-3 sentences) triage recommendation for a security analyst.
 
 Alert: {alert_data.get("title", "Unknown")}
 Suggested Severity: {severity}
@@ -336,35 +347,17 @@ Contributing factors:
 Write a concise explanation that helps the analyst understand
 why this severity/priority is recommended."""
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": settings.anthropic_api_key,
-                    "Content-Type": "application/json",
-                    "anthropic-version": "2023-06-01",
-                },
-                json={
-                    "model": settings.anthropic_model or "claude-sonnet-4-20250514",
-                    "max_tokens": 300,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
-                timeout=15.0,
-            )
-
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("content", [{}])[0].get("text", "")
-
+    try:
+        reasoning = await llm_service.generate_completion(
+            db=db,
+            organization_id=org_id,
+            prompt=prompt,
+            max_tokens=300,
+        )
+        return reasoning or template
     except Exception as e:
         logger.error(f"Error generating reasoning with LLM: {e}")
-
-    # Fallback
-    return (
-        "Based on asset criticality analysis and historical patterns, "
-        f"this alert is recommended as {severity.upper()} severity "
-        f"with {priority.upper()} priority. Confidence: {confidence:.0%}."
-    )
+        return template
 
 
 @router.get("/suggest/{alert_id}", response_model=TriageSuggestionResponse)
@@ -475,7 +468,7 @@ async def submit_triage_feedback(
 
     suggestion.was_accepted = request.was_accepted
     suggestion.feedback_by = user.email
-    suggestion.feedback_at = datetime.utcnow()
+    suggestion.feedback_at = utcnow()
 
     await db.commit()
 

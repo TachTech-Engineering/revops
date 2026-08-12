@@ -74,8 +74,9 @@ Field mapping hints:
 """
 
 
-# Model configurations
-ANTHROPIC_MODEL = "claude-sonnet-4-20250514"
+# Model configurations. The Anthropic model id comes from the single config
+# source (settings.default_llm_model) so there is no per-file hardcoded model.
+ANTHROPIC_MODEL = settings.default_llm_model
 OPENAI_MODEL = "gpt-4o"
 
 
