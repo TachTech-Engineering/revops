@@ -8,23 +8,23 @@ generating AI-powered hypotheses, and managing hunt results.
 import logging
 import os
 from datetime import datetime
-from typing import Annotated, Optional, List
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import select, and_, func
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.v1.deps import OrgIdDep, OrgUserDep
 from app.db import get_db
 from app.db.models import (
-    ThreatHunt,
     HuntQuery,
     HuntResult,
-    HuntStatus,
     HuntResultStatus,
+    HuntStatus,
+    ThreatHunt,
 )
-from app.api.v1.deps import OrgUserDep, OrgIdDep
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/threat-hunting", tags=["threat-hunting"])
@@ -34,71 +34,89 @@ router = APIRouter(prefix="/threat-hunting", tags=["threat-hunting"])
 # Pydantic Models
 # ============================================================================
 
+
 class HypothesisGenerationRequest(BaseModel):
     """Request to generate a threat hunting hypothesis."""
-    description: str = Field(..., min_length=10, max_length=2000,
-                            description="Natural language description of the threat or behavior to hunt for")
-    include_mitre: bool = Field(default=True, description="Include MITRE ATT&CK technique suggestions")
+
+    description: str = Field(
+        ...,
+        min_length=10,
+        max_length=2000,
+        description="Natural language description of the threat or behavior to hunt for",
+    )
+    include_mitre: bool = Field(
+        default=True, description="Include MITRE ATT&CK technique suggestions"
+    )
     include_queries: bool = Field(default=True, description="Include suggested detection queries")
 
 
 class GeneratedHypothesis(BaseModel):
     """AI-generated threat hunting hypothesis."""
+
     title: str
     hypothesis: str
     rationale: str
-    mitre_techniques: List[dict]  # [{id: "T1059", name: "Command and Scripting Interpreter", tactic: "Execution"}]
-    data_sources: List[str]
-    suggested_queries: List[dict]  # [{name: str, description: str, sql: str}]
-    indicators_to_look_for: List[str]
+    mitre_techniques: list[
+        dict
+    ]  # [{id: "T1059", name: "Command and Scripting Interpreter", tactic: "Execution"}]
+    data_sources: list[str]
+    suggested_queries: list[dict]  # [{name: str, description: str, sql: str}]
+    indicators_to_look_for: list[str]
     priority: str  # low, medium, high, critical
+    # "llm" when produced by the AI model; "fallback" when the LLM call failed
+    # and a keyword-matching heuristic produced the result instead.
+    generated_by: Literal["llm", "fallback"]
 
 
 class HuntQueryCreate(BaseModel):
     """Request to create a hunt query."""
+
     name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
+    description: str | None = None
     sql_query: str = Field(..., min_length=1)
     query_type: str = Field(default="detection", pattern="^(detection|baseline|enrichment)$")
-    expected_results: Optional[str] = None
+    expected_results: str | None = None
     order_index: int = Field(default=0)
 
 
 class HuntCreate(BaseModel):
     """Request to create a threat hunt."""
+
     title: str = Field(..., min_length=1, max_length=500)
     hypothesis: str = Field(..., min_length=10)
-    description: Optional[str] = None
-    mitre_techniques: List[str] = Field(default_factory=list)
-    data_sources: List[str] = Field(default_factory=list)
+    description: str | None = None
+    mitre_techniques: list[str] = Field(default_factory=list)
+    data_sources: list[str] = Field(default_factory=list)
     priority: str = Field(default="medium", pattern="^(low|medium|high|critical)$")
-    assigned_to: Optional[str] = None
-    tags: List[str] = Field(default_factory=list)
-    queries: List[HuntQueryCreate] = Field(default_factory=list)
+    assigned_to: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    queries: list[HuntQueryCreate] = Field(default_factory=list)
 
 
 class HuntUpdate(BaseModel):
     """Request to update a threat hunt."""
-    title: Optional[str] = None
-    hypothesis: Optional[str] = None
-    description: Optional[str] = None
-    mitre_techniques: Optional[List[str]] = None
-    data_sources: Optional[List[str]] = None
-    status: Optional[str] = None
-    priority: Optional[str] = None
-    assigned_to: Optional[str] = None
-    tags: Optional[List[str]] = None
+
+    title: str | None = None
+    hypothesis: str | None = None
+    description: str | None = None
+    mitre_techniques: list[str] | None = None
+    data_sources: list[str] | None = None
+    status: str | None = None
+    priority: str | None = None
+    assigned_to: str | None = None
+    tags: list[str] | None = None
 
 
 class HuntQueryResponse(BaseModel):
     """Response containing a hunt query."""
+
     id: UUID
     hunt_id: UUID
     name: str
-    description: Optional[str]
+    description: str | None
     sql_query: str
     query_type: str
-    expected_results: Optional[str]
+    expected_results: str | None
     order_index: int
     created_at: datetime
     updated_at: datetime
@@ -106,28 +124,30 @@ class HuntQueryResponse(BaseModel):
 
 class HuntResponse(BaseModel):
     """Response containing a threat hunt."""
+
     id: UUID
     title: str
     hypothesis: str
-    description: Optional[str]
-    mitre_techniques: List[str]
-    data_sources: List[str]
+    description: str | None
+    mitre_techniques: list[str]
+    data_sources: list[str]
     status: str
     priority: str
     findings_count: int
-    started_at: Optional[datetime]
-    completed_at: Optional[datetime]
+    started_at: datetime | None
+    completed_at: datetime | None
     created_by: str
-    assigned_to: Optional[str]
-    tags: List[str]
-    queries: List[HuntQueryResponse]
+    assigned_to: str | None
+    tags: list[str]
+    queries: list[HuntQueryResponse]
     created_at: datetime
     updated_at: datetime
 
 
 class HuntListResponse(BaseModel):
     """Paginated list of hunts."""
-    hunts: List[HuntResponse]
+
+    hunts: list[HuntResponse]
     total: int
     page: int
     page_size: int
@@ -135,25 +155,30 @@ class HuntListResponse(BaseModel):
 
 class QueryExecuteRequest(BaseModel):
     """Request to execute a hunt query."""
+
     timeout_seconds: int = Field(default=30, ge=5, le=300)
     limit_results: int = Field(default=1000, ge=1, le=10000)
 
 
 class HuntResultResponse(BaseModel):
     """Response containing hunt query results."""
+
     id: UUID
     hunt_id: UUID
-    query_id: Optional[UUID]
-    query_name: Optional[str]
+    query_id: UUID | None
+    query_name: str | None
     status: str
     results_count: int
-    findings: List[dict]
-    raw_results: Optional[dict]
-    execution_time_ms: Optional[int]
-    error_message: Optional[str]
-    executed_at: Optional[datetime]
-    executed_by: Optional[str]
+    findings: list[dict]
+    raw_results: dict | None
+    execution_time_ms: int | None
+    error_message: str | None
+    executed_at: datetime | None
+    executed_by: str | None
     created_at: datetime
+    # True when the result was produced by the built-in simulation instead of
+    # a real data-lake query execution. Simulated findings are not evidence.
+    simulated: bool = False
 
 
 # ============================================================================
@@ -204,7 +229,9 @@ MITRE_TECHNIQUE_MAP = {
 }
 
 
-async def generate_hypothesis_with_llm(description: str, include_mitre: bool, include_queries: bool) -> GeneratedHypothesis:
+async def generate_hypothesis_with_llm(
+    description: str, include_mitre: bool, include_queries: bool
+) -> GeneratedHypothesis:
     """
     Generate a threat hunting hypothesis using LLM.
 
@@ -218,15 +245,19 @@ async def generate_hypothesis_with_llm(description: str, include_mitre: bool, in
     """
     try:
         import anthropic
-        client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
-        prompt = f"""You are a threat hunting expert. Generate a comprehensive threat hunting hypothesis based on the following description:
+        # AsyncAnthropic: a synchronous client here would block the event loop.
+        client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
+        prompt = f"""You are a threat hunting expert. Generate a comprehensive threat hunting
+hypothesis based on the following description:
 
 Description: {description}
 
 Generate a structured threat hunt plan with:
 1. A clear, concise title (max 100 chars)
-2. A formal hypothesis statement (If X happens, then Y evidence should be observable in Z data sources)
+2. A formal hypothesis statement (If X happens, then Y evidence should be observable
+in Z data sources)
 3. Rationale explaining why this hunt is important
 4. Relevant MITRE ATT&CK techniques (provide ID, name, and tactic)
 5. Required data sources for this hunt
@@ -243,16 +274,18 @@ Respond in JSON format:
     "data_sources": ["source1", "source2"],
     "indicators_to_look_for": ["indicator1", "indicator2"],
     "priority": "medium",
-    "suggested_queries": [{{"name": "Query Name", "description": "What it detects", "sql": "SELECT ..."}}]
+    "suggested_queries": [{{"name": "Query Name", "description": "What it detects",
+    "sql": "SELECT ..."}}]
 }}"""
 
-        response = client.messages.create(
+        response = await client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
         )
 
         import json
+
         response_text = response.content[0].text
 
         # Extract JSON from response
@@ -274,14 +307,22 @@ Respond in JSON format:
             suggested_queries=result.get("suggested_queries", []) if include_queries else [],
             indicators_to_look_for=result.get("indicators_to_look_for", []),
             priority=result.get("priority", "medium"),
+            generated_by="llm",
         )
 
     except Exception as e:
-        logger.warning(f"LLM hypothesis generation failed: {e}, using pattern-based fallback")
+        logger.warning(
+            "LLM hypothesis generation failed, degrading to keyword-based fallback "
+            "(response will be marked generated_by='fallback'): %s",
+            e,
+            exc_info=True,
+        )
         return await generate_hypothesis_fallback(description, include_mitre, include_queries)
 
 
-async def generate_hypothesis_fallback(description: str, include_mitre: bool, include_queries: bool) -> GeneratedHypothesis:
+async def generate_hypothesis_fallback(
+    description: str, include_mitre: bool, include_queries: bool
+) -> GeneratedHypothesis:
     """
     Fallback hypothesis generation using keyword matching.
     """
@@ -298,7 +339,11 @@ async def generate_hypothesis_fallback(description: str, include_mitre: bool, in
         if not techniques:
             techniques = [
                 {"id": "T1059", "name": "Command and Scripting Interpreter", "tactic": "Execution"},
-                {"id": "T1027", "name": "Obfuscated Files or Information", "tactic": "Defense Evasion"},
+                {
+                    "id": "T1027",
+                    "name": "Obfuscated Files or Information",
+                    "tactic": "Defense Evasion",
+                },
             ]
 
     # Determine data sources
@@ -317,7 +362,10 @@ async def generate_hypothesis_fallback(description: str, include_mitre: bool, in
 
     # Determine priority
     priority = "medium"
-    if any(word in description_lower for word in ["ransomware", "critical", "urgent", "breach", "active"]):
+    if any(
+        word in description_lower
+        for word in ["ransomware", "critical", "urgent", "breach", "active"]
+    ):
         priority = "critical"
     elif any(word in description_lower for word in ["apt", "advanced", "targeted"]):
         priority = "high"
@@ -331,16 +379,20 @@ async def generate_hypothesis_fallback(description: str, include_mitre: bool, in
         title = title[:77] + "..."
 
     # Generate hypothesis
-    hypothesis = f"If {description.lower()}, then we should observe anomalous patterns in {', '.join(data_sources[:2])} that indicate malicious activity."
+    hypothesis = (
+        f"If {description.lower()}, then we should observe anomalous patterns in "
+        f"{', '.join(data_sources[:2])} that indicate malicious activity."
+    )
 
     # Generate suggested queries
     suggested_queries = []
     if include_queries:
         if "credential" in description_lower:
-            suggested_queries.append({
-                "name": "Credential Access Detection",
-                "description": "Detect potential credential theft attempts",
-                "sql": """SELECT
+            suggested_queries.append(
+                {
+                    "name": "Credential Access Detection",
+                    "description": "Detect potential credential theft attempts",
+                    "sql": """SELECT
     timestamp,
     hostname,
     process_name,
@@ -353,13 +405,15 @@ WHERE (
     OR command_line LIKE '%lsadump%'
 )
 AND timestamp >= NOW() - INTERVAL '7 days'
-ORDER BY timestamp DESC"""
-            })
+ORDER BY timestamp DESC""",
+                }
+            )
         elif "lateral" in description_lower:
-            suggested_queries.append({
-                "name": "Lateral Movement Detection",
-                "description": "Detect suspicious remote connections",
-                "sql": """SELECT
+            suggested_queries.append(
+                {
+                    "name": "Lateral Movement Detection",
+                    "description": "Detect suspicious remote connections",
+                    "sql": """SELECT
     timestamp,
     source_ip,
     destination_ip,
@@ -372,13 +426,15 @@ AND source_ip != destination_ip
 AND timestamp >= NOW() - INTERVAL '24 hours'
 GROUP BY source_ip, destination_ip
 HAVING COUNT(*) > 10
-ORDER BY COUNT(*) DESC"""
-            })
+ORDER BY COUNT(*) DESC""",
+                }
+            )
         else:
-            suggested_queries.append({
-                "name": "Anomalous Activity Detection",
-                "description": "Baseline deviation detection",
-                "sql": f"""SELECT
+            suggested_queries.append(
+                {
+                    "name": "Anomalous Activity Detection",
+                    "description": "Baseline deviation detection",
+                    "sql": """SELECT
     timestamp,
     event_type,
     source,
@@ -387,13 +443,15 @@ FROM security_events
 WHERE timestamp >= NOW() - INTERVAL '7 days'
 -- Add specific filters based on hunt hypothesis
 ORDER BY timestamp DESC
-LIMIT 1000"""
-            })
+LIMIT 1000""",
+                }
+            )
 
     return GeneratedHypothesis(
         title=title,
         hypothesis=hypothesis,
-        rationale=f"This hunt targets {description.lower()} which could indicate malicious activity requiring investigation.",
+        rationale=f"This hunt targets {description.lower()} which could indicate "
+        "malicious activity requiring investigation.",
         mitre_techniques=techniques[:5],  # Limit to top 5
         data_sources=list(set(data_sources))[:5],
         suggested_queries=suggested_queries,
@@ -404,12 +462,14 @@ LIMIT 1000"""
             "Known malicious indicators",
         ],
         priority=priority,
+        generated_by="fallback",
     )
 
 
 # ============================================================================
 # Endpoints
 # ============================================================================
+
 
 @router.post("/generate-hypothesis", response_model=GeneratedHypothesis)
 async def generate_hypothesis(
@@ -424,6 +484,9 @@ async def generate_hypothesis(
     - MITRE ATT&CK technique mappings
     - Required data sources
     - Suggested detection queries
+
+    If the LLM call fails, a keyword-matching fallback produces the result;
+    the response's generated_by field reports "llm" or "fallback" accordingly.
     """
     logger.info(f"Generating hypothesis for: {request.description[:100]}...")
 
@@ -525,10 +588,10 @@ async def list_hunts(
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    status: Optional[str] = Query(None, description="Filter by status"),
-    priority: Optional[str] = Query(None, description="Filter by priority"),
-    assigned_to: Optional[str] = Query(None, description="Filter by assignee"),
-    search: Optional[str] = Query(None, description="Search in title/hypothesis"),
+    status: str | None = Query(None, description="Filter by status"),
+    priority: str | None = Query(None, description="Filter by priority"),
+    assigned_to: str | None = Query(None, description="Filter by assignee"),
+    search: str | None = Query(None, description="Search in title/hypothesis"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -536,9 +599,7 @@ async def list_hunts(
     List threat hunts with optional filtering.
     """
     # Build query
-    query = select(ThreatHunt).where(
-        ThreatHunt.organization_id == org_id
-    )
+    query = select(ThreatHunt).where(ThreatHunt.organization_id == org_id)
 
     if status:
         try:
@@ -556,8 +617,7 @@ async def list_hunts(
     if search:
         search_pattern = f"%{search}%"
         query = query.where(
-            ThreatHunt.title.ilike(search_pattern) |
-            ThreatHunt.hypothesis.ilike(search_pattern)
+            ThreatHunt.title.ilike(search_pattern) | ThreatHunt.hypothesis.ilike(search_pattern)
         )
 
     # Get total count
@@ -575,45 +635,45 @@ async def list_hunts(
     hunt_responses = []
     for hunt in hunts:
         queries_result = await db.execute(
-            select(HuntQuery)
-            .where(HuntQuery.hunt_id == hunt.id)
-            .order_by(HuntQuery.order_index)
+            select(HuntQuery).where(HuntQuery.hunt_id == hunt.id).order_by(HuntQuery.order_index)
         )
         queries = queries_result.scalars().all()
 
-        hunt_responses.append(HuntResponse(
-            id=hunt.id,
-            title=hunt.title,
-            hypothesis=hunt.hypothesis,
-            description=hunt.description,
-            mitre_techniques=hunt.mitre_techniques or [],
-            data_sources=hunt.data_sources or [],
-            status=hunt.status.value,
-            priority=hunt.priority,
-            findings_count=hunt.findings_count,
-            started_at=hunt.started_at,
-            completed_at=hunt.completed_at,
-            created_by=hunt.created_by,
-            assigned_to=hunt.assigned_to,
-            tags=hunt.tags or [],
-            queries=[
-                HuntQueryResponse(
-                    id=q.id,
-                    hunt_id=q.hunt_id,
-                    name=q.name,
-                    description=q.description,
-                    sql_query=q.sql_query,
-                    query_type=q.query_type,
-                    expected_results=q.expected_results,
-                    order_index=q.order_index,
-                    created_at=q.created_at,
-                    updated_at=q.updated_at,
-                )
-                for q in queries
-            ],
-            created_at=hunt.created_at,
-            updated_at=hunt.updated_at,
-        ))
+        hunt_responses.append(
+            HuntResponse(
+                id=hunt.id,
+                title=hunt.title,
+                hypothesis=hunt.hypothesis,
+                description=hunt.description,
+                mitre_techniques=hunt.mitre_techniques or [],
+                data_sources=hunt.data_sources or [],
+                status=hunt.status.value,
+                priority=hunt.priority,
+                findings_count=hunt.findings_count,
+                started_at=hunt.started_at,
+                completed_at=hunt.completed_at,
+                created_by=hunt.created_by,
+                assigned_to=hunt.assigned_to,
+                tags=hunt.tags or [],
+                queries=[
+                    HuntQueryResponse(
+                        id=q.id,
+                        hunt_id=q.hunt_id,
+                        name=q.name,
+                        description=q.description,
+                        sql_query=q.sql_query,
+                        query_type=q.query_type,
+                        expected_results=q.expected_results,
+                        order_index=q.order_index,
+                        created_at=q.created_at,
+                        updated_at=q.updated_at,
+                    )
+                    for q in queries
+                ],
+                created_at=hunt.created_at,
+                updated_at=hunt.updated_at,
+            )
+        )
 
     return HuntListResponse(
         hunts=hunt_responses,
@@ -648,9 +708,7 @@ async def get_hunt(
 
     # Get queries
     queries_result = await db.execute(
-        select(HuntQuery)
-        .where(HuntQuery.hunt_id == hunt.id)
-        .order_by(HuntQuery.order_index)
+        select(HuntQuery).where(HuntQuery.hunt_id == hunt.id).order_by(HuntQuery.order_index)
     )
     queries = queries_result.scalars().all()
 
@@ -751,9 +809,7 @@ async def update_hunt(
 
     # Get queries
     queries_result = await db.execute(
-        select(HuntQuery)
-        .where(HuntQuery.hunt_id == hunt.id)
-        .order_by(HuntQuery.order_index)
+        select(HuntQuery).where(HuntQuery.hunt_id == hunt.id).order_by(HuntQuery.order_index)
     )
     queries = queries_result.scalars().all()
 
@@ -856,8 +912,11 @@ async def execute_hunt_query(
     """
     Execute a hunt query and store the results.
 
-    The query is executed against the security data lake with
-    organization-level isolation and timeout protection.
+    NOTE: Data-lake execution is not yet implemented. This endpoint currently
+    SIMULATES execution: the SQL is rewritten with an organization filter but
+    never run, and a placeholder finding is stored. Results are marked with
+    `simulated: true` (in the API response, each finding, and raw_results) so
+    clients can never mistake them for real detections.
     """
     # Verify hunt and query exist
     hunt_result = await db.execute(
@@ -934,13 +993,18 @@ async def execute_hunt_query(
         # For now, return simulated results
         execution_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
 
-        # Simulated results for demonstration
+        # Simulated results for demonstration. Every finding is explicitly
+        # marked simulated (finding-level flag, raw_results flag, and the
+        # API response's `simulated` field) so it can never be mistaken for
+        # a real detection.
         findings = [
             {
                 "severity": "medium",
-                "description": "Simulated finding from query execution",
+                "description": "[SIMULATED] Placeholder finding - no query was executed "
+                "against a data lake",
                 "timestamp": datetime.utcnow().isoformat(),
                 "source": "threat_hunt_simulation",
+                "simulated": True,
             }
         ]
 
@@ -978,16 +1042,17 @@ async def execute_hunt_query(
         executed_at=result.executed_at,
         executed_by=result.executed_by,
         created_at=result.created_at,
+        simulated=bool(result.raw_results and result.raw_results.get("simulated")),
     )
 
 
-@router.get("/hunts/{hunt_id}/results", response_model=List[HuntResultResponse])
+@router.get("/hunts/{hunt_id}/results", response_model=list[HuntResultResponse])
 async def get_hunt_results(
     hunt_id: UUID,
     user: OrgUserDep,
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
-    status: Optional[str] = Query(None, description="Filter by status"),
+    status: str | None = Query(None, description="Filter by status"),
 ):
     """
     Get all results for a threat hunt.
@@ -1024,9 +1089,7 @@ async def get_hunt_results(
     query_ids = [r.query_id for r in results if r.query_id]
     query_names = {}
     if query_ids:
-        queries_result = await db.execute(
-            select(HuntQuery).where(HuntQuery.id.in_(query_ids))
-        )
+        queries_result = await db.execute(select(HuntQuery).where(HuntQuery.id.in_(query_ids)))
         query_names = {q.id: q.name for q in queries_result.scalars().all()}
 
     return [
@@ -1044,6 +1107,7 @@ async def get_hunt_results(
             executed_at=r.executed_at,
             executed_by=r.executed_by,
             created_at=r.created_at,
+            simulated=bool(r.raw_results and r.raw_results.get("simulated")),
         )
         for r in results
     ]
