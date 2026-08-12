@@ -61,3 +61,6 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "db: behavioral test requiring a real Postgres (opt-in; skipped when no DB is reachable). Run with `pytest -m db`; exclude with `pytest -m \"not db\"`.",
+]
