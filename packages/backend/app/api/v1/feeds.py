@@ -10,18 +10,16 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import OrgAnalystDep, OrgUserDep
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
 from app.db.models import FeedStatus, FeedType
 from app.db.session import get_db
 from app.services.feed_service import feed_service
 
 router = APIRouter()
 
-# NOTE: ThreatFeed rows carry an organization_id column, but feed_service does
-# not (yet) accept or filter by organization. The service layer is outside the
-# scope of this change, so these endpoints require org membership via the JWT
-# deps (OrgUserDep / OrgAnalystDep) without applying per-organization
-# filtering to the queries themselves.
+# All endpoints are scoped to the caller's organization via OrgIdDep. Feeds
+# belonging to another organization are indistinguishable from missing feeds
+# (404), matching the cross-org behavior of the rule health endpoints.
 
 
 # Request/Response models
@@ -112,11 +110,12 @@ def sync_log_to_response(log) -> SyncLogResponse:
 @router.get("", response_model=list[FeedResponse])
 async def list_feeds(
     user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     status: FeedStatus | None = Query(None, description="Filter by status"),
 ):
-    """List all threat feed subscriptions."""
-    feeds = await feed_service.list_feeds(db, status=status)
+    """List the organization's threat feed subscriptions."""
+    feeds = await feed_service.list_feeds(db, organization_id=org_id, status=status)
     return [feed_to_response(feed) for feed in feeds]
 
 
@@ -161,6 +160,7 @@ async def get_feed_types(user: OrgUserDep):
 async def create_feed(
     feed_create: FeedCreate,
     analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Create a new feed subscription. Requires analyst role."""
@@ -171,6 +171,7 @@ async def create_feed(
         feed_type=feed_create.feed_type,
         update_interval_minutes=feed_create.update_interval_minutes,
         created_by=analyst.email,
+        organization_id=org_id,
     )
     return feed_to_response(feed)
 
@@ -179,10 +180,11 @@ async def create_feed(
 async def get_feed(
     feed_id: uuid.UUID,
     user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Get a single feed by ID."""
-    feed = await feed_service.get_feed(db, feed_id)
+    feed = await feed_service.get_feed(db, feed_id, organization_id=org_id)
     if not feed:
         raise HTTPException(status_code=404, detail="Feed not found")
     return feed_to_response(feed)
@@ -193,11 +195,12 @@ async def update_feed(
     feed_id: uuid.UUID,
     feed_update: FeedUpdate,
     analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Update a feed. Requires analyst role."""
     updates = feed_update.model_dump(exclude_none=True)
-    feed = await feed_service.update_feed(db, feed_id, **updates)
+    feed = await feed_service.update_feed(db, feed_id, organization_id=org_id, **updates)
     if not feed:
         raise HTTPException(status_code=404, detail="Feed not found")
     return feed_to_response(feed)
@@ -207,10 +210,11 @@ async def update_feed(
 async def delete_feed(
     feed_id: uuid.UUID,
     analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Delete a feed and its associated IOCs. Requires analyst role."""
-    success = await feed_service.delete_feed(db, feed_id)
+    success = await feed_service.delete_feed(db, feed_id, organization_id=org_id)
     if not success:
         raise HTTPException(status_code=404, detail="Feed not found")
     return {"status": "deleted"}
@@ -220,11 +224,12 @@ async def delete_feed(
 async def sync_feed(
     feed_id: uuid.UUID,
     analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Trigger a manual sync for a feed. Requires analyst role."""
     try:
-        result = await feed_service.sync_feed(db, feed_id)
+        result = await feed_service.sync_feed(db, feed_id, organization_id=org_id)
         return SyncResult(**result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -236,19 +241,24 @@ async def sync_feed(
 async def get_sync_logs(
     feed_id: uuid.UUID,
     user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = Query(20, ge=1, le=100),
 ):
     """Get sync history for a feed."""
-    logs = await feed_service.get_sync_logs(db, feed_id, limit=limit)
+    feed = await feed_service.get_feed(db, feed_id, organization_id=org_id)
+    if not feed:
+        raise HTTPException(status_code=404, detail="Feed not found")
+    logs = await feed_service.get_sync_logs(db, feed_id, organization_id=org_id, limit=limit)
     return [sync_log_to_response(log) for log in logs]
 
 
 @router.post("/sync-all", response_model=list[SyncResult])
 async def sync_all_feeds(
     analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Trigger sync for all active feeds that are due. Requires analyst role."""
-    results = await feed_service.sync_all_active(db)
+    """Trigger sync for the organization's active feeds that are due. Requires analyst role."""
+    results = await feed_service.sync_all_active(db, organization_id=org_id)
     return [SyncResult(**r) for r in results]

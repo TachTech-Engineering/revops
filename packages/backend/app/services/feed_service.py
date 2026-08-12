@@ -5,6 +5,7 @@ Handles feed subscriptions, syncing, and IOC import.
 
 import csv
 import io
+import logging
 import time
 import uuid
 from datetime import datetime, timedelta
@@ -15,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import IOC, FeedStatus, FeedSyncLog, FeedType, IOCSeverity, IOCType, ThreatFeed
 from app.services.ioc_service import ioc_service
+
+logger = logging.getLogger(__name__)
 
 
 class FeedParser:
@@ -196,9 +199,10 @@ class FeedService:
         url: str,
         feed_type: FeedType,
         created_by: str,
+        organization_id: uuid.UUID,
         update_interval_minutes: int = 60,
     ) -> ThreatFeed:
-        """Create a new feed subscription."""
+        """Create a new feed subscription owned by an organization."""
         feed = ThreatFeed(
             name=name,
             url=url,
@@ -206,22 +210,34 @@ class FeedService:
             update_interval_minutes=update_interval_minutes,
             next_sync_at=datetime.utcnow(),
             created_by=created_by,
+            organization_id=organization_id,
         )
         db.add(feed)
         await db.commit()
         await db.refresh(feed)
         return feed
 
-    async def get_feed(self, db: AsyncSession, feed_id: uuid.UUID) -> ThreatFeed | None:
-        """Get a feed by ID."""
-        result = await db.execute(select(ThreatFeed).where(ThreatFeed.id == feed_id))
+    async def get_feed(
+        self,
+        db: AsyncSession,
+        feed_id: uuid.UUID,
+        organization_id: uuid.UUID | None = None,
+    ) -> ThreatFeed | None:
+        """Get a feed by ID, scoped to an organization when one is provided."""
+        query = select(ThreatFeed).where(ThreatFeed.id == feed_id)
+        if organization_id is not None:
+            query = query.where(ThreatFeed.organization_id == organization_id)
+        result = await db.execute(query)
         return result.scalar_one_or_none()
 
     async def list_feeds(
-        self, db: AsyncSession, status: FeedStatus | None = None
+        self,
+        db: AsyncSession,
+        organization_id: uuid.UUID,
+        status: FeedStatus | None = None,
     ) -> list[ThreatFeed]:
-        """List all feeds, optionally filtered by status."""
-        query = select(ThreatFeed)
+        """List an organization's feeds, optionally filtered by status."""
+        query = select(ThreatFeed).where(ThreatFeed.organization_id == organization_id)
         if status:
             query = query.where(ThreatFeed.status == status)
         query = query.order_by(ThreatFeed.created_at.desc())
@@ -230,12 +246,19 @@ class FeedService:
         return list(result.scalars().all())
 
     async def update_feed(
-        self, db: AsyncSession, feed_id: uuid.UUID, **updates
+        self,
+        db: AsyncSession,
+        feed_id: uuid.UUID,
+        organization_id: uuid.UUID | None = None,
+        **updates,
     ) -> ThreatFeed | None:
-        """Update a feed."""
-        feed = await self.get_feed(db, feed_id)
+        """Update a feed, scoped to an organization when one is provided."""
+        feed = await self.get_feed(db, feed_id, organization_id=organization_id)
         if not feed:
             return None
+
+        # Never allow tenant reassignment through the generic update path
+        updates.pop("organization_id", None)
 
         for key, value in updates.items():
             if hasattr(feed, key) and value is not None:
@@ -245,9 +268,14 @@ class FeedService:
         await db.refresh(feed)
         return feed
 
-    async def delete_feed(self, db: AsyncSession, feed_id: uuid.UUID) -> bool:
-        """Delete a feed and its IOCs."""
-        feed = await self.get_feed(db, feed_id)
+    async def delete_feed(
+        self,
+        db: AsyncSession,
+        feed_id: uuid.UUID,
+        organization_id: uuid.UUID | None = None,
+    ) -> bool:
+        """Delete a feed and its IOCs, scoped to an organization when one is provided."""
+        feed = await self.get_feed(db, feed_id, organization_id=organization_id)
         if not feed:
             return False
 
@@ -262,14 +290,19 @@ class FeedService:
         self,
         db: AsyncSession,
         feed_id: uuid.UUID,
+        organization_id: uuid.UUID | None = None,
     ) -> dict:
         """
         Sync a single feed - fetch and import new IOCs.
 
+        When organization_id is provided, the feed lookup is scoped to that
+        organization. Imported IOCs are always attributed to the feed's own
+        organization.
+
         Returns:
             Dictionary with sync results
         """
-        feed = await self.get_feed(db, feed_id)
+        feed = await self.get_feed(db, feed_id, organization_id=organization_id)
         if not feed:
             raise ValueError("Feed not found")
 
@@ -282,6 +315,20 @@ class FeedService:
             "iocs_updated": 0,
             "error": None,
         }
+
+        # Guard against legacy rows created before organization_id was enforced.
+        # IOC.organization_id and FeedSyncLog.organization_id are NOT NULL, so
+        # syncing an org-less feed would crash mid-import; skip and log instead.
+        if feed.organization_id is None:
+            logger.warning(
+                "Skipping sync for feed %s (%s): feed has no organization_id",
+                feed.name,
+                feed_id,
+            )
+            result["status"] = "skipped"
+            result["error"] = "Feed has no organization_id; sync skipped"
+            result["duration_ms"] = int((time.time() - start_time) * 1000)
+            return result
 
         try:
             # Fetch feed content
@@ -312,6 +359,7 @@ class FeedService:
                     source=feed.name,
                     created_by="feed_sync",
                     feed_id=feed_id,
+                    organization_id=feed.organization_id,
                 )
                 result["iocs_added"] = import_result["added"]
                 result["iocs_updated"] = import_result["updated"]
@@ -335,6 +383,7 @@ class FeedService:
         # Log sync
         sync_log = FeedSyncLog(
             feed_id=feed_id,
+            organization_id=feed.organization_id,
             status=result["status"],
             iocs_added=result["iocs_added"],
             iocs_updated=result["iocs_updated"],
@@ -347,8 +396,15 @@ class FeedService:
         result["duration_ms"] = duration_ms
         return result
 
-    async def sync_all_active(self, db: AsyncSession) -> list[dict]:
-        """Sync all active feeds that are due for update."""
+    async def sync_all_active(
+        self, db: AsyncSession, organization_id: uuid.UUID | None = None
+    ) -> list[dict]:
+        """
+        Sync all active feeds that are due for update.
+
+        When organization_id is provided, only that organization's feeds are
+        synced. Each feed's IOCs are attributed to the feed's own organization.
+        """
         results = []
 
         # Get feeds due for sync
@@ -358,12 +414,16 @@ class FeedService:
                 ThreatFeed.next_sync_at <= datetime.utcnow(),
             )
         )
+        if organization_id is not None:
+            query = query.where(ThreatFeed.organization_id == organization_id)
         result = await db.execute(query)
         feeds = list(result.scalars().all())
 
         for feed in feeds:
             try:
-                sync_result = await self.sync_feed(db, feed.id)
+                sync_result = await self.sync_feed(
+                    db, feed.id, organization_id=feed.organization_id
+                )
                 results.append(sync_result)
             except Exception as e:
                 results.append(
@@ -381,15 +441,14 @@ class FeedService:
         self,
         db: AsyncSession,
         feed_id: uuid.UUID,
+        organization_id: uuid.UUID | None = None,
         limit: int = 20,
     ) -> list[FeedSyncLog]:
-        """Get sync history for a feed."""
-        query = (
-            select(FeedSyncLog)
-            .where(FeedSyncLog.feed_id == feed_id)
-            .order_by(FeedSyncLog.synced_at.desc())
-            .limit(limit)
-        )
+        """Get sync history for a feed, scoped to an organization when provided."""
+        query = select(FeedSyncLog).where(FeedSyncLog.feed_id == feed_id)
+        if organization_id is not None:
+            query = query.where(FeedSyncLog.organization_id == organization_id)
+        query = query.order_by(FeedSyncLog.synced_at.desc()).limit(limit)
         result = await db.execute(query)
         return list(result.scalars().all())
 
