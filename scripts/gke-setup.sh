@@ -1,13 +1,11 @@
 #!/bin/bash
 # GKE Setup Script for Panther Dashboard
-# Project: pantherutil
 
-set -e
+set -euo pipefail
 
-PROJECT_ID="pantherutil"
-CLUSTER_NAME="panther-dashboard-cluster"
-REGION="us-central1"
-ZONE="${REGION}-a"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/gke-env.sh
+source "$SCRIPT_DIR/gke-env.sh"
 
 echo "=== Panther Dashboard GKE Setup ==="
 echo "Project: $PROJECT_ID"
@@ -20,7 +18,8 @@ gcloud config set project $PROJECT_ID
 # Enable required APIs
 echo "2. Enabling required APIs..."
 gcloud services enable container.googleapis.com
-gcloud services enable containerregistry.googleapis.com
+gcloud services enable artifactregistry.googleapis.com
+gcloud services enable cloudbuild.googleapis.com
 gcloud services enable secretmanager.googleapis.com
 
 # Create GKE cluster
@@ -52,5 +51,7 @@ echo "=== GKE cluster setup complete! ==="
 echo ""
 echo "Next steps:"
 echo "  1. Run: ./scripts/gke-secrets.sh"
-echo "  2. Run: ./scripts/gke-build.sh"
-echo "  3. Run: ./scripts/gke-deploy.sh staging"
+echo "  2. Build images (see README 'GKE Deployment'):"
+echo "     gcloud builds submit --config=cloudbuild-backend.yaml --substitutions=SHORT_SHA=\$(git rev-parse --short HEAD)"
+echo "     gcloud builds submit --config=cloudbuild-frontend.yaml --substitutions=SHORT_SHA=\$(git rev-parse --short HEAD)"
+echo "  3. Run: ./scripts/gke-deploy.sh staging <short-sha>"

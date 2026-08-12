@@ -1,55 +1,126 @@
 #!/bin/bash
-# Deploy to GKE
+# Deploy to GKE.
+#
+# Usage: ./scripts/gke-deploy.sh <staging|production> <image-tag>
+#
+# <image-tag> is the tag pushed by Cloud Build (the short commit SHA, or
+# any tag present in the registry). It is required: deploying without
+# pinning a tag re-applies whatever tag the overlay was last set to and
+# the rollout silently no-ops.
 
-set -e
+set -euo pipefail
 
-ENVIRONMENT="${1:-staging}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=scripts/gke-env.sh
+source "$SCRIPT_DIR/gke-env.sh"
 
-echo "=== Deploying to GKE ($ENVIRONMENT) ==="
-echo ""
+ENVIRONMENT="${1:-}"
+TAG="${2:-}"
+
+usage() {
+    echo "Usage: ./scripts/gke-deploy.sh <staging|production> <image-tag>"
+    echo "Example: ./scripts/gke-deploy.sh staging \$(git rev-parse --short HEAD)"
+}
 
 if [ "$ENVIRONMENT" != "staging" ] && [ "$ENVIRONMENT" != "production" ]; then
-    echo "Usage: ./scripts/gke-deploy.sh [staging|production]"
+    usage
     exit 1
 fi
 
-# Deploy using kustomize
-echo "1. Applying Kubernetes manifests..."
-kubectl apply -k k8s/overlays/$ENVIRONMENT
+if [ -z "$TAG" ]; then
+    echo "ERROR: no image tag given." >&2
+    echo "Pass the tag that Cloud Build pushed (it tags every build with the short commit SHA)." >&2
+    usage >&2
+    exit 1
+fi
 
-# Wait for deployments
-echo ""
-echo "2. Waiting for deployments to be ready..."
+if ! command -v kustomize >/dev/null 2>&1; then
+    echo "ERROR: kustomize is required (kubectl alone cannot 'edit set image')." >&2
+    echo "Install: https://kubectl.docs.kubernetes.io/installation/kustomize/" >&2
+    exit 1
+fi
 
 if [ "$ENVIRONMENT" == "staging" ]; then
-    NAMESPACE="panther-dashboard-staging"
+    NAMESPACE="$STAGING_NAMESPACE"
     PREFIX="staging-"
 else
-    NAMESPACE="panther-dashboard"
+    NAMESPACE="$PROD_NAMESPACE"
     PREFIX=""
 fi
 
-kubectl rollout status deployment/${PREFIX}frontend -n $NAMESPACE --timeout=300s
-kubectl rollout status deployment/${PREFIX}backend -n $NAMESPACE --timeout=300s
-kubectl rollout status deployment/${PREFIX}redis -n $NAMESPACE --timeout=300s
+OVERLAY="$REPO_ROOT/k8s/overlays/$ENVIRONMENT"
 
-# Show status
+echo "=== Deploying to GKE ($ENVIRONMENT) ==="
+echo "Project:   $PROJECT_ID"
+echo "Namespace: $NAMESPACE"
+echo "Tag:       $TAG"
 echo ""
-echo "3. Deployment status:"
-kubectl get pods -n $NAMESPACE
+
+# Pin the image tags in the overlay, then apply.
+echo "1. Setting image tags in overlay..."
+(
+    cd "$OVERLAY"
+    kustomize edit set image "${BACKEND_IMAGE}=${BACKEND_IMAGE}:${TAG}"
+    kustomize edit set image "${FRONTEND_IMAGE}=${FRONTEND_IMAGE}:${TAG}"
+)
+
 echo ""
-kubectl get services -n $NAMESPACE
+echo "2. Running database migrations..."
+MIGRATE_JOB="${PREFIX}backend-migrate"
+# Job pod specs are immutable, so drop any previous run before re-applying
+# with the new image tag.
+kubectl delete job "$MIGRATE_JOB" -n "$NAMESPACE" --ignore-not-found
+kustomize build "$OVERLAY" | kubectl apply -l app=backend-migrate -f -
+
+echo "   Waiting for migration job to complete..."
+MIGRATE_OK=""
+for _ in $(seq 1 60); do
+    COMPLETE=$(kubectl get job "$MIGRATE_JOB" -n "$NAMESPACE" \
+        -o jsonpath='{.status.conditions[?(@.type=="Complete")].status}' 2>/dev/null || true)
+    FAILED=$(kubectl get job "$MIGRATE_JOB" -n "$NAMESPACE" \
+        -o jsonpath='{.status.conditions[?(@.type=="Failed")].status}' 2>/dev/null || true)
+    if [ "$COMPLETE" == "True" ]; then
+        MIGRATE_OK="yes"
+        break
+    fi
+    if [ "$FAILED" == "True" ]; then
+        break
+    fi
+    sleep 5
+done
+
+if [ "$MIGRATE_OK" != "yes" ]; then
+    echo "ERROR: migration job did not complete successfully. Aborting deploy." >&2
+    echo "--- migration job logs ---" >&2
+    kubectl logs "job/$MIGRATE_JOB" -n "$NAMESPACE" --tail=100 >&2 || true
+    exit 1
+fi
+echo "   Migrations applied."
+
 echo ""
-kubectl get ingress -n $NAMESPACE
+echo "3. Applying Kubernetes manifests..."
+kubectl apply -k "$OVERLAY"
+
+echo ""
+echo "4. Waiting for deployments to be ready..."
+kubectl rollout status "deployment/${PREFIX}frontend" -n "$NAMESPACE" --timeout=300s
+kubectl rollout status "deployment/${PREFIX}backend" -n "$NAMESPACE" --timeout=300s
+kubectl rollout status "deployment/${PREFIX}redis" -n "$NAMESPACE" --timeout=300s
+
+echo ""
+echo "5. Deployment status:"
+kubectl get pods -n "$NAMESPACE"
+echo ""
+kubectl get services -n "$NAMESPACE"
+echo ""
+kubectl get ingress -n "$NAMESPACE"
 
 echo ""
 echo "=== Deployment complete! ==="
 echo ""
 
-# Get ingress IP
-INGRESS_IP=$(kubectl get ingress -n $NAMESPACE -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
+INGRESS_IP=$(kubectl get ingress -n "$NAMESPACE" -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "pending")
 echo "Ingress IP: $INGRESS_IP"
 echo ""
 echo "Note: It may take a few minutes for the load balancer and SSL certificate to be ready."
-echo "You can access the dashboard at: https://panther-dashboard.example.com"
-echo "Or temporarily at: http://$INGRESS_IP (if IP is available)"

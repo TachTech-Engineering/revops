@@ -1,5 +1,15 @@
 # RevOps SOC Platform - GCP + Cloudflare Architecture
 
+> **Note (August 2026):** This document describes a target/aspirational architecture
+> built on Cloud Run, Cloud Run Jobs, Cloud SQL, Memorystore, and Cloud Storage.
+> The platform as actually deployed today runs on **GKE** using the kustomize
+> manifests in [`k8s/`](./k8s/) (base + `staging`/`production` overlays), with
+> images built by Cloud Build (`cloudbuild-*.yaml`) and deployed via
+> `scripts/gke-deploy.sh`. Redis runs in-cluster, and the database is provided
+> externally via the `DATABASE_URL` secret (see `scripts/gke-secrets.sh`) rather
+> than by a provisioned Cloud SQL instance. Treat the Cloud Run sections below as
+> a design proposal, not a description of current infrastructure.
+
 ## Full Infrastructure
 
 ```mermaid

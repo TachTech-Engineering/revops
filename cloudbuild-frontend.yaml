@@ -1,6 +1,14 @@
 steps:
   - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend:latest', '.']
+    args:
+      - 'build'
+      - '-t'
+      - 'us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend:$SHORT_SHA'
+      - '-t'
+      - 'us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend:latest'
+      - '.'
     dir: 'packages/frontend'
 images:
+  - 'us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend:$SHORT_SHA'
   - 'us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend:latest'
+# Deploy with: ./scripts/gke-deploy.sh <staging|production> $SHORT_SHA

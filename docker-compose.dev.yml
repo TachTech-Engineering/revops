@@ -21,14 +21,12 @@ services:
       - "8000:8000"
     volumes:
       - ./packages/backend/app:/app/app
-      - C:/Source/panther_sdk:/app/panther_sdk_repo:ro
     env_file: .env
     environment:
       - REDIS_HOST=redis
       - DATABASE_URL=postgresql+asyncpg://panther:panther@postgres:5432/panther_dashboard
       - LOG_LEVEL=DEBUG
       - CORS_ORIGINS=http://localhost:3000
-      - PYTHONPATH=/app:/app/panther_sdk_repo
     depends_on:
       redis:
         condition: service_started

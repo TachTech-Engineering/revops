@@ -77,8 +77,9 @@ Supported integrations organized by category:
 
 - **Frontend**: React 18, TypeScript, Vite, Redux Toolkit, Tailwind CSS, Monaco Editor, ReactFlow
 - **Backend**: Python 3.11+, FastAPI, SQLAlchemy, PostgreSQL, Redis
-- **Infrastructure**: Docker, Kubernetes, GCP (Cloud Run/GKE, Cloud SQL, Memorystore)
-- **CI/CD**: Google Cloud Build
+- **Infrastructure**: Docker, Kubernetes (GKE), GCP
+- **CI**: GitHub Actions (`.github/workflows/ci.yml` — backend lint/import/tests, frontend lint/build, Docker image builds, kustomize overlay validation)
+- **Image builds**: Google Cloud Build (`cloudbuild-backend.yaml`, `cloudbuild-frontend.yaml`)
 
 ## Prerequisites
 
@@ -161,8 +162,7 @@ revops/
 │       │   ├── services/      # Business logic & external integrations
 │       │   ├── db/            # Database models & migrations
 │       │   ├── jobs/          # Background tasks (APScheduler)
-│       │   └── lib/           # Shared utilities
-│       ├── panther_sdk/       # Panther SDK integration
+│       │   └── lib/           # Shared utilities (incl. vendored panther_sdk stub)
 │       └── Dockerfile
 ├── k8s/                       # Kubernetes manifests
 │   ├── base/                  # Base configurations
@@ -177,17 +177,31 @@ revops/
 
 ### GKE Deployment
 
+Images are tagged with the short commit SHA (and `latest`); deploys pin that
+tag in the kustomize overlay so every deploy actually rolls pods.
+
 ```bash
-# Build and push images
-gcloud builds submit --config=cloudbuild-frontend.yaml
-gcloud builds submit --config=cloudbuild-backend.yaml
+# One-time setup
+./scripts/gke-setup.sh      # cluster, APIs, static IP
+./scripts/gke-secrets.sh    # backend-secrets in revops + revops-staging namespaces
+                            # (requires PANTHER_API_HOST, PANTHER_API_TOKEN and
+                            #  DATABASE_URL in .env — DATABASE_URL must point at a
+                            #  real database such as Cloud SQL; the k8s manifests
+                            #  do not deploy Postgres)
 
-# Deploy to staging
-kubectl apply -k k8s/overlays/staging
+# Build and push images (tags: $SHORT_SHA + latest)
+TAG=$(git rev-parse --short HEAD)
+gcloud builds submit --config=cloudbuild-frontend.yaml --substitutions=SHORT_SHA=$TAG
+gcloud builds submit --config=cloudbuild-backend.yaml --substitutions=SHORT_SHA=$TAG
+# (Cloud Build triggers populate SHORT_SHA automatically)
 
-# Deploy to production
-kubectl apply -k k8s/overlays/production
+# Deploy to staging, then production
+./scripts/gke-deploy.sh staging $TAG
+./scripts/gke-deploy.sh production $TAG
 ```
+
+Project/cluster/namespace settings live in one place: `scripts/gke-env.sh`
+(GCP project `revops-486917`, namespaces `revops` / `revops-staging`).
 
 See [ARCHITECTURE-GCP.md](./ARCHITECTURE-GCP.md) for detailed GCP deployment architecture.
 

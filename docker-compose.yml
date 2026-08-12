@@ -18,9 +18,6 @@ services:
       - "8000:8000"
       - "514:514/udp"   # Syslog UDP (UniFi)
       - "514:514/tcp"   # Syslog TCP (UniFi)
-    volumes:
-      # Mount the local panther_sdk for development
-      - C:/Source/panther_sdk:/app/panther_sdk_repo:ro
     environment:
       - PANTHER_API_HOST=${PANTHER_API_HOST}
       - PANTHER_API_TOKEN=${PANTHER_API_TOKEN}
@@ -29,7 +26,6 @@ services:
       - DATABASE_URL=postgresql+asyncpg://panther:panther@postgres:5432/panther_dashboard
       - LOG_LEVEL=INFO
       - CORS_ORIGINS=http://localhost:3000
-      - PYTHONPATH=/app:/app/panther_sdk_repo
       # Telephony service (mock for local dev, twilio for production)
       - TELEPHONY_PROVIDER=${TELEPHONY_PROVIDER:-mock}
       - TELEPHONY_MOCK_ENDPOINT=http://telephony-mock:50051
