@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,6 +8,7 @@ from sqlalchemy import Date, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import get_db
 from app.db.models import NormalizedAlert
 
@@ -109,7 +110,7 @@ async def get_alert_analytics(
 ) -> AnalyticsResponse:
     """Get alert analytics and statistics from normalized alerts."""
     try:
-        since = datetime.utcnow() - timedelta(days=days)
+        since = utcnow() - timedelta(days=days)
         logger.info(f"Analytics query: org_id={org_id}, since={since}, days={days}")
 
         # Total alerts (no date filter first to see all alerts)
@@ -236,6 +237,6 @@ async def get_alert_analytics(
             byDaySeverity={k: DaySeverityBreakdown(**v) for k, v in by_day_severity.items()},
             topRules=top_rules,
         )
-    except Exception as e:
-        logger.exception(f"Analytics error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Analytics error")
+        raise HTTPException(status_code=500, detail="Failed to compute analytics")

@@ -7,6 +7,7 @@ from sqlalchemy import and_, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import get_db
 from app.db.models import NormalizedAlert
 
@@ -250,8 +251,6 @@ async def add_comment(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, Any]:
     """Add a comment to an alert (stored locally)."""
-    from datetime import datetime
-
     try:
         alert_uuid = UUID(alert_id)
     except ValueError:
@@ -279,7 +278,7 @@ async def add_comment(
         "id": str(UUID(int=len(alert.raw_data["comments"]))),
         "body": request.body,
         "author": user.email,
-        "createdAt": datetime.utcnow().isoformat(),
+        "createdAt": utcnow().isoformat(),
     }
     alert.raw_data["comments"].append(comment)
 

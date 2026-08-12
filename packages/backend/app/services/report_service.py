@@ -1,10 +1,11 @@
 import csv
 import io
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time_utils import utcnow
 from app.db import ScheduledReport
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ class ReportService:
     ) -> tuple[str, bytes, str]:
         """Generate alert summary report."""
         # Calculate date range based on frequency
-        end_date = datetime.utcnow()
+        end_date = utcnow()
         if report.frequency.value == "daily":
             start_date = end_date - timedelta(days=1)
         elif report.frequency.value == "weekly":
@@ -54,7 +55,7 @@ class ReportService:
         data = {
             "report_name": report.name,
             "period": f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}",
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": utcnow().isoformat(),
             "summary": {
                 "total_alerts": 150,
                 "by_severity": {
@@ -101,7 +102,7 @@ class ReportService:
         panther_service=None,
     ) -> tuple[str, bytes, str]:
         """Generate rule summary report."""
-        end_date = datetime.utcnow()
+        end_date = utcnow()
 
         output = io.StringIO()
         writer = csv.writer(output)
@@ -126,7 +127,7 @@ class ReportService:
         filters: dict,
     ) -> tuple[str, bytes, str]:
         """Generate SLA metrics report."""
-        end_date = datetime.utcnow()
+        end_date = utcnow()
 
         output = io.StringIO()
         writer = csv.writer(output)
@@ -151,7 +152,7 @@ class ReportService:
         filters: dict,
     ) -> tuple[str, bytes, str]:
         """Generate a generic report."""
-        end_date = datetime.utcnow()
+        end_date = utcnow()
 
         output = io.StringIO()
         writer = csv.writer(output)

@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -8,6 +7,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import ReportFrequency, ScheduledReport, get_db
 from app.services.email_service import email_service
 from app.services.report_service import ReportService
@@ -276,7 +276,7 @@ async def run_report_now(
         )
 
     # Update last_run_at
-    report.last_run_at = datetime.utcnow()
+    report.last_run_at = utcnow()
     await db.flush()
 
     return {

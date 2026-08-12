@@ -10,6 +10,7 @@ from datetime import datetime
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time_utils import utcnow
 from app.db.models import IOC, IOCSeverity, IOCType
 from app.services.stix_service import stix_service
 
@@ -78,7 +79,7 @@ class IOCService:
             if hasattr(ioc, key) and value is not None:
                 setattr(ioc, key, value)
 
-        ioc.last_seen = datetime.utcnow()
+        ioc.last_seen = utcnow()
         await db.commit()
         await db.refresh(ioc)
         return ioc
@@ -197,7 +198,7 @@ class IOCService:
 
             if existing:
                 # Update existing IOC
-                existing.last_seen = datetime.utcnow()
+                existing.last_seen = utcnow()
                 if ioc_data.get("severity"):
                     severity = ioc_data["severity"]
                     if isinstance(severity, str):
@@ -227,7 +228,7 @@ class IOCService:
                     feed_id=feed_id,
                     description=ioc_data.get("description"),
                     tags=ioc_data.get("tags", []),
-                    first_seen=ioc_data.get("first_seen", datetime.utcnow()),
+                    first_seen=ioc_data.get("first_seen", utcnow()),
                     expires_at=ioc_data.get("expires_at"),
                     created_by=created_by,
                 )

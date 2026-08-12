@@ -1,6 +1,10 @@
+import logging
+
 from fastapi import APIRouter, Header, HTTPException
 
 from app.services.panther_service import PantherService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -24,8 +28,9 @@ async def health_check(
             await service.list_alerts(page_size=1)
             await service.close()
             return {"status": "connected", "host": x_panther_host}
-        except Exception as e:
-            raise HTTPException(status_code=401, detail=f"Failed to connect to Panther: {str(e)}")
+        except Exception:
+            logger.exception("Failed to connect to Panther during health check")
+            raise HTTPException(status_code=401, detail="Failed to connect to Panther")
 
     return {"status": "healthy"}
 

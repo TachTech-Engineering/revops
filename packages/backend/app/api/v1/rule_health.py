@@ -3,7 +3,7 @@ Stale Rule Detection API - Feature 2
 Find rules that haven't triggered alerts and monitor rule health.
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,6 +12,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAdminDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import RuleHealth, get_db
 
 router = APIRouter()
@@ -240,7 +241,7 @@ async def refresh_rule_health(
     # 3. Update health scores and stale flags
 
     # For demo, mark rules as stale if no triggers in 90 days
-    now = datetime.utcnow()
+    now = utcnow()
     stale_threshold = now - timedelta(days=90)
 
     await db.execute(

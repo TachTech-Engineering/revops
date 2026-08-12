@@ -14,6 +14,7 @@ import httpx
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time_utils import utcnow
 from app.db.models import IOC, FeedStatus, FeedSyncLog, FeedType, IOCSeverity, IOCType, ThreatFeed
 from app.services.ioc_service import ioc_service
 
@@ -208,7 +209,7 @@ class FeedService:
             url=url,
             feed_type=feed_type,
             update_interval_minutes=update_interval_minutes,
-            next_sync_at=datetime.utcnow(),
+            next_sync_at=utcnow(),
             created_by=created_by,
             organization_id=organization_id,
         )
@@ -365,8 +366,8 @@ class FeedService:
                 result["iocs_updated"] = import_result["updated"]
 
             # Update feed status
-            feed.last_sync_at = datetime.utcnow()
-            feed.next_sync_at = datetime.utcnow() + timedelta(minutes=feed.update_interval_minutes)
+            feed.last_sync_at = utcnow()
+            feed.next_sync_at = utcnow() + timedelta(minutes=feed.update_interval_minutes)
             feed.status = FeedStatus.ACTIVE
             feed.error_message = None
             feed.ioc_count = result["iocs_added"] + result["iocs_updated"]
@@ -411,7 +412,7 @@ class FeedService:
         query = select(ThreatFeed).where(
             and_(
                 ThreatFeed.status == FeedStatus.ACTIVE,
-                ThreatFeed.next_sync_at <= datetime.utcnow(),
+                ThreatFeed.next_sync_at <= utcnow(),
             )
         )
         if organization_id is not None:

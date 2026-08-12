@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 
+from app.core.time_utils import utcnow
 from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
     ConnectionTestResult,
@@ -223,7 +224,7 @@ class SplunkConnector(DataSourceConnector):
         """Normalize a Splunk notable event to the unified schema."""
         # Parse timestamps
         event_time = raw_alert.get("_time", raw_alert.get("info_min_time", ""))
-        created_at = datetime.utcnow()
+        created_at = utcnow()
         if event_time:
             try:
                 created_at = datetime.fromisoformat(event_time.replace("Z", "+00:00"))
@@ -259,7 +260,7 @@ class SplunkConnector(DataSourceConnector):
             if raw_alert.get("mitre_technique")
             else [],
             raw_data=raw_alert,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def normalize_severity(self, source_severity: str) -> str:

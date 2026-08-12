@@ -16,6 +16,7 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time_utils import utcnow
 from app.db.models import SimulationFramework, SimulationTemplate
 
 logger = logging.getLogger(__name__)
@@ -61,14 +62,14 @@ class TechniqueSyncService:
             Summary of sync results
         """
         if not force and self._last_sync:
-            if datetime.utcnow() - self._last_sync < self._sync_interval:
+            if utcnow() - self._last_sync < self._sync_interval:
                 logger.info("Skipping sync - recently synced")
                 return {"skipped": True, "reason": "Recently synced"}
 
         results = {
             "atomic_red_team": {"added": 0, "updated": 0, "errors": []},
             "stratus_red_team": {"added": 0, "updated": 0, "errors": []},
-            "synced_at": datetime.utcnow().isoformat(),
+            "synced_at": utcnow().isoformat(),
         }
 
         try:
@@ -85,7 +86,7 @@ class TechniqueSyncService:
             logger.error(f"Failed to sync Stratus Red Team: {e}")
             results["stratus_red_team"]["errors"].append(str(e))
 
-        self._last_sync = datetime.utcnow()
+        self._last_sync = utcnow()
         return results
 
     async def sync_atomic_red_team(self, db: AsyncSession) -> dict:
@@ -160,7 +161,7 @@ class TechniqueSyncService:
                         if existing_template:
                             for key, value in template_data.items():
                                 setattr(existing_template, key, value)
-                            existing_template.updated_at = datetime.utcnow()
+                            existing_template.updated_at = utcnow()
                             result["updated"] += 1
                         else:
                             new_template = SimulationTemplate(**template_data)
@@ -267,7 +268,7 @@ class TechniqueSyncService:
                         if existing_template:
                             for key, value in template_data.items():
                                 setattr(existing_template, key, value)
-                            existing_template.updated_at = datetime.utcnow()
+                            existing_template.updated_at = utcnow()
                             result["updated"] += 1
                         else:
                             new_template = SimulationTemplate(**template_data)

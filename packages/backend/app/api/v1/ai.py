@@ -3,7 +3,7 @@ AI-powered summarization and conversion API endpoints.
 """
 
 import json
-from datetime import datetime
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAdminDep, OrgAnalystDep, OrgIdDep, OrgUserDep, get_panther_service
 from app.config import settings
+from app.core.time_utils import utcnow
 from app.db.models import (
     AISummaryCache,
     Incident,
@@ -33,6 +34,8 @@ from app.services.ai_converter_service import (
 from app.services.encryption_service import decrypt_credential, encrypt_credential
 from app.services.llm_service import llm_service
 from app.services.panther_service import PantherService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -159,8 +162,11 @@ async def summarize_alert(
         alert_data = await panther.get_alert(alert_id)
         if not alert_data:
             raise HTTPException(status_code=404, detail="Alert not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch alert: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to fetch alert %s", alert_id)
+        raise HTTPException(status_code=500, detail="Failed to fetch alert")
 
     # Determine provider
     provider = None
@@ -186,8 +192,9 @@ async def summarize_alert(
         return SummaryResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
+    except Exception:
+        logger.exception("Failed to generate alert summary")
+        raise HTTPException(status_code=500, detail="Failed to generate summary")
 
 
 @router.post("/summarize/incident/{incident_id}", response_model=SummaryResponse)
@@ -268,8 +275,9 @@ async def summarize_incident(
         return SummaryResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate summary: {str(e)}")
+    except Exception:
+        logger.exception("Failed to generate incident summary")
+        raise HTTPException(status_code=500, detail="Failed to generate summary")
 
 
 @router.get("/settings", response_model=OrganizationSettingsResponse)
@@ -375,7 +383,7 @@ async def save_api_key(
         existing_key.model = request.model
         existing_key.is_active = True
         existing_key.last_error = None
-        existing_key.updated_at = datetime.utcnow()
+        existing_key.updated_at = utcnow()
     else:
         # Create new key
         new_key = OrganizationAPIKeys(
@@ -439,8 +447,9 @@ async def test_api_key_direct(
             model=request.model,
         )
         return TestConnectionResponse(**result)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Test failed: {str(e)}")
+    except Exception:
+        logger.exception("API key test connection failed")
+        raise HTTPException(status_code=400, detail="Test failed")
 
 
 @router.delete("/keys/{provider}")
@@ -521,7 +530,7 @@ async def test_organization_api_key(
         )
 
         # Update last_used_at and any errors
-        org_key.last_used_at = datetime.utcnow()
+        org_key.last_used_at = utcnow()
         if test_result["status"] == "success":
             org_key.last_error = None
         else:
@@ -532,7 +541,8 @@ async def test_organization_api_key(
     except Exception as e:
         org_key.last_error = str(e)
         await db.commit()
-        raise HTTPException(status_code=500, detail=f"Test failed: {str(e)}")
+        logger.exception("API key test connection failed")
+        raise HTTPException(status_code=500, detail="Test failed")
 
 
 @router.get("/summaries")
@@ -544,12 +554,8 @@ async def list_cached_summaries(
     db: AsyncSession = Depends(get_db),
 ):
     """List cached AI summaries."""
-    from datetime import datetime
-
     query = select(AISummaryCache).where(
-        and_(
-            AISummaryCache.organization_id == org_id, AISummaryCache.expires_at > datetime.utcnow()
-        )
+        and_(AISummaryCache.organization_id == org_id, AISummaryCache.expires_at > utcnow())
     )
 
     if resource_type:
@@ -1102,7 +1108,7 @@ async def _execute_conversion(
 
 async def _get_alert_stats(db: AsyncSession, org_id: UUID) -> dict:
     """Get alert statistics."""
-    from datetime import datetime, timedelta
+    from datetime import timedelta
 
     # Get counts by severity
     severity_stmt = (
@@ -1125,7 +1131,7 @@ async def _get_alert_stats(db: AsyncSession, org_id: UUID) -> dict:
     status_counts = {row[0]: row[1] for row in status_result.all()}
 
     # Get recent count (last 24h)
-    yesterday = datetime.utcnow() - timedelta(hours=24)
+    yesterday = utcnow() - timedelta(hours=24)
     recent_stmt = select(func.count(NormalizedAlert.id)).where(
         and_(NormalizedAlert.organization_id == org_id, NormalizedAlert.timestamp >= yesterday)
     )

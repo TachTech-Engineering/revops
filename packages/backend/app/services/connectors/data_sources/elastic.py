@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 
+from app.core.time_utils import utcnow
 from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
     ConnectionTestResult,
@@ -243,7 +244,7 @@ class ElasticConnector(DataSourceConnector):
         rule = signal.get("rule", {})
 
         # Parse timestamps
-        timestamp = source.get("@timestamp", datetime.utcnow().isoformat())
+        timestamp = source.get("@timestamp", utcnow().isoformat())
         created_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
 
         # Extract MITRE info from rule threat
@@ -276,7 +277,7 @@ class ElasticConnector(DataSourceConnector):
             mitre_tactics=tactics,
             mitre_techniques=techniques,
             raw_data=raw_alert,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def normalize_severity(self, source_severity: str) -> str:

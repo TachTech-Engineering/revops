@@ -1,15 +1,15 @@
-from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time_utils import utcnow
 from app.db import Case, CaseActivity, CaseActivityType
 
 
 async def generate_case_number(db: AsyncSession) -> str:
     """Generate a unique case number in format CASE-YYYY-NNNN."""
-    year = datetime.utcnow().year
+    year = utcnow().year
     prefix = f"CASE-{year}-"
 
     # Find the highest case number for this year

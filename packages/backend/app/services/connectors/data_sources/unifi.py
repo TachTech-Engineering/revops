@@ -15,6 +15,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from app.core.time_utils import utcnow
 from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
     ConnectionTestResult,
@@ -309,7 +310,7 @@ class UnifiConnector(DataSourceConnector):
                 "parsed": event_data,
                 "raw_message": msg.raw,
             },
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def _build_title(self, event_type: str, data: dict, msg: SyslogMessage) -> str:
@@ -410,7 +411,7 @@ class UnifiConnector(DataSourceConnector):
             description=str(raw_alert),
             severity="info",
             status="open",
-            created_at_source=datetime.utcnow(),
+            created_at_source=utcnow(),
             updated_at_source=None,
             rule_id="unknown",
             rule_name="Unknown",
@@ -418,5 +419,5 @@ class UnifiConnector(DataSourceConnector):
             mitre_tactics=[],
             mitre_techniques=[],
             raw_data=raw_alert,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )

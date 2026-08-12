@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -8,6 +7,7 @@ from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import Notification, NotificationType, get_db
 
 router = APIRouter()
@@ -184,7 +184,7 @@ async def mark_as_read(
 
     if not notification.is_read:
         notification.is_read = True
-        notification.read_at = datetime.utcnow()
+        notification.read_at = utcnow()
         await db.flush()
         await db.refresh(notification)
 
@@ -198,7 +198,7 @@ async def mark_all_as_read(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Mark all notifications as read."""
-    now = datetime.utcnow()
+    now = utcnow()
     result = await db.execute(
         update(Notification)
         .where(

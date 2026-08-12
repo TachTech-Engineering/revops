@@ -233,8 +233,6 @@ async def sync_feed(
         return SyncResult(**result)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{feed_id}/logs", response_model=list[SyncLogResponse])

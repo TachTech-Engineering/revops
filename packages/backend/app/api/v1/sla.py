@@ -8,6 +8,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import SLAMetric, SLAPolicy, SLAStatus, get_db
 
 router = APIRouter()
@@ -318,7 +319,7 @@ async def list_metrics(
     page_size: int = 50,
 ) -> dict:
     """List SLA metrics with filtering."""
-    since = datetime.utcnow() - timedelta(days=days)
+    since = utcnow() - timedelta(days=days)
 
     query = select(SLAMetric).where(
         and_(SLAMetric.created_at >= since, SLAMetric.organization_id == org_id)
@@ -379,7 +380,7 @@ async def track_alert_sla(
     """Create or update SLA tracking for an alert."""
     alert_id = data.get("alert_id")
     severity = data.get("severity", "MEDIUM").upper()
-    alert_created_at = datetime.fromisoformat(data.get("created_at", datetime.utcnow().isoformat()))
+    alert_created_at = datetime.fromisoformat(data.get("created_at", utcnow().isoformat()))
     rule_id = data.get("rule_id")
 
     # Find applicable policy
@@ -473,7 +474,7 @@ async def acknowledge_alert(
     if metric.acknowledged_at:
         raise HTTPException(status_code=400, detail="Alert already acknowledged")
 
-    now = datetime.utcnow()
+    now = utcnow()
     metric.acknowledged_at = now
 
     # Calculate ack time
@@ -513,7 +514,7 @@ async def resolve_alert(
     if metric.resolved_at:
         raise HTTPException(status_code=400, detail="Alert already resolved")
 
-    now = datetime.utcnow()
+    now = utcnow()
     metric.resolved_at = now
 
     # Calculate resolve time
@@ -540,7 +541,7 @@ async def get_sla_dashboard(
     days: int = 7,
 ) -> SLADashboardResponse:
     """Get SLA dashboard summary."""
-    since = datetime.utcnow() - timedelta(days=days)
+    since = utcnow() - timedelta(days=days)
 
     # Get all metrics in the time range
     result = await db.execute(
@@ -635,7 +636,7 @@ async def update_sla_statuses(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Update SLA statuses for all active metrics (run periodically)."""
-    now = datetime.utcnow()
+    now = utcnow()
 
     # Get all unresolved metrics for this organization
     result = await db.execute(

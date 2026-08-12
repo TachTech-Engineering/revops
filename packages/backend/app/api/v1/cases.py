@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -8,6 +7,7 @@ from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import Case, CaseActivity, CaseActivityType, CasePriority, CaseStatus, get_db
 from app.services.case_service import (
     add_case_activity,
@@ -310,7 +310,7 @@ async def update_case(
     # Handle status change to closed
     if "status" in update_data:
         if update_data["status"] == CaseStatus.CLOSED and case.status != CaseStatus.CLOSED:
-            case.closed_at = datetime.utcnow()
+            case.closed_at = utcnow()
         elif update_data["status"] != CaseStatus.CLOSED:
             case.closed_at = None
 

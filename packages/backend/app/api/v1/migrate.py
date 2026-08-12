@@ -2,6 +2,8 @@
 Migration API - Detection rule conversion endpoints.
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import and_, select
@@ -14,6 +16,8 @@ from app.db.session import get_db
 from app.services.ai_converter_service import ConversionFormat, LLMProvider, ai_converter_service
 from app.services.encryption_service import decrypt_credential
 from app.services.migration_service import SIEMFormat, migration_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -180,9 +184,10 @@ async def convert_rule(request: ConvertRequest, user: OrgUserDep):
             intermediate_sigma=intermediate_sigma,
         )
 
-    except Exception as e:
+    except Exception:
+        logger.exception("Rule conversion failed")
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Conversion failed: {str(e)}"
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Conversion failed"
         )
 
 
@@ -276,9 +281,10 @@ async def convert_file(
             "converted_code": converted,
         }
 
-    except Exception as e:
+    except Exception:
+        logger.exception("Rule conversion failed")
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"Conversion failed: {str(e)}"
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Conversion failed"
         )
 
 

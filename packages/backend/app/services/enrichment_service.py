@@ -1,18 +1,22 @@
 import hashlib
+import logging
 import os
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import UUID
 
 import httpx
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time_utils import utcnow
 from app.db import (
     AlertEnrichment,
     EnrichmentCache,
     EnrichmentPipeline,
     EnrichmentType,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def get_cache_key(value: str) -> str:
@@ -33,7 +37,7 @@ async def get_cached_enrichment(
             and_(
                 EnrichmentCache.pipeline_id == pipeline_id,
                 EnrichmentCache.input_hash == input_hash,
-                EnrichmentCache.expires_at > datetime.utcnow(),
+                EnrichmentCache.expires_at > utcnow(),
             )
         )
     )
@@ -55,7 +59,7 @@ async def store_cached_enrichment(
 ) -> EnrichmentCache:
     """Store an enrichment result in the cache."""
     input_hash = await get_cache_key(input_value)
-    expires_at = datetime.utcnow() + timedelta(minutes=ttl_minutes)
+    expires_at = utcnow() + timedelta(minutes=ttl_minutes)
 
     # Check if entry exists and update, otherwise create
     existing = await db.execute(
@@ -108,6 +112,7 @@ async def enrich_ip_geolocation(ip_address: str) -> dict:
                         "as": data.get("as"),
                     }
     except Exception as e:
+        logger.exception("Enrichment lookup failed")
         return {"error": str(e)}
 
     return {"error": "Failed to get geolocation data"}
@@ -139,6 +144,7 @@ async def enrich_ip_reputation(ip_address: str) -> dict:
                     "last_reported_at": data.get("lastReportedAt"),
                 }
     except Exception as e:
+        logger.exception("Enrichment lookup failed")
         return {"error": str(e)}
 
     return {"error": "Failed to get IP reputation data"}
@@ -185,6 +191,7 @@ async def enrich_file_hash(file_hash: str) -> dict:
             elif response.status_code == 404:
                 return {"status": "not_found", "hash": file_hash}
     except Exception as e:
+        logger.exception("Enrichment lookup failed")
         return {"error": str(e)}
 
     return {"error": "Failed to get file hash data"}
@@ -218,6 +225,7 @@ async def enrich_custom_api(
                     "response": response.text[:500],
                 }
     except Exception as e:
+        logger.exception("Enrichment lookup failed")
         return {"error": str(e)}
 
 

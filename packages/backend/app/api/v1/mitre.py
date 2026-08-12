@@ -1,6 +1,6 @@
 import logging
 import re
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -10,6 +10,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OptionalPantherServiceDep, OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import MitreMapping, MitreTactic, NormalizedAlert, get_db
 
 logger = logging.getLogger(__name__)
@@ -303,7 +304,7 @@ async def get_alert_coverage(
 
     This shows what techniques are being detected in your environment.
     """
-    since = datetime.utcnow() - timedelta(days=days)
+    since = utcnow() - timedelta(days=days)
 
     # Aggregate by tactic and technique
     tactic_data = {}

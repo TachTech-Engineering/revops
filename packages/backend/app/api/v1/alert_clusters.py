@@ -3,7 +3,7 @@ AI Alert Clustering API - Feature 5
 Group similar alerts to reduce analyst fatigue.
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,6 +12,7 @@ from sqlalchemy import and_, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAdminDep, OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import AlertCluster, AlertClusterMember, AlertClusterStatus, NormalizedAlert, get_db
 from app.services.llm_service import llm_service
 
@@ -212,7 +213,7 @@ async def generate_clusters(
 ):
     """Trigger AI clustering of alerts."""
     # 1. Fetch recent alerts from the time window that aren't already clustered
-    time_limit = datetime.utcnow() - timedelta(hours=request.time_window_hours)
+    time_limit = utcnow() - timedelta(hours=request.time_window_hours)
 
     # Get IDs of alerts that are already in a cluster
     clustered_alerts_query = select(AlertClusterMember.alert_id).where(

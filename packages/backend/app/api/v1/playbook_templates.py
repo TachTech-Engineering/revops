@@ -3,7 +3,6 @@ AI Playbook Generation API - Feature 6
 Generate playbooks from incident resolution patterns.
 """
 
-from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,6 +11,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAdminDep, OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import Playbook, PlaybookStatus, PlaybookTemplate, get_db
 
 router = APIRouter()
@@ -260,7 +260,7 @@ async def approve_template(
 
     template.is_approved = True
     template.approved_by = user.email
-    template.approved_at = datetime.utcnow()
+    template.approved_at = utcnow()
 
     playbook_id = None
     if request.convert_to_playbook:

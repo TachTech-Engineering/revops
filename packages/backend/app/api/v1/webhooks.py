@@ -1,4 +1,3 @@
-from datetime import datetime
 from typing import Annotated
 from uuid import UUID
 
@@ -9,6 +8,7 @@ from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAdminDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import WebhookConfig, get_db
 from app.db.models import WebhookType
 
@@ -214,7 +214,7 @@ async def test_webhook(
     test_payload = {
         "type": "test",
         "message": "This is a test notification from PantherUtil",
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": utcnow().isoformat(),
         "alert": {
             "id": "test-alert-id",
             "title": "Test Alert",
@@ -258,7 +258,7 @@ async def test_webhook(
             )
 
         if response.status_code < 400:
-            webhook.last_triggered_at = datetime.utcnow()
+            webhook.last_triggered_at = utcnow()
             await db.flush()
             return WebhookTestResult(
                 success=True,

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.v1.deps import OrgAdminDep, OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import (
     OnCallOverride,
     OnCallRole,
@@ -359,7 +360,7 @@ async def get_current_oncall(
     db: AsyncSession = Depends(get_db),
 ):
     """Get who is currently on-call for all active schedules."""
-    now = datetime.utcnow()
+    now = utcnow()
 
     result = await db.execute(
         select(OnCallSchedule)

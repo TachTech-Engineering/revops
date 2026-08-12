@@ -8,7 +8,7 @@ import hashlib
 import hmac
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.time_utils import utcnow
 from app.db import (
     AlertEscalation,
     EscalationNotificationType,
@@ -89,14 +90,14 @@ class EscalationService:
             policy_id=policy.id,
             status=EscalationStatus.ACTIVE,
             current_step=0,
-            started_at=datetime.utcnow(),
+            started_at=utcnow(),
             notification_history=[],
         )
 
         # Calculate next escalation time based on first step
         if policy.steps:
             first_step = sorted(policy.steps, key=lambda s: s.step_order)[0]
-            escalation.next_escalation_at = datetime.utcnow() + timedelta(
+            escalation.next_escalation_at = utcnow() + timedelta(
                 minutes=first_step.delay_minutes
             )
 
@@ -208,7 +209,7 @@ class EscalationService:
         history_entry = {
             "step": step.step_order,
             "type": step.notification_type.value,
-            "sent_at": datetime.utcnow().isoformat(),
+            "sent_at": utcnow().isoformat(),
             "targets": step.targets,
             "success": success,
         }
@@ -218,7 +219,7 @@ class EscalationService:
         # Calculate next escalation time
         if step_index + 1 < len(sorted_steps):
             next_step = sorted_steps[step_index + 1]
-            escalation.next_escalation_at = datetime.utcnow() + timedelta(
+            escalation.next_escalation_at = utcnow() + timedelta(
                 minutes=next_step.delay_minutes
             )
         else:
@@ -642,7 +643,7 @@ Escalation ID: {escalation_id}
         # Build payload
         payload = {
             "event_type": "alert.escalation",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": utcnow().isoformat() + "Z",
             "escalation_id": escalation_id,
             "alert": {
                 "id": alert_id,
@@ -661,7 +662,7 @@ Escalation ID: {escalation_id}
         headers = {
             "Content-Type": "application/json",
             "X-Event-Type": "alert.escalation",
-            "X-Timestamp": datetime.utcnow().isoformat() + "Z",
+            "X-Timestamp": utcnow().isoformat() + "Z",
         }
 
         # Add custom headers from policy if available
@@ -715,7 +716,7 @@ Escalation ID: {escalation_id}
 
         Returns the number of escalations processed.
         """
-        now = datetime.utcnow()
+        now = utcnow()
 
         result = await self.db.execute(
             select(AlertEscalation)

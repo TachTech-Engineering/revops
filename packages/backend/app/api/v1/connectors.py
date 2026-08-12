@@ -5,6 +5,7 @@ Endpoints for managing data source and action connectors.
 All endpoints are organization-scoped for multi-tenancy.
 """
 
+import logging
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
@@ -15,6 +16,7 @@ from sqlalchemy import and_, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAdminDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import get_db
 from app.db.models import (
     Connector,
@@ -26,6 +28,8 @@ from app.services.connectors.base import (
     get_connector_registry,
 )
 from app.services.encryption import EncryptionError, get_encryption_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -276,8 +280,9 @@ async def create_connector(
         encryption = get_encryption_service()
         try:
             encrypted_creds = encryption.encrypt(connector.credentials)
-        except EncryptionError as e:
-            raise HTTPException(status_code=500, detail=f"Failed to encrypt credentials: {str(e)}")
+        except EncryptionError:
+            logger.exception("Failed to encrypt connector credentials")
+            raise HTTPException(status_code=500, detail="Failed to encrypt credentials")
 
     db_connector = Connector(
         organization_id=admin.organization_id,
@@ -342,8 +347,9 @@ async def update_connector(
         encryption = get_encryption_service()
         try:
             connector.credentials_encrypted = encryption.encrypt(update_data["credentials"])
-        except EncryptionError as e:
-            raise HTTPException(status_code=500, detail=f"Failed to encrypt credentials: {str(e)}")
+        except EncryptionError:
+            logger.exception("Failed to encrypt connector credentials")
+            raise HTTPException(status_code=500, detail="Failed to encrypt credentials")
         del update_data["credentials"]
 
     for field, value in update_data.items():
@@ -421,8 +427,9 @@ async def test_connector(
         encryption = get_encryption_service()
         try:
             credentials = encryption.decrypt(connector.credentials_encrypted)
-        except EncryptionError as e:
-            raise HTTPException(status_code=500, detail=f"Failed to decrypt credentials: {str(e)}")
+        except EncryptionError:
+            logger.exception("Failed to decrypt connector credentials")
+            raise HTTPException(status_code=500, detail="Failed to decrypt credentials")
 
     # Get connector implementation
     registry = get_connector_registry()
@@ -441,7 +448,7 @@ async def test_connector(
     test_result = await connector_instance.test_connection()
 
     # Update connector status
-    connector.last_health_check = datetime.utcnow()
+    connector.last_health_check = utcnow()
     if test_result.success:
         connector.status = ConnectorStatus.CONNECTED
         connector.last_error = None
@@ -558,7 +565,7 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_
         # Calculate sync time range
         from datetime import timedelta
 
-        since = datetime.utcnow() - timedelta(days=settings.alert_sync_max_age_days)
+        since = utcnow() - timedelta(days=settings.alert_sync_max_age_days)
         if connector.last_sync_at and not full_sync:
             since = connector.last_sync_at
 
@@ -613,7 +620,7 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_
                     break
                 cursor = next_cursor
 
-            connector.last_sync_at = datetime.utcnow()
+            connector.last_sync_at = utcnow()
             connector.last_sync_cursor = None
             connector.last_error = None
             await db.commit()

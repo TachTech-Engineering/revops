@@ -7,12 +7,13 @@ when rules match. Supports multi-alert time window correlation.
 
 import hashlib
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy import and_, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time_utils import utcnow
 from app.db.models import (
     AlertCorrelationWindow,
     CorrelationRule,
@@ -164,7 +165,7 @@ class CorrelationService:
 
         # Get time window duration in minutes
         time_window_minutes = conditions.get("time_window_minutes", 60)
-        window_start = datetime.utcnow() - timedelta(minutes=time_window_minutes)
+        window_start = utcnow() - timedelta(minutes=time_window_minutes)
 
         # Look for existing window
         result = await self.db.execute(
@@ -190,8 +191,8 @@ class CorrelationService:
             window_key=window_key,
             alert_count=0,
             alert_ids=[],
-            first_alert_at=datetime.utcnow(),
-            last_alert_at=datetime.utcnow(),
+            first_alert_at=utcnow(),
+            last_alert_at=utcnow(),
             triggered=False,
         )
         self.db.add(new_window)
@@ -224,7 +225,7 @@ class CorrelationService:
         alert_ids = window.alert_ids or []
         alert_ids.append(str(alert.id))
         window.alert_ids = alert_ids
-        window.last_alert_at = datetime.utcnow()
+        window.last_alert_at = utcnow()
 
         # Check threshold
         if window.alert_count >= min_alerts:
@@ -465,7 +466,7 @@ class CorrelationService:
         Returns:
             Number of windows deleted
         """
-        cutoff = datetime.utcnow() - timedelta(hours=max_age_hours)
+        cutoff = utcnow() - timedelta(hours=max_age_hours)
 
         result = await self.db.execute(
             delete(AlertCorrelationWindow).where(AlertCorrelationWindow.last_alert_at < cutoff)

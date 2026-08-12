@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 
+from app.core.time_utils import utcnow
 from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
     ConnectionTestResult,
@@ -190,7 +191,7 @@ class GoogleSecOpsConnector(DataSourceConnector):
         """Normalize a Chronicle detection to the unified schema."""
         # Parse timestamps
         created_at = datetime.fromisoformat(
-            raw_alert.get("createTime", datetime.utcnow().isoformat()).replace("Z", "+00:00")
+            raw_alert.get("createTime", utcnow().isoformat()).replace("Z", "+00:00")
         )
         updated_at = None
         if raw_alert.get("updateTime"):
@@ -217,7 +218,7 @@ class GoogleSecOpsConnector(DataSourceConnector):
             mitre_tactics=raw_alert.get("mitreTactics", []) or [],
             mitre_techniques=raw_alert.get("mitreTechniques", []) or [],
             raw_data=raw_alert,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def normalize_severity(self, source_severity: str) -> str:

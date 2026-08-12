@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 
+from app.core.time_utils import utcnow
 from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
     ConnectionTestResult,
@@ -296,7 +297,7 @@ class OktaConnector(DataSourceConnector):
     def normalize_alert(self, raw_alert: dict[str, Any]) -> NormalizedAlert:
         """Normalize an Okta event to the unified schema."""
         # Parse timestamps
-        created_at = datetime.utcnow()
+        created_at = utcnow()
         if raw_alert.get("published"):
             try:
                 created_at = datetime.fromisoformat(raw_alert["published"].replace("Z", "+00:00"))
@@ -376,7 +377,7 @@ class OktaConnector(DataSourceConnector):
             mitre_tactics=self._map_mitre_tactics(event_type),
             mitre_techniques=self._map_mitre_techniques(event_type),
             raw_data=raw_alert,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def _determine_severity(self, event: dict[str, Any]) -> str:

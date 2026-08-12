@@ -3,7 +3,6 @@ Escalation Policies API - Feature 7
 Time-based escalation chains for unacknowledged alerts.
 """
 
-from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.v1.deps import OrgAdminDep, OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import (
     AlertEscalation,
     EscalationNotificationType,
@@ -168,7 +168,7 @@ async def list_escalation_policies(
 # ==================== Active Escalations (must be before /{policy_id}) ====================
 
 
-@router.get("/active", response_model=list["AlertEscalationResponse"])
+@router.get("/active", response_model=list[AlertEscalationResponse])
 async def list_active_escalations(
     user: OrgUserDep,
     org_id: OrgIdDep,
@@ -406,7 +406,7 @@ async def acknowledge_alert_escalation(
         raise HTTPException(status_code=404, detail="No active escalation found for this alert")
 
     escalation.status = EscalationStatus.ACKNOWLEDGED
-    escalation.acknowledged_at = datetime.utcnow()
+    escalation.acknowledged_at = utcnow()
     escalation.acknowledged_by = user.email
 
     await db.commit()

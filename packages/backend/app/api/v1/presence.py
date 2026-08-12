@@ -4,7 +4,7 @@ Real-time Presence API
 Tracks which users are currently viewing alerts for collaboration awareness.
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -13,6 +13,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import AlertPresence, get_db
 
 router = APIRouter()
@@ -54,7 +55,7 @@ async def get_alert_presence(
 ):
     """Get list of users currently viewing an alert."""
     # Clean up stale presence records first
-    cutoff = datetime.utcnow() - timedelta(seconds=PRESENCE_TIMEOUT_SECONDS)
+    cutoff = utcnow() - timedelta(seconds=PRESENCE_TIMEOUT_SECONDS)
     await db.execute(
         delete(AlertPresence)
         .where(AlertPresence.organization_id == org_id)
@@ -110,7 +111,7 @@ async def send_heartbeat(
 
     if presence:
         # Update heartbeat
-        presence.last_heartbeat = datetime.utcnow()
+        presence.last_heartbeat = utcnow()
     else:
         # Create new presence record
         presence = AlertPresence(
@@ -119,8 +120,8 @@ async def send_heartbeat(
             user_id=UUID(user.id),
             user_email=user.email,
             user_name=user.name,
-            started_viewing_at=datetime.utcnow(),
-            last_heartbeat=datetime.utcnow(),
+            started_viewing_at=utcnow(),
+            last_heartbeat=utcnow(),
         )
         db.add(presence)
 

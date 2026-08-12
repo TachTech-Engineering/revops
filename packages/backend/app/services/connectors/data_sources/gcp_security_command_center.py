@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
+from app.core.time_utils import utcnow
 from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
     ConnectionTestResult,
@@ -258,7 +259,7 @@ class GCPSecurityCommandCenterConnector(DataSourceConnector):
     def normalize_alert(self, raw_alert: dict[str, Any]) -> NormalizedAlert:
         """Normalize a GCP SCC finding to the unified schema."""
         # Parse timestamps
-        created_at = datetime.utcnow()
+        created_at = utcnow()
         if raw_alert.get("eventTime"):
             try:
                 created_at = datetime.fromisoformat(raw_alert["eventTime"].replace("Z", "+00:00"))
@@ -334,7 +335,7 @@ class GCPSecurityCommandCenterConnector(DataSourceConnector):
             mitre_tactics=list(set(mitre_tactics)),
             mitre_techniques=list(set(mitre_techniques)),
             raw_data=raw_alert,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def normalize_severity(self, source_severity: str) -> str:

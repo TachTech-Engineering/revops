@@ -15,6 +15,7 @@ from typing import Any
 
 import httpx
 
+from app.core.time_utils import utcnow
 from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
     ConnectionTestResult,
@@ -420,7 +421,7 @@ class UniFiSyslogConnector(DataSourceConnector):
             norm_severity = "info"
 
         source_ip = msg.source_ip if hasattr(msg, "source_ip") else "unknown"
-        timestamp = msg.timestamp if hasattr(msg, "timestamp") else datetime.utcnow()
+        timestamp = msg.timestamp if hasattr(msg, "timestamp") else utcnow()
 
         return NormalizedAlert(
             id=uuid.uuid4(),
@@ -439,7 +440,7 @@ class UniFiSyslogConnector(DataSourceConnector):
             mitre_tactics=[],
             mitre_techniques=[],
             raw_data={"raw_message": message, "source_ip": source_ip},
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def _normalize_api_event(self, event: dict[str, Any]) -> NormalizedAlert | None:
@@ -448,7 +449,7 @@ class UniFiSyslogConnector(DataSourceConnector):
         event_time = event.get("time", event.get("datetime"))
 
         # Parse timestamp
-        timestamp = datetime.utcnow()
+        timestamp = utcnow()
         if event_time:
             if isinstance(event_time, (int, float)):
                 timestamp = datetime.fromtimestamp(event_time / 1000)
@@ -499,7 +500,7 @@ class UniFiSyslogConnector(DataSourceConnector):
             mitre_tactics=mitre.get("tactics", []),
             mitre_techniques=mitre.get("techniques", []),
             raw_data=event,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def _normalize_api_alarm(self, alarm: dict[str, Any]) -> NormalizedAlert | None:
@@ -508,7 +509,7 @@ class UniFiSyslogConnector(DataSourceConnector):
         alarm_time = alarm.get("time", alarm.get("datetime"))
 
         # Parse timestamp
-        timestamp = datetime.utcnow()
+        timestamp = utcnow()
         if alarm_time:
             if isinstance(alarm_time, (int, float)):
                 timestamp = datetime.fromtimestamp(alarm_time / 1000)
@@ -559,7 +560,7 @@ class UniFiSyslogConnector(DataSourceConnector):
             mitre_tactics=[],
             mitre_techniques=[],
             raw_data=alarm,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def _map_api_event_type(self, event_key: str) -> str:
@@ -676,7 +677,7 @@ class UniFiSyslogConnector(DataSourceConnector):
         mitre = self.MITRE_MAPPINGS.get(event_type, {})
 
         # Parse timestamp
-        timestamp = datetime.utcnow()
+        timestamp = utcnow()
         if syslog_data.get("timestamp"):
             try:
                 timestamp = datetime.fromisoformat(syslog_data["timestamp"])
@@ -712,7 +713,7 @@ class UniFiSyslogConnector(DataSourceConnector):
             mitre_tactics=mitre.get("tactics", []),
             mitre_techniques=mitre.get("techniques", []),
             raw_data=raw_alert,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def _build_title(self, event_type: str, data: dict) -> str:

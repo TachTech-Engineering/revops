@@ -3,7 +3,7 @@ Trend Analysis API - Feature 9
 Forecasting, anomaly detection, coverage visualization.
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,6 +12,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAdminDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import (
     AlertTrendCache,
     AnomalyDetection,
@@ -88,7 +89,7 @@ async def get_trends(
     days: int = Query(30, ge=1, le=365),
 ):
     """Get alert volume trends."""
-    end_date = datetime.utcnow()
+    end_date = utcnow()
     start_date = end_date - timedelta(days=days)
 
     result = await db.execute(
@@ -178,7 +179,7 @@ async def get_forecast(
 ):
     """Get predicted alert volume for upcoming period."""
     # Get historical data for forecasting
-    end_date = datetime.utcnow()
+    end_date = utcnow()
     start_date = end_date - timedelta(days=30)
 
     result = await db.execute(
@@ -244,7 +245,7 @@ async def get_anomalies(
     days: int = Query(7, ge=1, le=90),
 ):
     """Get detected anomalies."""
-    start_date = datetime.utcnow() - timedelta(days=days)
+    start_date = utcnow() - timedelta(days=days)
 
     query = (
         select(AnomalyDetection)
@@ -301,7 +302,7 @@ async def acknowledge_anomaly(
 
     anomaly.is_acknowledged = True
     anomaly.acknowledged_by = user.email
-    anomaly.acknowledged_at = datetime.utcnow()
+    anomaly.acknowledged_at = utcnow()
 
     await db.commit()
 
@@ -321,7 +322,7 @@ async def trigger_anomaly_detection(
     # 3. Detect volume spikes, drops, unusual patterns
     # 4. Create anomaly records
 
-    now = datetime.utcnow()
+    now = utcnow()
 
     # Demo: create sample anomaly
     demo_anomaly = AnomalyDetection(
@@ -422,7 +423,7 @@ async def get_coverage_heatmap(
     days: int = Query(30, ge=1, le=365),
 ):
     """Get MITRE ATT&CK heatmap based on alert activity."""
-    datetime.utcnow() - timedelta(days=days)
+    utcnow() - timedelta(days=days)
 
     # Get alerts with MITRE mappings
     # In production, this would aggregate alert data

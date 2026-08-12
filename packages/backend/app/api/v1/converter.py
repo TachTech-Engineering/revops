@@ -81,8 +81,6 @@ async def convert_rule(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/batch")
@@ -103,8 +101,6 @@ async def batch_convert_spl(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/validate")
@@ -119,11 +115,8 @@ async def validate_rule(
     Supports SPL, YARA-L, and AQL formats.
     Returns analysis of the rule including detected patterns and recommendations.
     """
-    try:
-        if request.sourceFormat == "yaral":
-            return await converter.validate_yaral(request.spl)
-        if request.sourceFormat == "aql":
-            return await converter.validate_aql(request.spl)
-        return await converter.validate(request.spl)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    if request.sourceFormat == "yaral":
+        return await converter.validate_yaral(request.spl)
+    if request.sourceFormat == "aql":
+        return await converter.validate_aql(request.spl)
+    return await converter.validate(request.spl)

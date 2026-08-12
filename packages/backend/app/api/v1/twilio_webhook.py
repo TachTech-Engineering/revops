@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from twilio.request_validator import RequestValidator
 
 from app.config import settings
+from app.core.time_utils import utcnow
 from app.db import AlertEscalation, EscalationStatus, get_db
 
 logger = logging.getLogger(__name__)
@@ -184,7 +185,6 @@ async def alert_response_webhook(
         # Update escalation status if we have an escalation_id
         if escalation_id and escalation_id != "None":
             try:
-                from datetime import datetime
                 from uuid import UUID
 
                 result = await db.execute(
@@ -193,7 +193,7 @@ async def alert_response_webhook(
                 escalation = result.scalar_one_or_none()
                 if escalation:
                     escalation.status = EscalationStatus.ACKNOWLEDGED
-                    escalation.acknowledged_at = datetime.utcnow()
+                    escalation.acknowledged_at = utcnow()
                     escalation.acknowledged_by = "phone_response"
                     await db.commit()
                     logger.info(f"Escalation {escalation_id} marked as acknowledged")

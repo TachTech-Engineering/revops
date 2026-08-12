@@ -6,13 +6,13 @@ Executes workflows by traversing the node graph and running each node's logic.
 
 import asyncio
 import time
-from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time_utils import utcnow
 from app.db.models import (
     NodeType,
     Workflow,
@@ -98,7 +98,7 @@ class WorkflowEngine:
             trigger_data=trigger_data,
             context={},
             variables={},
-            started_at=datetime.utcnow(),
+            started_at=utcnow(),
             triggered_by=triggered_by,
         )
         self.db.add(execution)
@@ -131,13 +131,13 @@ class WorkflowEngine:
 
             # Mark execution complete
             execution.status = WorkflowExecutionStatus.COMPLETED
-            execution.completed_at = datetime.utcnow()
+            execution.completed_at = utcnow()
             execution.context = context.to_dict()
             execution.variables = context.variables
 
         except Exception as e:
             execution.status = WorkflowExecutionStatus.FAILED
-            execution.completed_at = datetime.utcnow()
+            execution.completed_at = utcnow()
             execution.error_message = str(e)
             execution.context = context.to_dict()
             execution.variables = context.variables
@@ -254,7 +254,7 @@ class WorkflowEngine:
             node_type=node.node_type.value,
             status="running",
             input_data=node.config,
-            started_at=datetime.utcnow(),
+            started_at=utcnow(),
             loop_index=context.current_loop.current_index if context.current_loop else None,
         )
         self.db.add(step_execution)
@@ -279,7 +279,7 @@ class WorkflowEngine:
             step_execution.status = "completed" if result.success else "failed"
             step_execution.output_data = result.output
             step_execution.error_message = result.error
-            step_execution.completed_at = datetime.utcnow()
+            step_execution.completed_at = utcnow()
             step_execution.duration_ms = duration_ms
 
             result.output["_duration_ms"] = duration_ms
@@ -290,7 +290,7 @@ class WorkflowEngine:
         except TimeoutError:
             step_execution.status = "failed"
             step_execution.error_message = f"Node timed out after {node.timeout_seconds}s"
-            step_execution.completed_at = datetime.utcnow()
+            step_execution.completed_at = utcnow()
             step_execution.duration_ms = int((time.time() - start_time) * 1000)
             await self.db.flush()
 
@@ -302,7 +302,7 @@ class WorkflowEngine:
         except Exception as e:
             step_execution.status = "failed"
             step_execution.error_message = str(e)
-            step_execution.completed_at = datetime.utcnow()
+            step_execution.completed_at = utcnow()
             step_execution.duration_ms = int((time.time() - start_time) * 1000)
             await self.db.flush()
 

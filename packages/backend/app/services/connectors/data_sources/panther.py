@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from app.core.time_utils import utcnow
 from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
     ConnectionTestResult,
@@ -179,7 +180,7 @@ class PantherDataSourceConnector(DataSourceConnector):
         """
 
         # Panther requires both createdAtAfter and createdAtBefore
-        now = datetime.utcnow()
+        now = utcnow()
         variables = {
             "input": {
                 "createdAtAfter": since.isoformat() + "Z",
@@ -243,7 +244,7 @@ class PantherDataSourceConnector(DataSourceConnector):
                 tzinfo=None
             )
         else:
-            created_at = datetime.utcnow()
+            created_at = utcnow()
 
         updated_at = None
         if raw_alert.get("updatedAt"):
@@ -268,7 +269,7 @@ class PantherDataSourceConnector(DataSourceConnector):
             mitre_tactics=[],
             mitre_techniques=[],
             raw_data=raw_alert,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def normalize_severity(self, source_severity: str) -> str:

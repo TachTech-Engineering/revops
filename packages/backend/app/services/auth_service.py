@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.core.time_utils import utcnow
 from app.db import Organization, RefreshToken, User, UserRoleType
 
 # Password hashing configuration
@@ -48,7 +49,7 @@ def hash_token(token: str) -> str:
 def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
     """Create a JWT access token."""
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    expire = utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     to_encode.update({"exp": expire, "type": "access"})
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
 
@@ -84,7 +85,7 @@ async def authenticate_user(db: AsyncSession, email: str, password: str) -> User
         return None
 
     # Update last login timestamp
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = utcnow()
     await db.commit()
 
     return user
@@ -164,7 +165,7 @@ async def store_refresh_token(db: AsyncSession, user_id: UUID, token: str) -> Re
     refresh_token = RefreshToken(
         user_id=user_id,
         token_hash=hash_token(token),
-        expires_at=datetime.utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
+        expires_at=utcnow() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
     )
     db.add(refresh_token)
     await db.commit()
@@ -178,7 +179,7 @@ async def validate_refresh_token(db: AsyncSession, token: str) -> User | None:
         select(RefreshToken).where(
             and_(
                 RefreshToken.token_hash == token_hash,
-                RefreshToken.expires_at > datetime.utcnow(),
+                RefreshToken.expires_at > utcnow(),
                 RefreshToken.revoked_at.is_(None),
             )
         )
@@ -200,7 +201,7 @@ async def revoke_refresh_token(db: AsyncSession, token: str) -> bool:
     if not refresh_token:
         return False
 
-    refresh_token.revoked_at = datetime.utcnow()
+    refresh_token.revoked_at = utcnow()
     await db.commit()
     return True
 
@@ -219,7 +220,7 @@ async def revoke_all_user_tokens(db: AsyncSession, user_id: UUID) -> int:
 
     count = 0
     for token in tokens:
-        token.revoked_at = datetime.utcnow()
+        token.revoked_at = utcnow()
         count += 1
 
     await db.commit()
@@ -254,7 +255,7 @@ _password_reset_tokens: dict[str, tuple[UUID, datetime]] = {}
 async def create_password_reset_token(db: AsyncSession, user_id: UUID) -> str:
     """Create a password reset token for a user."""
     token = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(hours=PASSWORD_RESET_EXPIRE_HOURS)
+    expires_at = utcnow() + timedelta(hours=PASSWORD_RESET_EXPIRE_HOURS)
 
     # Store token (in production, use database or Redis)
     _password_reset_tokens[token] = (user_id, expires_at)
@@ -269,7 +270,7 @@ async def validate_password_reset_token(token: str) -> UUID | None:
 
     user_id, expires_at = _password_reset_tokens[token]
 
-    if datetime.utcnow() > expires_at:
+    if utcnow() > expires_at:
         # Token expired, remove it
         del _password_reset_tokens[token]
         return None

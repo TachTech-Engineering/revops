@@ -15,6 +15,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.core.time_utils import utcnow
 from app.db.models import (
     SimulationFramework,
     SimulationResult,
@@ -297,7 +298,7 @@ class AttackSimulationService:
         # For manual mode, just record the run
         if mode == ExecutionMode.MANUAL:
             run.status = SimulationStatus.RUNNING
-            run.started_at = datetime.utcnow()
+            run.started_at = utcnow()
 
             # Create result records for each target
             for target in targets:
@@ -324,7 +325,7 @@ class AttackSimulationService:
             )
 
         run.status = SimulationStatus.RUNNING
-        run.started_at = datetime.utcnow()
+        run.started_at = utcnow()
         await db.flush()
 
         try:
@@ -346,13 +347,13 @@ class AttackSimulationService:
                 db.add(sim_result)
 
             run.status = SimulationStatus.COMPLETED
-            run.completed_at = datetime.utcnow()
+            run.completed_at = utcnow()
 
         except Exception as e:
             logger.error(f"Simulation execution failed: {e}")
             run.status = SimulationStatus.FAILED
             run.error_message = str(e)
-            run.completed_at = datetime.utcnow()
+            run.completed_at = utcnow()
 
         await db.commit()
         await db.refresh(run)
@@ -563,7 +564,7 @@ class AttackSimulationService:
             # Search for alerts in the time window
             alerts = await panther_service.list_alerts(
                 start_time=run.started_at.isoformat() if run.started_at else None,
-                end_time=datetime.utcnow().isoformat(),
+                end_time=utcnow().isoformat(),
             )
 
             # Look for alerts related to this technique
@@ -640,7 +641,7 @@ class AttackSimulationService:
             raise ValueError("Simulation run not found")
 
         run.status = SimulationStatus.COMPLETED
-        run.completed_at = datetime.utcnow()
+        run.completed_at = utcnow()
 
         await db.commit()
         await db.refresh(run)

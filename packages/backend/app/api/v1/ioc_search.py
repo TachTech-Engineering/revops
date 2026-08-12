@@ -1,9 +1,12 @@
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep, PantherServiceDep
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -181,8 +184,9 @@ async def search_ioc(
             first_seen=first_seen,
             last_seen=last_seen,
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("IOC search failed")
+        raise HTTPException(status_code=500, detail="IOC search failed")
 
 
 @router.get("/types")

@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from app.core.time_utils import utcnow
 from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
     ConnectionTestResult,
@@ -235,7 +236,7 @@ class CloudflareConnector(DataSourceConnector):
 
             # Build GraphQL query for firewall events
             since_str = since.strftime("%Y-%m-%dT%H:%M:%SZ")
-            until_str = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            until_str = utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
             # Build filter
             filter_parts = [
@@ -318,7 +319,7 @@ class CloudflareConnector(DataSourceConnector):
     def normalize_alert(self, raw_alert: dict[str, Any]) -> NormalizedAlert:
         """Normalize a Cloudflare security event to the unified schema."""
         # Parse timestamp - ensure naive datetime for database compatibility
-        created_at = datetime.utcnow()
+        created_at = utcnow()
         if raw_alert.get("datetime"):
             try:
                 dt = datetime.fromisoformat(raw_alert["datetime"].replace("Z", "+00:00"))
@@ -394,7 +395,7 @@ class CloudflareConnector(DataSourceConnector):
             mitre_tactics=mitre_tactics,
             mitre_techniques=mitre_techniques,
             raw_data=raw_alert,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def _determine_severity(self, event: dict[str, Any]) -> str:

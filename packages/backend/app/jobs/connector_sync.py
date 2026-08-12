@@ -11,6 +11,7 @@ from uuid import UUID
 
 from sqlalchemy import and_, select
 
+from app.core.time_utils import utcnow
 from app.db.models import Connector, ConnectorCategory, ConnectorStatus
 from app.db.session import AsyncSessionLocal
 
@@ -60,7 +61,7 @@ class ConnectorSyncScheduler:
             )
             connectors = result.scalars().all()
 
-            now = datetime.utcnow()
+            now = utcnow()
 
             for connector in connectors:
                 try:

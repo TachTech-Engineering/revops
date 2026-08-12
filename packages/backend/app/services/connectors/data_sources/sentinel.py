@@ -11,6 +11,7 @@ from typing import Any
 
 import httpx
 
+from app.core.time_utils import utcnow
 from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
     ConnectionTestResult,
@@ -227,7 +228,7 @@ class SentinelConnector(DataSourceConnector):
 
         # Parse timestamps
         created_at = datetime.fromisoformat(
-            properties.get("createdTimeUtc", datetime.utcnow().isoformat()).replace("Z", "+00:00")
+            properties.get("createdTimeUtc", utcnow().isoformat()).replace("Z", "+00:00")
         )
         updated_at = None
         if properties.get("lastModifiedTimeUtc"):
@@ -263,7 +264,7 @@ class SentinelConnector(DataSourceConnector):
             mitre_tactics=tactics if isinstance(tactics, list) else [],
             mitre_techniques=techniques if isinstance(techniques, list) else [],
             raw_data=raw_alert,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def normalize_severity(self, source_severity: str) -> str:

@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from app.core.time_utils import utcnow
 from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
     ConnectionTestResult,
@@ -257,7 +258,7 @@ class MicrosoftDefenderConnector(DataSourceConnector):
     def normalize_alert(self, raw_alert: dict[str, Any]) -> NormalizedAlert:
         """Normalize a Microsoft Defender alert to the unified schema."""
         # Parse timestamps
-        created_at = datetime.utcnow()
+        created_at = utcnow()
         if raw_alert.get("createdDateTime"):
             try:
                 created_at = datetime.fromisoformat(
@@ -333,7 +334,7 @@ class MicrosoftDefenderConnector(DataSourceConnector):
             mitre_tactics=mitre_tactics,
             mitre_techniques=mitre_techniques,
             raw_data=raw_alert,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def normalize_severity(self, source_severity: str) -> str:

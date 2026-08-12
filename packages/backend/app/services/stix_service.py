@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import datetime
 
+from app.core.time_utils import utcnow
 from app.db.models import IOCSeverity, IOCType
 
 # STIX 2.1 pattern mappings
@@ -101,7 +102,7 @@ class STIXService:
             "severity": severity,
             "description": indicator.get("description") or indicator.get("name"),
             "tags": tags,
-            "first_seen": first_seen or datetime.utcnow(),
+            "first_seen": first_seen or utcnow(),
             "expires_at": expires_at,
             "stix_id": indicator.get("id"),
         }
@@ -210,7 +211,7 @@ class STIXService:
         indicator_id = f"indicator--{ioc.get('id', uuid.uuid4())}"
 
         # Get timestamps
-        created = ioc.get("created_at") or datetime.utcnow()
+        created = ioc.get("created_at") or utcnow()
         first_seen = ioc.get("first_seen") or created
 
         if isinstance(created, datetime):

@@ -1,10 +1,10 @@
 import logging
-from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time_utils import utcnow
 from app.db import ActionType, ExecutionStatus, Playbook, PlaybookExecution
 from app.services.integrations import (
     ActionConnector,
@@ -56,7 +56,7 @@ class PlaybookService:
             playbook_id=playbook_id,
             alert_id=alert_data.get("id", "unknown"),
             status=ExecutionStatus.RUNNING,
-            started_at=datetime.utcnow(),
+            started_at=utcnow(),
             triggered_by=triggered_by,
             action_results=[],
         )
@@ -119,7 +119,7 @@ class PlaybookService:
 
         # Update execution record
         execution.action_results = action_results
-        execution.completed_at = datetime.utcnow()
+        execution.completed_at = utcnow()
 
         if all_success:
             execution.status = ExecutionStatus.SUCCESS

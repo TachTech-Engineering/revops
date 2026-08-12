@@ -1,10 +1,13 @@
 import asyncio
 import logging
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.v1.router import api_router
@@ -119,6 +122,43 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 # Session middleware for OAuth state management
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
+
+# Global exception handlers
+#
+# FastAPI/Starlette handle HTTPException (and RequestValidationError) before these
+# fire, so intended 4xx/5xx responses keep their status and detail. These catch-all
+# handlers only run for otherwise-unhandled errors: they log the full traceback
+# server-side under a generated correlation id and return a generic 500 that never
+# echoes the exception text to the client.
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError) -> JSONResponse:
+    correlation_id = uuid.uuid4().hex
+    logger.exception(
+        "Unhandled database error [correlation_id=%s] on %s %s",
+        correlation_id,
+        request.method,
+        request.url.path,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error", "correlation_id": correlation_id},
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    correlation_id = uuid.uuid4().hex
+    logger.exception(
+        "Unhandled exception [correlation_id=%s] on %s %s",
+        correlation_id,
+        request.method,
+        request.url.path,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error", "correlation_id": correlation_id},
+    )
+
 
 # Routes
 app.include_router(api_router, prefix="/api/v1")

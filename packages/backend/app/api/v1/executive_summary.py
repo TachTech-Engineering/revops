@@ -20,6 +20,7 @@ from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import get_db
 from app.db.models import (
     Incident,
@@ -149,7 +150,7 @@ def calculate_metric_value(current: float, previous: float | None = None) -> Met
 
 async def get_period_bounds(days: int, end_date: datetime | None = None):
     if end_date is None:
-        end_date = datetime.utcnow()
+        end_date = utcnow()
     current_start = end_date - timedelta(days=days)
     current_end = end_date
     previous_end = current_start

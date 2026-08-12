@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 
+from app.core.time_utils import utcnow
 from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
     ConnectionTestResult,
@@ -272,7 +273,7 @@ class UniFiAPIConnector(DataSourceConnector):
             # Calculate time range
             # UniFi API uses Unix timestamps in milliseconds
             since_ts = int(since.timestamp() * 1000)
-            now_ts = int(datetime.utcnow().timestamp() * 1000)
+            now_ts = int(utcnow().timestamp() * 1000)
 
             events = []
 
@@ -379,7 +380,7 @@ class UniFiAPIConnector(DataSourceConnector):
         is_alarm = raw_alert.get("_is_alarm", False)
 
         # Parse timestamp
-        timestamp = datetime.utcnow()
+        timestamp = utcnow()
         if raw_alert.get("time"):
             try:
                 # UniFi uses millisecond timestamps
@@ -430,7 +431,7 @@ class UniFiAPIConnector(DataSourceConnector):
             mitre_tactics=mitre_tactics,
             mitre_techniques=mitre_techniques,
             raw_data=raw_alert,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def _build_title(self, event_key: str, event: dict, msg: str, is_alarm: bool) -> str:

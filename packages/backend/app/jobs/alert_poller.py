@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timedelta
 from uuid import UUID
 
+from app.core.time_utils import utcnow
 from app.db.session import AsyncSessionLocal
 from app.services.notification_service import notification_service
 from app.services.panther_service import PantherService
@@ -55,7 +56,7 @@ class AlertPoller:
         """Poll for new alerts and broadcast them."""
         try:
             # Calculate time range - poll for alerts in the last 5 minutes
-            end_time = datetime.utcnow()
+            end_time = utcnow()
             start_time = end_time - timedelta(minutes=5)
 
             # Fetch recent alerts

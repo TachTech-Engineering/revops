@@ -9,6 +9,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from app.core.time_utils import utcnow
+
 
 @dataclass
 class StepOutput:
@@ -57,7 +59,7 @@ class ExecutionContext:
     variables: dict[str, Any] = field(default_factory=dict)
     steps: dict[str, StepOutput] = field(default_factory=dict)
     loop_stack: list[LoopState] = field(default_factory=list)
-    started_at: datetime = field(default_factory=datetime.utcnow)
+    started_at: datetime = field(default_factory=utcnow)
 
     def set_step_output(
         self,

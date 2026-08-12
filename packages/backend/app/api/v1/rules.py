@@ -53,21 +53,18 @@ async def list_rules(
     pageSize: int = Query(50, ge=1, le=1000, description="Page size"),
 ) -> PaginatedResponse:
     """List detection rules with optional filtering."""
-    try:
-        rules, cursor = await panther.list_rules(
-            enabled=enabled,
-            severity=severity,
-            log_types=logTypes,
-            tags=tags,
-            page_size=pageSize,
-        )
-        return PaginatedResponse(
-            results=rules,
-            cursor=cursor,
-            hasMore=cursor is not None,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    rules, cursor = await panther.list_rules(
+        enabled=enabled,
+        severity=severity,
+        log_types=logTypes,
+        tags=tags,
+        page_size=pageSize,
+    )
+    return PaginatedResponse(
+        results=rules,
+        cursor=cursor,
+        hasMore=cursor is not None,
+    )
 
 
 @router.get("/{rule_id}")
@@ -80,8 +77,6 @@ async def get_rule(
         return await panther.get_rule(rule_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("", status_code=201)
@@ -90,10 +85,7 @@ async def create_rule(
     panther: PantherServiceDep,
 ) -> dict[str, Any]:
     """Create a new detection rule."""
-    try:
-        return await panther.create_rule(rule.model_dump(by_alias=True))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return await panther.create_rule(rule.model_dump(by_alias=True))
 
 
 @router.patch("/{rule_id}")
@@ -108,8 +100,6 @@ async def update_rule(
         return await panther.update_rule(rule_id, update_data)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.delete("/{rule_id}", status_code=204)
@@ -122,8 +112,6 @@ async def delete_rule(
         await panther.delete_rule(rule_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/{rule_id}/test")
@@ -136,5 +124,3 @@ async def test_rule(
         return await panther.test_rule(rule_id)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))

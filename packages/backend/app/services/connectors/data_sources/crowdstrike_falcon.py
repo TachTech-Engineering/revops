@@ -12,6 +12,7 @@ from typing import Any
 
 import httpx
 
+from app.core.time_utils import utcnow
 from app.db.models import ConnectorCategory, NormalizedAlert
 from app.services.connectors.base import (
     ConnectionTestResult,
@@ -265,7 +266,7 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
     def normalize_alert(self, raw_alert: dict[str, Any]) -> NormalizedAlert:
         """Normalize a CrowdStrike alert to the unified schema."""
         # Parse timestamps (must be timezone-naive for database)
-        created_at = datetime.utcnow()
+        created_at = utcnow()
         created_timestamp = raw_alert.get("created_timestamp", "")
         if created_timestamp:
             try:
@@ -344,7 +345,7 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
             mitre_tactics=mitre_tactics,
             mitre_techniques=mitre_techniques,
             raw_data=raw_alert,
-            ingested_at=datetime.utcnow(),
+            ingested_at=utcnow(),
         )
 
     def _extract_tags(self, raw_alert: dict[str, Any]) -> list[str]:

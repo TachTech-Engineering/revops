@@ -15,6 +15,8 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
+from app.core.time_utils import utcnow
+
 logger = logging.getLogger(__name__)
 
 
@@ -401,7 +403,7 @@ class SyslogReceiverService:
                 pri = int(raw[1:end_pri])
                 message = raw[end_pri + 1 :].strip()
                 return SyslogMessage(
-                    timestamp=datetime.utcnow(),
+                    timestamp=utcnow(),
                     facility=pri >> 3,
                     severity=pri & 0x07,
                     hostname="unknown",
@@ -418,7 +420,7 @@ class SyslogReceiverService:
         # Last resort: accept any message
         if raw and len(raw) > 5:
             return SyslogMessage(
-                timestamp=datetime.utcnow(),
+                timestamp=utcnow(),
                 facility=1,
                 severity=6,
                 hostname="unknown",
@@ -437,7 +439,7 @@ class SyslogReceiverService:
         # RFC 3164 format: "Jan  5 12:34:56"
         try:
             # Add current year
-            current_year = datetime.utcnow().year
+            current_year = utcnow().year
             parsed = datetime.strptime(f"{current_year} {ts_str}", "%Y %b %d %H:%M:%S")
             return parsed
         except ValueError:
@@ -453,7 +455,7 @@ class SyslogReceiverService:
         except ValueError:
             pass
 
-        return datetime.utcnow()
+        return utcnow()
 
     def _matches_handler(self, message: SyslogMessage, handler: SyslogHandler) -> bool:
         """Check if a message matches a handler's filters."""

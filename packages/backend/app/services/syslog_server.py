@@ -13,6 +13,7 @@ from datetime import datetime
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time_utils import utcnow
 from app.db.models import Connector, ConnectorCategory, ConnectorStatus, NormalizedAlert
 from app.db.session import AsyncSessionLocal
 from app.services.connectors.data_sources.unifi_syslog import UniFiSyslogConnector
@@ -148,7 +149,7 @@ class SyslogServer:
         # Return raw message if no pattern matches
         return {
             "priority": "14",  # Default: user.info
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": utcnow().isoformat(),
             "hostname": "unknown",
             "message": message,
         }
@@ -311,7 +312,7 @@ class SyslogServer:
     def _parse_timestamp(self, timestamp_str: str | None) -> datetime:
         """Parse syslog timestamp to datetime."""
         if not timestamp_str:
-            return datetime.utcnow()
+            return utcnow()
 
         # Try various formats
         formats = [
@@ -326,7 +327,7 @@ class SyslogServer:
                 dt = datetime.strptime(timestamp_str, fmt)
                 # Handle BSD format (no year)
                 if dt.year == 1900:
-                    dt = dt.replace(year=datetime.utcnow().year)
+                    dt = dt.replace(year=utcnow().year)
                 # Remove timezone info for naive datetime
                 if dt.tzinfo:
                     dt = dt.replace(tzinfo=None)
@@ -334,7 +335,7 @@ class SyslogServer:
             except ValueError:
                 continue
 
-        return datetime.utcnow()
+        return utcnow()
 
 
 # Global server instance

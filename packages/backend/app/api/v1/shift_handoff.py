@@ -4,7 +4,6 @@ Shift Handoff API
 Allows SOC analysts to document and transfer context between shifts.
 """
 
-from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -13,6 +12,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import ShiftHandoff, get_db
 
 router = APIRouter()
@@ -175,7 +175,7 @@ async def create_handoff(
 
     handoff = ShiftHandoff(
         organization_id=org_id,
-        shift_date=datetime.utcnow(),
+        shift_date=utcnow(),
         outgoing_analyst=user.email,
         incoming_analyst=request.incoming_analyst,
         summary=request.summary,
@@ -216,7 +216,7 @@ async def acknowledge_handoff(
         raise HTTPException(status_code=400, detail="Handoff already acknowledged")
 
     handoff.is_acknowledged = True
-    handoff.acknowledged_at = datetime.utcnow()
+    handoff.acknowledged_at = utcnow()
     handoff.acknowledged_by = user.email
 
     await db.commit()

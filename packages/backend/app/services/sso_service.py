@@ -5,7 +5,6 @@ Supports Google, Okta, Azure AD, and generic SAML.
 
 import logging
 import os
-from datetime import datetime
 from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
@@ -16,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.core.time_utils import utcnow
 from app.db import Organization, OrganizationSSO, SSOProvider, User
 from app.services.encryption_service import decrypt_credential
 
@@ -258,7 +258,7 @@ async def get_or_create_sso_user(
 
     if user:
         # Update last login
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = utcnow()
         if name and not user.name:
             user.name = name
         await db.commit()
@@ -277,7 +277,7 @@ async def get_or_create_sso_user(
         # Link existing account to SSO
         user.sso_provider = provider
         user.sso_id = sso_id
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = utcnow()
         if name and not user.name:
             user.name = name
         await db.commit()
@@ -297,7 +297,7 @@ async def get_or_create_sso_user(
         user.organization_id = organization_id
         user.sso_provider = provider
         user.sso_id = sso_id
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = utcnow()
         if name and not user.name:
             user.name = name
         await db.commit()

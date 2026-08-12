@@ -8,6 +8,8 @@ from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from app.core.time_utils import utcnow
+
 
 class Base(DeclarativeBase):
     pass
@@ -165,9 +167,9 @@ class Organization(Base):
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     settings: Mapped[dict | None] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     # Relationships
@@ -230,9 +232,9 @@ class OrganizationSSO(Base):
 
     # Audit
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     # Relationships
@@ -279,9 +281,9 @@ class OrganizationAPIKeys(Base):
 
     # Audit
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     __table_args__ = (
@@ -312,9 +314,9 @@ class User(Base):
     )  # Provider's unique user ID
 
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     # Relationships
@@ -332,7 +334,7 @@ class RefreshToken(Base):
     )
     token_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
@@ -355,9 +357,9 @@ class SavedQuery(Base):
     sql: Mapped[str] = mapped_column(Text, nullable=False)
     is_shared: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str] = mapped_column(String(255), default="default")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -381,9 +383,9 @@ class ScheduledReport(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -406,9 +408,9 @@ class SuppressionRule(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), default="default")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -425,9 +427,9 @@ class UserSettings(Base):
         JSON, default=lambda: ["CRITICAL", "HIGH"]
     )
     keyboard_shortcuts_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -449,9 +451,9 @@ class WebhookConfig(Base):
     severity_filter: Mapped[list] = mapped_column(JSON, default=lambda: ["CRITICAL", "HIGH"])
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -467,9 +469,9 @@ class UserRole(Base):
     email: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[UserRoleType] = mapped_column(SQLEnum(UserRoleType), default=UserRoleType.VIEWER)
     created_by: Mapped[str] = mapped_column(String(255), default="system")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     __table_args__ = (Index("ix_user_roles_org_email", "organization_id", "email", unique=True),)
@@ -489,7 +491,7 @@ class AuditLog(Base):
     details: Mapped[dict] = mapped_column(JSON, default=dict)
     ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class Playbook(Base):
@@ -508,9 +510,9 @@ class Playbook(Base):
     )
     auto_execute: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str] = mapped_column(String(255), default="system")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -531,7 +533,7 @@ class PlaybookExecution(Base):
     action_results: Mapped[list] = mapped_column(JSON, default=list)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     triggered_by: Mapped[str] = mapped_column(String(255), default="system")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class Incident(Base):
@@ -552,9 +554,9 @@ class Incident(Base):
     assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     created_by: Mapped[str] = mapped_column(String(255), default="system")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -568,7 +570,7 @@ class IncidentAlert(Base):
     incident_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     alert_id: Mapped[str] = mapped_column(String(255), nullable=False)
     added_by: Mapped[str] = mapped_column(String(255), default="system")
-    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class CorrelationRule(Base):
@@ -584,9 +586,9 @@ class CorrelationRule(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_create_incident: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str] = mapped_column(String(255), default="system")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -609,9 +611,9 @@ class Case(Base):
     incident_ids: Mapped[list] = mapped_column(JSON, default=list)  # Linked incidents
     created_by: Mapped[str] = mapped_column(String(255), default="system")
     closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     __table_args__ = (Index("ix_cases_org_number", "organization_id", "case_number", unique=True),)
@@ -632,7 +634,7 @@ class CaseActivity(Base):
     old_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     new_value: Mapped[str | None] = mapped_column(Text, nullable=True)
     user_email: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class CaseAttachment(Base):
@@ -648,7 +650,7 @@ class CaseAttachment(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     storage_path: Mapped[str] = mapped_column(Text, nullable=False)
     uploaded_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class EnrichmentPipeline(Base):
@@ -681,9 +683,9 @@ class EnrichmentPipeline(Base):
         JSON, default=list
     )  # Only enrich alerts with these severities
     created_by: Mapped[str] = mapped_column(String(255), default="system")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -704,7 +706,7 @@ class EnrichmentCache(Base):
     result: Mapped[dict] = mapped_column(JSON, default=dict)  # Enrichment result
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class AlertEnrichment(Base):
@@ -720,7 +722,7 @@ class AlertEnrichment(Base):
     source_value: Mapped[str] = mapped_column(Text, nullable=False)
     enrichment_data: Mapped[dict] = mapped_column(JSON, default=dict)
     enriched_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class CustomDashboard(Base):
@@ -737,9 +739,9 @@ class CustomDashboard(Base):
     layout: Mapped[list] = mapped_column(JSON, default=list)  # react-grid-layout format
     widgets: Mapped[list] = mapped_column(JSON, default=list)  # Widget configurations
     owner_email: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -761,9 +763,9 @@ class MitreMapping(Base):
     tactic: Mapped[MitreTactic] = mapped_column(SQLEnum(MitreTactic), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -791,9 +793,9 @@ class SLAPolicy(Base):
     # Optional rule filters - if empty, applies to all alerts
     rule_ids: Mapped[list] = mapped_column(JSON, default=list)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -822,9 +824,9 @@ class SLAMetric(Base):
     # Actual times (in minutes)
     ack_time_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     resolve_time_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -1073,9 +1075,9 @@ class Note(Base):
         UUID(as_uuid=True), nullable=True
     )  # For replies
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -1099,7 +1101,7 @@ class Notification(Base):
     created_by: Mapped[str | None] = mapped_column(
         String(255), nullable=True
     )  # Who triggered the notification
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 # Phase 5: IOC Management Models
@@ -1117,14 +1119,14 @@ class IOC(Base):
     feed_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list] = mapped_column(JSON, default=list)
-    first_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    last_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    first_seen: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -1146,9 +1148,9 @@ class ThreatFeed(Base):
     ioc_count: Mapped[int] = mapped_column(Integer, default=0)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -1165,7 +1167,7 @@ class FeedSyncLog(Base):
     iocs_updated: Mapped[int] = mapped_column(Integer, default=0)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 # Phase 5: AI Summary Cache
@@ -1184,7 +1186,7 @@ class AISummaryCache(Base):
     input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 # Phase 5: Rule Recommendations
@@ -1205,9 +1207,9 @@ class RuleRecommendation(Base):
     status: Mapped[RecommendationStatus] = mapped_column(
         SQLEnum(RecommendationStatus), default=RecommendationStatus.PENDING
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -1221,7 +1223,7 @@ class RuleRecommendationDismissal(Base):
     recommendation_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     dismissed_by: Mapped[str] = mapped_column(String(255), nullable=False)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    dismissed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    dismissed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 # Phase 5: Attack Simulation Models
@@ -1269,9 +1271,9 @@ class SimulationTemplate(Base):
     test_data: Mapped[dict] = mapped_column(
         JSON, default=dict
     )  # Additional framework-specific data
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -1294,7 +1296,7 @@ class SimulationRun(Base):
     detection_rule_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     triggered_by: Mapped[str] = mapped_column(String(255), nullable=False)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class SimulationResult(Base):
@@ -1310,7 +1312,7 @@ class SimulationResult(Base):
     output: Mapped[str | None] = mapped_column(Text, nullable=True)
     detected_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     detection_details: Mapped[dict] = mapped_column(JSON, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 # ==================== CONNECTOR FRAMEWORK MODELS ====================
@@ -1357,9 +1359,9 @@ class Connector(Base):
     )  # Pagination cursor
 
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -1410,9 +1412,9 @@ class NormalizedAlert(Base):
     raw_data: Mapped[dict] = mapped_column(JSON, default=dict)
 
     # Local timestamps
-    ingested_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    ingested_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     __table_args__ = (
@@ -1458,9 +1460,9 @@ class Workflow(Base):
     tags: Mapped[list] = mapped_column(JSON, default=list)
 
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -1502,9 +1504,9 @@ class WorkflowNode(Base):
     # Timeout
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=300)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     __table_args__ = (
@@ -1540,7 +1542,7 @@ class WorkflowEdge(Base):
     # Edge styling/metadata
     label: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class WorkflowExecution(Base):
@@ -1581,7 +1583,7 @@ class WorkflowExecution(Base):
     failed_node_key: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     triggered_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class WorkflowStepExecution(Base):
@@ -1624,7 +1626,7 @@ class WorkflowStepExecution(Base):
     loop_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     loop_item: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 # ==================== DATA PIPELINE ENUMS ====================
@@ -1710,9 +1712,9 @@ class Pipeline(Base):
     avg_processing_ms: Mapped[float] = mapped_column(default=0.0)
 
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     # Relationships
@@ -1760,9 +1762,9 @@ class PipelineStage(Base):
         JSON, default=list
     )  # [{"id": "match", "label": "Match"}, ...]
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     # Relationship
@@ -1795,7 +1797,7 @@ class PipelineEdge(Base):
     # Optional condition for conditional routing
     condition: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     # Relationship
     pipeline: Mapped["Pipeline"] = relationship("Pipeline", back_populates="edges")
@@ -1822,9 +1824,9 @@ class PipelineDestination(Base):
     status: Mapped[str] = mapped_column(String(50), default="pending")
 
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -1862,7 +1864,7 @@ class PipelineExecution(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     triggered_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 # ==================== FEATURE 1: RULE VERSION HISTORY ====================
@@ -1902,7 +1904,7 @@ class RuleVersion(Base):
     change_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     changed_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     __table_args__ = (
         Index(
@@ -1945,10 +1947,10 @@ class RuleHealth(Base):
     severity: Mapped[str | None] = mapped_column(String(50), nullable=True)
     owner_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    last_checked_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_checked_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     __table_args__ = (Index("ix_rule_health_org_rule", "organization_id", "rule_id", unique=True),)
@@ -1985,7 +1987,7 @@ class TriageSuggestion(Base):
     feedback_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     feedback_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 class AssetCriticality(Base):
@@ -2018,9 +2020,9 @@ class AssetCriticality(Base):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -2056,7 +2058,7 @@ class NLQueryHistory(Base):
     was_helpful: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     feedback_comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 # ==================== FEATURE 5: AI ALERT CLUSTERING ====================
@@ -2105,9 +2107,9 @@ class AlertCluster(Base):
     common_entities: Mapped[dict] = mapped_column(JSON, default=dict)
 
     assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -2131,7 +2133,7 @@ class AlertClusterMember(Base):
     alert_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
 
     similarity_score: Mapped[float] = mapped_column(nullable=False)  # 0.0-1.0
-    added_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     __table_args__ = (
         Index("ix_cluster_members_cluster_alert", "cluster_id", "alert_id", unique=True),
@@ -2174,9 +2176,9 @@ class PlaybookTemplate(Base):
         UUID(as_uuid=True), nullable=True
     )
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -2206,9 +2208,9 @@ class IncidentResolutionPattern(Base):
     pattern_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     occurrence_count: Mapped[int] = mapped_column(Integer, default=1)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -2245,9 +2247,9 @@ class EscalationPolicy(Base):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     # Custom message templates for notifications
@@ -2306,7 +2308,7 @@ class EscalationStep(Base):
     use_oncall_schedule: Mapped[bool] = mapped_column(Boolean, default=False)
     oncall_schedule_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     # Relationship
     policy: Mapped["EscalationPolicy"] = relationship("EscalationPolicy", back_populates="steps")
@@ -2344,7 +2346,7 @@ class AlertEscalation(Base):
     current_step: Mapped[int] = mapped_column(Integer, default=0)
 
     # Timing
-    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     next_escalation_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     acknowledged_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
@@ -2352,9 +2354,9 @@ class AlertEscalation(Base):
     # History of sent notifications
     notification_history: Mapped[list] = mapped_column(JSON, default=list)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -2400,9 +2402,9 @@ class OnCallSchedule(Base):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     # Relationships
@@ -2436,7 +2438,7 @@ class OnCallRotationMember(Base):
     phone_number: Mapped[str | None] = mapped_column(String(50), nullable=True)
     slack_user_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     # Relationship
     schedule: Mapped["OnCallSchedule"] = relationship("OnCallSchedule", back_populates="members")
@@ -2467,7 +2469,7 @@ class OnCallOverride(Base):
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 # ==================== FEATURE 9: TREND ANALYSIS ====================
@@ -2499,7 +2501,7 @@ class AlertTrendCache(Base):
     # Trend indicators
     change_from_previous: Mapped[float | None] = mapped_column(nullable=True)  # Percentage change
 
-    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     __table_args__ = (
         Index(
@@ -2551,7 +2553,7 @@ class AnomalyDetection(Base):
     acknowledged_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    detected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    detected_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
 # ==================== FEATURE: SHIFT HANDOFF ====================
@@ -2595,9 +2597,9 @@ class ShiftHandoff(Base):
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     acknowledged_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
 
@@ -2623,8 +2625,8 @@ class AlertPresence(Base):
     user_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Presence tracking
-    started_viewing_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    last_heartbeat: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    started_viewing_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_heartbeat: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     __table_args__ = (
         Index("ix_alert_presence_alert_org", "alert_id", "organization_id"),
@@ -2656,9 +2658,9 @@ class AlertCorrelationWindow(Base):
     first_alert_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     last_alert_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     triggered: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     __table_args__ = (
@@ -2698,9 +2700,9 @@ class ComplianceFramework(Base):
     last_assessment_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     next_assessment_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     # Relationships
@@ -2742,9 +2744,9 @@ class ComplianceControl(Base):
     last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     reviewed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     # Relationship
@@ -2783,7 +2785,7 @@ class ComplianceAssessment(Base):
     not_implemented_count: Mapped[int] = mapped_column(Integer, default=0)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     assessor: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     # Relationship
     framework: Mapped["ComplianceFramework"] = relationship(
@@ -2825,9 +2827,9 @@ class ThreatHunt(Base):
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     assigned_to: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tags: Mapped[list] = mapped_column(JSONB, default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     # Relationships
@@ -2859,9 +2861,9 @@ class HuntQuery(Base):
     query_type: Mapped[str] = mapped_column(String(50), default="detection")
     expected_results: Mapped[str | None] = mapped_column(Text, nullable=True)
     order_index: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, default=utcnow, onupdate=utcnow
     )
 
     # Relationship
@@ -2905,7 +2907,7 @@ class HuntResult(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     executed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     executed_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     # Relationship
     hunt: Mapped["ThreatHunt"] = relationship("ThreatHunt", back_populates="results")

@@ -1,7 +1,7 @@
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Query
 from pydantic import BaseModel
 
 from app.api.v1.deps import OrgAnalystDep, OrgUserDep
@@ -215,11 +215,8 @@ async def unified_lookup(
     }
     normalized_type = type_mapping.get(indicator_type, indicator_type)
 
-    try:
-        result = await threat_intel_service.lookup(indicator, normalized_type)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    result = await threat_intel_service.lookup(indicator, normalized_type)
+    return result
 
 
 @router.get("/sources")

@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.v1.deps import OrgAdminDep, OrgIdDep, OrgUserDep
+from app.core.time_utils import utcnow
 from app.db import get_db
 from app.db.models import (
     ComplianceAssessment,
@@ -399,7 +400,7 @@ async def update_control(
         control.notes = request.notes
 
     # Track review
-    control.last_reviewed_at = datetime.utcnow()
+    control.last_reviewed_at = utcnow()
     control.reviewed_by = user.email
 
     # Update framework counts if status changed
@@ -541,7 +542,7 @@ async def create_assessment(
     assessment = ComplianceAssessment(
         organization_id=org_id,
         framework_id=framework_id,
-        assessment_date=datetime.utcnow(),
+        assessment_date=utcnow(),
         coverage_score=coverage,
         total_controls=total,
         implemented_count=implemented,
@@ -553,7 +554,7 @@ async def create_assessment(
     db.add(assessment)
 
     # Update framework
-    framework.last_assessment_date = datetime.utcnow()
+    framework.last_assessment_date = utcnow()
 
     await db.commit()
     await db.refresh(assessment)
@@ -671,7 +672,7 @@ async def export_compliance_report(
             headers={
                 "Content-Disposition": (
                     "attachment; filename=compliance_report_"
-                    f"{datetime.utcnow().strftime('%Y%m%d')}.csv"
+                    f"{utcnow().strftime('%Y%m%d')}.csv"
                 )
             },
         )
