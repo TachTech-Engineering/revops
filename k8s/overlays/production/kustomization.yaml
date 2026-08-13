@@ -50,7 +50,7 @@ configMapGenerator:
 images:
 - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend
   newName: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend
-  newTag: 765e431
+  newTag: c2a7ccb
 - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend
   newName: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend
-  newTag: 765e431
+  newTag: c2a7ccb
