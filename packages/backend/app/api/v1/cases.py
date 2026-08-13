@@ -212,7 +212,9 @@ async def create_case(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CaseDetailResponse:
     """Create a new case. Requires analyst role."""
-    case_number = await generate_case_number(db)
+    # Scope the sequence to this organization: a global counter leaked
+    # platform-wide case volume across tenants.
+    case_number = await generate_case_number(db, analyst.organization_id)
 
     db_case = Case(
         case_number=case_number,

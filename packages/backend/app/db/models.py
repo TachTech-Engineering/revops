@@ -333,6 +333,64 @@ class RefreshToken(Base):
     user: Mapped["User"] = relationship("User")
 
 
+class PasswordResetToken(Base):
+    """Password reset tokens.
+
+    Previously these lived in a module-level dict, which is wrong in two ways
+    once there is more than one replica: a token minted on pod A is rejected by
+    pod B, and every token is lost on restart. Only the hash is stored, so a
+    database read does not yield a usable token.
+    """
+
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    # Single-use: set the moment the token is redeemed.
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    user: Mapped["User"] = relationship("User")
+
+
+class OrganizationTelephonyConfig(Base):
+    """Per-organization telephony (Fonoster) configuration.
+
+    This was a process-global singleton, so one tenant saving their carrier
+    credentials overwrote another's and escalation calls dialled out under the
+    wrong account. Mirrors OrganizationAPIKeys: secret encrypted at rest, one
+    row per organization.
+    """
+
+    __tablename__ = "organization_telephony_config"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    api_endpoint: Mapped[str] = mapped_column(String(255), nullable=False)
+    access_key_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Fernet-encrypted; never returned by the API.
+    access_key_secret_encrypted: Mapped[bytes] = mapped_column(nullable=False)
+    default_caller_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    tts_voice: Mapped[str] = mapped_column(String(50), default="en-US-Standard-A")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (Index("ix_org_telephony_org", "organization_id", unique=True),)
+
+
 # ==================== Tenant-Scoped Models ====================
 # All models below include organization_id for multi-tenancy
 
@@ -1368,6 +1426,16 @@ class NormalizedAlert(Base):
     __table_args__ = (
         Index("ix_normalized_alerts_org_connector", "organization_id", "connector_id"),
         Index("ix_normalized_alerts_org_external", "organization_id", "external_id"),
+        # The connector sync does a check-then-insert, so two overlapping syncs
+        # of the same connector both miss the check and insert the same alert.
+        # The database is the only place that race can actually be settled.
+        Index(
+            "uq_normalized_alerts_org_connector_external",
+            "organization_id",
+            "connector_id",
+            "external_id",
+            unique=True,
+        ),
     )
 
     @validates("source_type", "external_id", "title", "severity", "status", "rule_id", "rule_name")

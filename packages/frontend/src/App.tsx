@@ -65,6 +65,8 @@ const FonosterIntegrationPage = lazy(() => import('./pages/FonosterIntegrationPa
 const ComplianceDashboardPage = lazy(() => import('./pages/ComplianceDashboardPage'))
 const ReportBuilderPage = lazy(() => import('./pages/ReportBuilderPage'))
 const ExecutiveSummaryPage = lazy(() => import('./pages/ExecutiveSummaryPage'))
+// Catch-all for unknown paths inside the authenticated shell.
+const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 
 // Lightweight Suspense fallback: a centered spinner that respects
 // prefers-reduced-motion (motion-reduce:animate-none disables the spin).
@@ -178,6 +180,9 @@ function App() {
                     <Route path="/compliance" element={<ComplianceDashboardPage />} />
                     <Route path="/report-builder" element={<ReportBuilderPage />} />
                     <Route path="/executive-summary" element={<ExecutiveSummaryPage />} />
+                    {/* Anything else: show a real "not found" page instead of
+                        rendering null (a blank body under the shell). */}
+                    <Route path="*" element={<NotFoundPage />} />
                   </Routes>
                 </Suspense>
               </ErrorBoundary>

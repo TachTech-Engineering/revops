@@ -1675,6 +1675,11 @@ export const revopsApi = createApi({
       providesTags: ['ExecutiveMetrics'],
     }),
 
+    // NOTE: the backend has no POST /executive/export (app/api/v1/executive_summary.py
+    // exposes only /metrics, /risk-areas, /team-performance, /sla-compliance).
+    // This endpoint 404s; the Executive Summary page therefore shows export as
+    // unavailable instead of calling it. Do not wire it into UI until the
+    // backend route exists.
     exportExecutiveReport: builder.mutation<ExportReportResponse, ExportExecutiveReportRequest>({
       query: (body) => ({
         url: '/executive/export',

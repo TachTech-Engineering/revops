@@ -13,22 +13,21 @@ from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.db import SSOProvider, UserRoleType, get_db
+from app.db import SSOProvider, get_db
 from app.services.auth_service import (
     AuthError,
     authenticate_user,
-    create_organization,
     create_password_reset_token,
     create_refresh_token,
-    create_user,
     decode_access_token,
     generate_token_response,
     get_user_by_email,
     get_user_by_id,
+    register_account,
     reset_user_password,
     revoke_refresh_token,
+    rotate_refresh_token,
     store_refresh_token,
-    validate_refresh_token,
 )
 from app.services.sso_service import (
     complete_sso_flow,
@@ -159,30 +158,19 @@ async def register(
     Register a new user account.
 
     Optionally creates a new organization if organization_name and organization_slug are provided.
+
+    Organization and user are created in a single transaction: creating the org
+    first and committing it meant a failing user insert (a duplicate email, say)
+    left an empty organization behind and burnt its unique slug forever.
     """
     try:
-        organization_id = None
-        user_role = None
-
-        # Create organization if details provided
-        if request.organization_name and request.organization_slug:
-            org = await create_organization(
-                db=db,
-                name=request.organization_name,
-                slug=request.organization_slug,
-            )
-            organization_id = org.id
-            # Organization creator becomes admin
-            user_role = UserRoleType.ADMIN
-
-        # Create user
-        user = await create_user(
+        user = await register_account(
             db=db,
             email=request.email,
             password=request.password,
             name=request.name,
-            organization_id=organization_id,
-            role=user_role,
+            organization_name=request.organization_name,
+            organization_slug=request.organization_slug,
         )
 
         # Generate tokens
@@ -208,24 +196,15 @@ async def login(
 
     If the user's organization has SSO enabled, password login is blocked
     and users must authenticate via SSO instead.
+
+    The SSO check runs AFTER the password verifies. Doing it first meant an
+    unauthenticated caller could tell a registered address in an SSO tenant
+    (403 naming the IdP) from an unknown address (generic 401) -- a free
+    account-enumeration oracle that also disclosed the organization's identity
+    provider. Everything reachable without a correct password is now the same
+    401; the provider hint survives for the user who actually proved they own
+    the account.
     """
-    # First check if user exists and get their org to check SSO enforcement
-    user = await get_user_by_email(db, request.email)
-
-    if user and user.organization_id:
-        # Check if organization has SSO enabled - if so, block password login
-        if await org_has_sso_enabled(db, user.organization_id):
-            providers = await get_org_sso_provider_names(db, user.organization_id)
-            provider_list = ", ".join(providers) if providers else "SSO"
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=(
-                    "Password login is disabled for your organization. "
-                    f"Please sign in using {provider_list}."
-                ),
-            )
-
-    # Proceed with normal authentication
     user = await authenticate_user(db, request.email, request.password)
 
     if not user:
@@ -233,6 +212,17 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if user.organization_id and await org_has_sso_enabled(db, user.organization_id):
+        providers = await get_org_sso_provider_names(db, user.organization_id)
+        provider_list = ", ".join(providers) if providers else "SSO"
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Password login is disabled for your organization. "
+                f"Please sign in using {provider_list}."
+            ),
         )
 
     # Generate tokens
@@ -249,20 +239,20 @@ async def refresh_tokens(
 ):
     """
     Refresh access token using a valid refresh token.
-    """
-    user = await validate_refresh_token(db, request.refresh_token)
 
-    if not user:
+    Rotation is a single compare-and-revoke inside auth_service (see
+    ``rotate_refresh_token``); presenting an already-revoked token revokes the
+    user's whole token family. Reuse and plain invalidity return the identical
+    401 so a replaying attacker learns nothing.
+    """
+    try:
+        user, new_refresh_token = await rotate_refresh_token(db, request.refresh_token)
+    except AuthError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    # Revoke old refresh token and create new one
-    await revoke_refresh_token(db, request.refresh_token)
-    new_refresh_token = create_refresh_token()
-    await store_refresh_token(db, user.id, new_refresh_token)
 
     return generate_token_response(user, new_refresh_token)
 

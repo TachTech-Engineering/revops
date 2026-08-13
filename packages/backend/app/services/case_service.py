@@ -1,36 +1,118 @@
+import logging
+import zlib
+from collections.abc import Iterable
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.time_utils import utcnow
 from app.db import Case, CaseActivity, CaseActivityType
 
+logger = logging.getLogger(__name__)
 
-async def generate_case_number(db: AsyncSession) -> str:
-    """Generate a unique case number in format CASE-YYYY-NNNN."""
+# How many of the highest-sorting case numbers to inspect. The ordering below
+# puts the true maximum first, but a malformed row (hand-written import, a
+# renumbering) should not be able to pin the sequence, so we look at a few and
+# take the largest value that parses.
+_CANDIDATE_ROWS = 25
+
+_INT4_RANGE = 2**32
+_INT4_MAX = 2**31
+
+
+def format_case_number(year: int, sequence: int) -> str:
+    """Render a case number: ``CASE-2026-0042``.
+
+    Zero-padded to four digits and *not* truncated past 9999, so the sequence
+    keeps climbing (CASE-2026-10000) instead of wrapping.
+    """
+    return f"CASE-{year}-{sequence:04d}"
+
+
+def next_case_sequence(case_numbers: Iterable[str], year: int) -> int:
+    """Next free sequence number given existing case numbers for ``year``.
+
+    The numeric suffix is compared as an integer. The old implementation took
+    the lexicographic maximum, so once an organization reached CASE-2026-10000
+    the string comparison ranked it *below* CASE-2026-9999: the counter stuck
+    at 10000 and every subsequent create hit a duplicate-key error.
+    """
+    prefix = f"CASE-{year}-"
+    highest = 0
+    for number in case_numbers:
+        if not number or not number.startswith(prefix):
+            continue
+        suffix = number[len(prefix) :]
+        if not suffix.isdigit():
+            continue
+        highest = max(highest, int(suffix))
+    return highest + 1
+
+
+def _sequence_lock_key(organization_id: UUID | None, year: int) -> int:
+    """Stable signed-int4 advisory-lock key for one org's yearly sequence."""
+    key = zlib.crc32(f"case-number:{organization_id}:{year}".encode())
+    return key - _INT4_RANGE if key >= _INT4_MAX else key
+
+
+async def _lock_case_sequence(db: AsyncSession, organization_id: UUID | None, year: int) -> None:
+    """Serialize case-number allocation for one organization and year.
+
+    A transaction-scoped advisory lock, so it is held until the caller commits
+    the new case. Two concurrent creates in the same organization therefore
+    allocate different numbers instead of both reading the same maximum and
+    racing to a duplicate key on ``ix_cases_org_number``.
+    """
+    try:
+        dialect = db.get_bind().dialect.name
+    except Exception:  # pragma: no cover - defensive
+        dialect = ""
+
+    if dialect != "postgresql":
+        # SQLite and friends have no advisory locks; the unique index still
+        # rejects a genuine collision.
+        return
+
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(:key)"),
+        {"key": _sequence_lock_key(organization_id, year)},
+    )
+
+
+async def generate_case_number(db: AsyncSession, organization_id: UUID | None = None) -> str:
+    """Generate the next case number for an organization: ``CASE-YYYY-NNNN``.
+
+    The sequence is per-organization: a tenant's case numbers must not reveal
+    the platform's total case volume, and ``ix_cases_org_number`` is unique on
+    (organization_id, case_number) so per-org numbering is what the schema
+    expects. ``organization_id`` is optional only so existing callers keep
+    working; omitting it falls back to a cross-tenant sequence and is logged.
+    """
     year = utcnow().year
     prefix = f"CASE-{year}-"
 
-    # Find the highest case number for this year
-    result = await db.execute(
-        select(Case.case_number)
-        .where(Case.case_number.like(f"{prefix}%"))
-        .order_by(Case.case_number.desc())
-        .limit(1)
-    )
-    last_case = result.scalar_one_or_none()
+    if organization_id is None:
+        logger.warning(
+            "generate_case_number called without organization_id; "
+            "falling back to a cross-tenant sequence"
+        )
 
-    if last_case:
-        try:
-            last_number = int(last_case.split("-")[-1])
-            next_number = last_number + 1
-        except (ValueError, IndexError):
-            next_number = 1
-    else:
-        next_number = 1
+    await _lock_case_sequence(db, organization_id, year)
 
-    return f"{prefix}{next_number:04d}"
+    # Longest-then-lexicographic descending puts the numerically largest
+    # suffix first for any zero-padded width (CASE-2026-10000 sorts above
+    # CASE-2026-9999 because it is one character longer).
+    query = select(Case.case_number).where(Case.case_number.like(f"{prefix}%"))
+    if organization_id is not None:
+        query = query.where(Case.organization_id == organization_id)
+    query = query.order_by(
+        func.length(Case.case_number).desc(),
+        Case.case_number.desc(),
+    ).limit(_CANDIDATE_ROWS)
+
+    result = await db.execute(query)
+    return format_case_number(year, next_case_sequence(result.scalars().all(), year))
 
 
 async def add_case_activity(

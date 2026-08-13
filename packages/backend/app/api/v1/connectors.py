@@ -13,6 +13,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import and_, desc, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAdminDep, OrgIdDep, OrgUserDep
@@ -521,6 +522,50 @@ async def trigger_sync(
     return {"status": "sync_queued", "connector_id": str(connector_id), "full_sync": full_sync}
 
 
+async def _insert_alerts_skipping_duplicates(
+    db: AsyncSession, alerts: list[NormalizedAlert]
+) -> list[NormalizedAlert]:
+    """Insert alerts, dropping any that collide on the alert unique index.
+
+    ``uq_normalized_alerts_org_connector_external`` makes
+    (organization_id, connector_id, external_id) unique, which is the only
+    place the check-then-insert race between two overlapping syncs of the same
+    connector can actually be settled. A collision used to abort the entire
+    sync batch; here the batch is flushed inside a SAVEPOINT and, if it
+    conflicts, retried alert-by-alert so only the duplicates are dropped.
+
+    Returns the alerts that were actually inserted.
+    """
+    if not alerts:
+        return []
+
+    try:
+        async with db.begin_nested():
+            db.add_all(alerts)
+            await db.flush()
+        return list(alerts)
+    except IntegrityError:
+        logger.info(
+            "Duplicate alert(s) in a batch of %d; falling back to per-alert insert",
+            len(alerts),
+        )
+
+    inserted: list[NormalizedAlert] = []
+    for alert in alerts:
+        try:
+            async with db.begin_nested():
+                db.add(alert)
+                await db.flush()
+            inserted.append(alert)
+        except IntegrityError:
+            logger.debug(
+                "Skipping alert already ingested for connector %s (external_id=%s)",
+                alert.connector_id,
+                alert.external_id,
+            )
+    return inserted
+
+
 async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_sync: bool = False):
     """Background task to sync alerts from a connector."""
     import logging
@@ -583,12 +628,14 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_
                     cursor=cursor,
                 )
 
-                new_alerts = []
+                candidates = []
                 for alert in alerts:
                     # Set organization_id on the alert
                     alert.organization_id = organization_id
 
-                    # Check if alert already exists (use .first() to handle duplicates gracefully)
+                    # Cheap pre-filter for alerts we already have. This is a
+                    # check-then-insert and therefore racy on its own; the
+                    # unique index is what actually settles concurrent syncs.
                     existing = await db.execute(
                         select(NormalizedAlert.id)
                         .where(
@@ -603,11 +650,10 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_
                     if existing.scalar():
                         continue
 
-                    db.add(alert)
-                    new_alerts.append(alert)
-                    total_synced += 1
+                    candidates.append(alert)
 
-                await db.flush()
+                new_alerts = await _insert_alerts_skipping_duplicates(db, candidates)
+                total_synced += len(new_alerts)
 
                 # Process new alerts through correlation rules
                 if new_alerts:

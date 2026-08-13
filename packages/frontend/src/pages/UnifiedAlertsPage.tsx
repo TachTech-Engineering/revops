@@ -19,7 +19,9 @@ import {
 } from '../api/pantherApi'
 import { cn } from '../lib/utils'
 import { formatRelativeTime } from '../lib/dateUtils'
+import { getApiErrorMessage } from '../lib/apiError'
 import PantherLogo from '../components/common/PantherLogo'
+import { useToast } from '../components/common/Toast'
 
 const severityConfig: Record<string, { color: string; label: string }> = {
   critical: { color: 'bg-red-500/20 text-red-400', label: 'Critical' },
@@ -78,7 +80,23 @@ const sourceTypeConfig: Record<string, { label: string; icon: string | ReactNode
 
 type AlertTab = 'active' | 'resolved'
 
+// Labels used in the bulk-action result messages: [past tense, infinitive].
+const bulkActionLabels: Record<string, [string, string]> = {
+  acknowledge: ['Acknowledged', 'acknowledge'],
+  resolve: ['Resolved', 'resolve'],
+  close: ['Closed', 'close'],
+  reopen: ['Reopened', 'reopen'],
+  set_severity: ['Updated severity for', 'update severity for'],
+  assign: ['Assigned', 'assign'],
+}
+
+function firstFailureReason(failed: { id: string; error: string }[]): string {
+  const reason = failed.find((f) => f.error)?.error
+  return reason ? `First error: ${reason}` : ''
+}
+
 export default function UnifiedAlertsPage() {
+  const toast = useToast()
   const [activeTab, setActiveTab] = useState<AlertTab>('active')
   const [filters, setFilters] = useState({
     severity: '',
@@ -148,17 +166,41 @@ export default function UnifiedAlertsPage() {
   const handleBulkAction = async (action: string, value?: string) => {
     if (selectedAlerts.size === 0) return
 
+    const attempted = selectedAlerts.size
+    const [label, verb] = bulkActionLabels[action] || [action, action]
+
     try {
-      await bulkUpdateAlerts({
+      // The endpoint returns 200 even when every item failed - the per-alert
+      // outcome is in {success, failed}, so it has to be inspected.
+      const result = await bulkUpdateAlerts({
         alert_ids: Array.from(selectedAlerts),
         action,
         value,
       }).unwrap()
 
-      clearSelection()
+      const succeeded = result.success?.length ?? 0
+      const failed = result.failed ?? []
+
+      // Keep the alerts that failed selected so the action can be retried.
+      setSelectedAlerts(new Set(failed.map((f) => f.id)))
       refetch()
+
+      if (failed.length === 0) {
+        toast.success(`${label} ${succeeded} alert${succeeded === 1 ? '' : 's'}.`)
+      } else if (succeeded === 0) {
+        toast.error(
+          `Could not ${verb} any of the ${attempted} selected alert${
+            attempted === 1 ? '' : 's'
+          }. ${firstFailureReason(failed)}`
+        )
+      } else {
+        toast.warning(
+          `${label} ${succeeded} of ${attempted} alerts; ${failed.length} failed. ${firstFailureReason(failed)}`
+        )
+      }
     } catch (error) {
       console.error('Bulk action failed:', error)
+      toast.error(`Bulk ${verb} failed. ${getApiErrorMessage(error)}`)
     }
   }
 

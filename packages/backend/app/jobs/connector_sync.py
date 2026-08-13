@@ -24,6 +24,14 @@ class ConnectorSyncScheduler:
     def __init__(self):
         self._running = False
         self._check_interval = 60  # Check every 60 seconds for connectors due for sync
+        # Strong references to the in-flight sync tasks. asyncio only keeps a
+        # weak reference to a running task, so a task nobody holds can be
+        # garbage collected mid-sync.
+        self._tasks: set[asyncio.Task] = set()
+        # Connectors with a sync already running. last_sync_at is only written
+        # when a sync finishes, so without this a sync taking longer than the
+        # check interval gets a duplicate spawned on every tick.
+        self._in_flight: set[UUID] = set()
 
     async def start(self):
         """Start the sync scheduler."""
@@ -66,15 +74,28 @@ class ConnectorSyncScheduler:
             for connector in connectors:
                 try:
                     # Check if connector is due for sync
-                    if self._is_due_for_sync(connector, now):
+                    if not self._is_due_for_sync(connector, now):
+                        continue
+
+                    if connector.id in self._in_flight:
                         logger.info(
-                            f"Triggering auto-sync for connector {connector.name} "
-                            f"(interval: {connector.sync_interval_minutes}m)"
+                            f"Skipping auto-sync for connector {connector.name}: "
+                            "a sync is still running"
                         )
-                        # Trigger sync in background
-                        asyncio.create_task(
-                            self._sync_connector(connector.id, connector.organization_id)
-                        )
+                        continue
+
+                    logger.info(
+                        f"Triggering auto-sync for connector {connector.name} "
+                        f"(interval: {connector.sync_interval_minutes}m)"
+                    )
+                    # Marked in-flight here, not inside the task, so a second
+                    # tick cannot slip in before the task gets scheduled.
+                    self._in_flight.add(connector.id)
+                    task = asyncio.create_task(
+                        self._sync_connector(connector.id, connector.organization_id)
+                    )
+                    self._tasks.add(task)
+                    task.add_done_callback(self._tasks.discard)
                 except Exception as e:
                     logger.error(f"Error checking connector {connector.id}: {e}")
 
@@ -99,6 +120,8 @@ class ConnectorSyncScheduler:
             await sync_connector_alerts(connector_id, organization_id)
         except Exception as e:
             logger.error(f"Auto-sync failed for connector {connector_id}: {e}")
+        finally:
+            self._in_flight.discard(connector_id)
 
 
 # Global scheduler instance

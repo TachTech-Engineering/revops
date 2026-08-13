@@ -359,10 +359,14 @@ async def remove_escalation_step(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a step from an escalation policy."""
+    # The step must belong to the policy named in the path AND that policy must
+    # belong to the caller's org. Without the policy_id constraint any step in
+    # the org could be deleted through any policy's URL.
     result = await db.execute(
         select(EscalationStep)
         .join(EscalationPolicy)
         .where(EscalationStep.id == UUID(step_id))
+        .where(EscalationStep.policy_id == UUID(policy_id))
         .where(EscalationPolicy.organization_id == org_id)
     )
     step = result.scalar_one_or_none()

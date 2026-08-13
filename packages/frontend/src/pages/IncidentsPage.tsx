@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   useListIncidentsQuery,
   useCreateIncidentMutation,
@@ -8,6 +8,8 @@ import {
   type IncidentSeverity,
   type IncidentCreate,
 } from '../api/pantherApi'
+import { useToast } from '../components/common/Toast'
+import { getApiErrorMessage } from '../lib/apiError'
 
 const statusColors: Record<IncidentStatus, string> = {
   open: 'bg-red-500/20 text-red-400',
@@ -25,10 +27,25 @@ const severityColors: Record<IncidentSeverity, string> = {
 }
 
 export default function IncidentsPage() {
+  const toast = useToast()
   const [page, setPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState<IncidentStatus | ''>('')
   const [severityFilter, setSeverityFilter] = useState<IncidentSeverity | ''>('')
-  const [showCreateModal, setShowCreateModal] = useState(false)
+  // `?create=1` opens the create modal, so other pages can deep-link to
+  // "create an incident" without a dedicated /incidents/new route.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [showCreateModal, setShowCreateModal] = useState(
+    () => searchParams.get('create') === '1'
+  )
+
+  const closeCreateModal = () => {
+    setShowCreateModal(false)
+    if (searchParams.get('create')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('create')
+      setSearchParams(next, { replace: true })
+    }
+  }
 
   const { data, isLoading, error } = useListIncidentsQuery({
     page,
@@ -43,9 +60,11 @@ export default function IncidentsPage() {
   const handleCreate = async (incidentData: IncidentCreate) => {
     try {
       await createIncident(incidentData).unwrap()
-      setShowCreateModal(false)
+      closeCreateModal()
+      toast.success('Incident created.')
     } catch (err) {
       console.error('Failed to create incident:', err)
+      toast.error(`Could not create incident. ${getApiErrorMessage(err)}`)
     }
   }
 
@@ -53,8 +72,10 @@ export default function IncidentsPage() {
     if (confirm('Are you sure you want to delete this incident?')) {
       try {
         await deleteIncident(id).unwrap()
+        toast.success('Incident deleted.')
       } catch (err) {
         console.error('Failed to delete incident:', err)
+        toast.error(`Could not delete incident. ${getApiErrorMessage(err)}`)
       }
     }
   }
@@ -238,7 +259,7 @@ export default function IncidentsPage() {
       {/* Create Incident Modal */}
       {showCreateModal && (
         <CreateIncidentModal
-          onClose={() => setShowCreateModal(false)}
+          onClose={closeCreateModal}
           onCreate={handleCreate}
         />
       )}

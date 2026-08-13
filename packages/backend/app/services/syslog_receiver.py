@@ -11,13 +11,80 @@ import re
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Optional
 from uuid import UUID
 
 from app.core.time_utils import utcnow
 
 logger = logging.getLogger(__name__)
+
+# Fractional seconds in an ISO-8601 timestamp, e.g. the ".123" in
+# "2024-01-15T12:34:56.123Z". Anchored on HH:MM:SS so a dotted date or a
+# dotted timezone name can never be mistaken for it.
+_ISO_FRACTION_RE = re.compile(r"(?<=\d{2}:\d{2}:\d{2})\.(\d+)")
+
+# "Jan  5 12:34:56" (RFC 3164, no year).
+_RFC3164_TS_FORMAT = "%Y %b %d %H:%M:%S"
+
+
+def parse_syslog_timestamp(ts_str: str | None) -> datetime:
+    """Parse a syslog timestamp into a **naive UTC** datetime.
+
+    Naive UTC is the app-wide convention (see ``app.core.time_utils.utcnow``):
+    every ``DateTime`` column is ``TIMESTAMP WITHOUT TIME ZONE`` and consumers
+    compare these values against naive datetimes. Returning a tz-aware value
+    raises ``TypeError: can't compare offset-naive and offset-aware datetimes``
+    in the consumer -- and because ``get_buffered_messages`` drains the buffer
+    *before* that comparison, the raise silently destroys the messages.
+
+    ``datetime.fromisoformat(ts_str[:26])`` used to do this job and was width
+    dependent: ".123456789Z" truncated to a naive value, ".123Z" kept the
+    offset and came back tz-aware, and other widths could slice mid-offset and
+    raise. Every fractional width (0-9+ digits), an explicit offset, a "Z"
+    suffix, an absent timestamp and unparseable junk all resolve to naive UTC
+    here.
+    """
+    ts_str = (ts_str or "").strip()
+    if not ts_str:
+        return utcnow()
+
+    # RFC 3164: "Jan  5 12:34:56" -- no year, so assume the current one.
+    try:
+        return datetime.strptime(f"{utcnow().year} {ts_str}", _RFC3164_TS_FORMAT)
+    except ValueError:
+        pass
+
+    parsed = _parse_iso8601(ts_str)
+    if parsed is not None:
+        return parsed
+
+    logger.debug("Unparseable syslog timestamp %r; falling back to now", ts_str)
+    return utcnow()
+
+
+def _parse_iso8601(ts_str: str) -> datetime | None:
+    """Parse an ISO-8601 timestamp to naive UTC, or None if it isn't one."""
+    candidate = ts_str
+    if candidate.endswith(("Z", "z")):
+        candidate = candidate[:-1] + "+00:00"
+
+    # fromisoformat only accepts 3- or 6-digit fractions; normalise any width
+    # (and drop sub-microsecond precision, which datetime cannot represent).
+    candidate = _ISO_FRACTION_RE.sub(
+        lambda m: "." + m.group(1)[:6].ljust(6, "0"),
+        candidate,
+        count=1,
+    )
+
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
 
 
 @dataclass
@@ -435,27 +502,8 @@ class SyslogReceiverService:
         return None
 
     def _parse_timestamp(self, ts_str: str) -> datetime:
-        """Parse various timestamp formats to datetime."""
-        # RFC 3164 format: "Jan  5 12:34:56"
-        try:
-            # Add current year
-            current_year = utcnow().year
-            parsed = datetime.strptime(f"{current_year} {ts_str}", "%Y %b %d %H:%M:%S")
-            return parsed
-        except ValueError:
-            pass
-
-        # RFC 5424 format: "2024-01-15T12:34:56.123Z" or similar
-        try:
-            # Handle various ISO formats
-            ts_str = ts_str.replace("Z", "+00:00")
-            if "." in ts_str:
-                return datetime.fromisoformat(ts_str[:26])  # Truncate microseconds
-            return datetime.fromisoformat(ts_str)
-        except ValueError:
-            pass
-
-        return utcnow()
+        """Parse various timestamp formats to a naive UTC datetime."""
+        return parse_syslog_timestamp(ts_str)
 
     def _matches_handler(self, message: SyslogMessage, handler: SyslogHandler) -> bool:
         """Check if a message matches a handler's filters."""

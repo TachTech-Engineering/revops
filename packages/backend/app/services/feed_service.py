@@ -20,6 +20,26 @@ from app.services.ioc_service import ioc_service
 
 logger = logging.getLogger(__name__)
 
+# Retry policy for feed syncs. A feed that fails once used to be parked in
+# FeedStatus.ERROR forever, because sync_all_active only picks up ACTIVE feeds
+# and nothing ever rescheduled it -- one 503 from the upstream provider took
+# the feed permanently offline. Instead we back off exponentially and only go
+# terminal after the failures stop looking transient.
+MAX_CONSECUTIVE_SYNC_FAILURES = 5
+SYNC_RETRY_BASE_MINUTES = 5
+SYNC_RETRY_MAX_MINUTES = 240
+
+
+def compute_retry_delay_minutes(consecutive_failures: int) -> int:
+    """Minutes to wait before retrying after ``consecutive_failures`` failures.
+
+    Exponential from :data:`SYNC_RETRY_BASE_MINUTES`, capped at
+    :data:`SYNC_RETRY_MAX_MINUTES`: 5, 10, 20, 40, 80, 160, 240, 240, ...
+    """
+    exponent = max(1, consecutive_failures) - 1
+    delay = SYNC_RETRY_BASE_MINUTES * (2**exponent)
+    return min(delay, SYNC_RETRY_MAX_MINUTES)
+
 
 class FeedParser:
     """Parsers for different feed formats."""
@@ -375,8 +395,36 @@ class FeedService:
         except Exception as e:
             result["status"] = "failed"
             result["error"] = str(e)
-            feed.status = FeedStatus.ERROR
             feed.error_message = str(e)
+
+            # Count this attempt on top of the unbroken run of failures already
+            # recorded, then either back off and stay schedulable or, once the
+            # failures clearly are not transient, hand the feed to an operator.
+            consecutive = await self._count_consecutive_failures(db, feed_id) + 1
+            delay_minutes = compute_retry_delay_minutes(consecutive)
+            feed.next_sync_at = utcnow() + timedelta(minutes=delay_minutes)
+
+            if consecutive >= MAX_CONSECUTIVE_SYNC_FAILURES:
+                feed.status = FeedStatus.ERROR
+                logger.error(
+                    "Feed %s (%s) failed %d consecutive syncs; marking ERROR: %s",
+                    feed.name,
+                    feed_id,
+                    consecutive,
+                    e,
+                )
+            else:
+                # Stays ACTIVE so sync_all_active retries it at next_sync_at.
+                feed.status = FeedStatus.ACTIVE
+                logger.warning(
+                    "Feed %s (%s) sync failed (%d/%d); retrying in %dm: %s",
+                    feed.name,
+                    feed_id,
+                    consecutive,
+                    MAX_CONSECUTIVE_SYNC_FAILURES,
+                    delay_minutes,
+                    e,
+                )
 
         # Calculate duration
         duration_ms = int((time.time() - start_time) * 1000)
@@ -396,6 +444,34 @@ class FeedService:
 
         result["duration_ms"] = duration_ms
         return result
+
+    async def _count_consecutive_failures(self, db: AsyncSession, feed_id: uuid.UUID) -> int:
+        """Count the unbroken run of failed syncs at the head of a feed's history.
+
+        ThreatFeed has no failure-counter column, so the count is derived from
+        FeedSyncLog. Capped at MAX_CONSECUTIVE_SYNC_FAILURES because that is
+        the only threshold any caller compares against.
+        """
+        try:
+            result = await db.execute(
+                select(FeedSyncLog.status)
+                .where(FeedSyncLog.feed_id == feed_id)
+                .order_by(FeedSyncLog.synced_at.desc(), FeedSyncLog.id.desc())
+                .limit(MAX_CONSECUTIVE_SYNC_FAILURES)
+            )
+            statuses = list(result.scalars().all())
+        except Exception as exc:  # pragma: no cover - defensive
+            # The session may already be poisoned by the failure being handled;
+            # assume a first failure so the feed backs off rather than dying.
+            logger.warning("Could not read sync history for feed %s: %s", feed_id, exc)
+            return 0
+
+        consecutive = 0
+        for status in statuses:
+            if status != "failed":
+                break
+            consecutive += 1
+        return consecutive
 
     async def sync_all_active(
         self, db: AsyncSession, organization_id: uuid.UUID | None = None

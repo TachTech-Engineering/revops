@@ -30,7 +30,8 @@ const primaryItems: NavItem[] = [
 ]
 
 const secondaryItems: NavItem[] = [
-  { path: '/rules', label: 'Rules', icon: Shield },
+  // There is no /rules page; rule management lives on the rule-health dashboard.
+  { path: '/rule-health', label: 'Rule Health', icon: Shield },
   { path: '/analytics', label: 'Analytics', icon: BarChart3 },
   { path: '/mitre', label: 'MITRE', icon: Target },
   { path: '/sla', label: 'SLA', icon: Clock },
@@ -126,7 +127,7 @@ export default function MobileNav() {
               </p>
               <div className="space-y-2">
                 <Link
-                  to="/playbooks"
+                  to="/playbook-generator"
                   onClick={() => setIsOpen(false)}
                   className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300"
                 >

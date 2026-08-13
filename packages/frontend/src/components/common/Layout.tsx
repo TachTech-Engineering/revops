@@ -293,7 +293,7 @@ export default function Layout({ children }: LayoutProps) {
       if (e.key === 'g') {
         const handleNav = (nextKey: KeyboardEvent) => {
           if (nextKey.key === 'a') navigate('/alerts')
-          else if (nextKey.key === 'r') navigate('/rules')
+          else if (nextKey.key === 'r') navigate('/rule-health')
           else if (nextKey.key === 'q') navigate('/queries')
           else if (nextKey.key === 's') navigate('/settings')
           else if (nextKey.key === 'd') navigate('/')
@@ -415,7 +415,7 @@ export default function Layout({ children }: LayoutProps) {
           <div className="flex-shrink-0 p-3 border-t border-border bg-background">
             <p className="text-xs text-muted-foreground">
               <kbd className="px-1 bg-muted rounded text-[10px]">g</kbd>+
-              <kbd className="px-1 bg-muted rounded text-[10px]">c</kbd>/
+              <kbd className="px-1 bg-muted rounded text-[10px]">d</kbd>/
               <kbd className="px-1 bg-muted rounded text-[10px]">a</kbd>/
               <kbd className="px-1 bg-muted rounded text-[10px]">r</kbd>{' '}
               quick nav

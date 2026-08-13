@@ -7,6 +7,9 @@ import RevOpsLogo from '../components/common/RevOpsLogo'
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
+const NETWORK_ERROR_MESSAGE =
+  'Unable to reach the server. Check your connection and try again.'
+
 interface TokenResponse {
   access_token: string
   refresh_token: string
@@ -216,10 +219,10 @@ export default function LoginPage() {
         setError(data.detail || 'Invalid email or password')
       }
     } catch (err) {
-      // Demo mode - allow login without backend auth
-      console.warn('Auth endpoint not available, using demo mode')
-      dispatch(login({ userEmail: email.trim().toLowerCase() }))
-      navigate('/')
+      // Never fake a session here: a session without tokens 401s on every
+      // request and bounces the user back to /login with no explanation.
+      console.error('Login request failed:', err)
+      setError(NETWORK_ERROR_MESSAGE)
     }
   }
 
@@ -259,10 +262,9 @@ export default function LoginPage() {
         setError(data.detail || 'Registration failed')
       }
     } catch (err) {
-      // Demo mode - allow registration without backend
-      console.warn('Auth endpoint not available, using demo mode')
-      dispatch(login({ userEmail: email.trim().toLowerCase(), userName: name.trim() || null }))
-      navigate('/')
+      // Same rule as login: no account was created, so do not sign anyone in.
+      console.error('Registration request failed:', err)
+      setError(NETWORK_ERROR_MESSAGE)
     }
   }
 

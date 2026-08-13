@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import json
 import logging
+from uuid import UUID
 
 import redis.asyncio as redis
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -11,6 +12,7 @@ from app.api.v1.deps import get_user_from_token
 from app.config import settings
 from app.db import User
 from app.db.session import AsyncSessionLocal
+from app.services.auth_service import decode_access_token, get_user_by_id
 from app.services.notification_service import notification_service
 
 logger = logging.getLogger(__name__)
@@ -19,6 +21,14 @@ router = APIRouter()
 
 # Custom close code for authentication failures (4000-4999 is the app-defined range)
 WS_CLOSE_UNAUTHORIZED = 4401
+# The connection authenticated fine but the account is no longer entitled to
+# this stream (deactivated, or moved to a different organization).
+WS_CLOSE_FORBIDDEN = 4403
+
+# How often an established connection re-checks that its authorization still
+# holds. Sockets here live for hours; the access token they presented is valid
+# for minutes.
+REVALIDATE_INTERVAL_SECONDS = 60.0
 
 CHANNEL_ALERTS = notification_service.CHANNEL_ALERTS
 CHANNEL_NOTIFICATIONS = notification_service.CHANNEL_NOTIFICATIONS
@@ -213,6 +223,44 @@ async def authenticate_websocket(websocket: WebSocket) -> User | None:
     return user
 
 
+async def revalidate_connection(
+    websocket: WebSocket, user_id: UUID, organization_id: str | None
+) -> tuple[int, str] | None:
+    """Re-check that this connection is still entitled to its stream.
+
+    Returns None when the connection may continue, otherwise the
+    ``(close_code, reason)`` to close with.
+
+    Authorization used to be decided once, at connect, and never revisited:
+    ``organization_id`` was snapshotted and the socket then sat in an unbounded
+    keepalive loop. An expired token, a deactivated account, or a user moved to
+    another tenant all kept streaming the *original* org's broadcasts for as
+    long as the client stayed connected.
+    """
+    token = websocket.query_params.get("token")
+    if not token:
+        return WS_CLOSE_UNAUTHORIZED, "Missing authentication token"
+
+    # decode_access_token enforces `exp`, so an expired token fails here.
+    payload = decode_access_token(token)
+    if not payload or payload.get("sub") != str(user_id):
+        return WS_CLOSE_UNAUTHORIZED, "Token expired or invalid"
+
+    async with AsyncSessionLocal() as db:
+        user = await get_user_by_id(db, user_id)
+        current_org = str(user.organization_id) if user and user.organization_id else None
+
+    if not user or not user.is_active:
+        return WS_CLOSE_FORBIDDEN, "Account is no longer active"
+
+    if current_org != organization_id:
+        # Never silently re-point the socket at the new org: the client must
+        # reconnect and be re-authorized from scratch.
+        return WS_CLOSE_FORBIDDEN, "Organization membership changed"
+
+    return None
+
+
 async def _serve_connection(websocket: WebSocket, channel: str, user: User) -> None:
     """Register an authenticated connection on `channel` and run the
     keepalive loop until the client disconnects.
@@ -221,15 +269,35 @@ async def _serve_connection(websocket: WebSocket, channel: str, user: User) -> N
     forwards published messages to the ConnectionManager, which sends them to
     this connection only when the payload's organization_id matches the
     user's organization.
+
+    Authorization is re-checked at most every REVALIDATE_INTERVAL_SECONDS; the
+    30s receive timeout guarantees the loop comes round often enough to honour
+    that even from a completely silent client.
     """
     organization_id = str(user.organization_id) if user.organization_id else None
+    user_id = user.id
 
     # Ensure the process-wide Redis subscriber is running (lazy, once).
     await subscriber.ensure_started()
     await manager.connect(websocket, channel, organization_id)
 
+    loop = asyncio.get_running_loop()
+    last_validated = loop.time()
+
     try:
         while True:
+            if loop.time() - last_validated >= REVALIDATE_INTERVAL_SECONDS:
+                failure = await revalidate_connection(websocket, user_id, organization_id)
+                last_validated = loop.time()
+                if failure is not None:
+                    code, reason = failure
+                    logger.info(
+                        "Closing WebSocket on %s for user %s: %s", channel, user_id, reason
+                    )
+                    with contextlib.suppress(Exception):
+                        await websocket.close(code=code, reason=reason)
+                    break
+
             try:
                 # Wait for any client messages (like ping/pong)
                 data = await asyncio.wait_for(

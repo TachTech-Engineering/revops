@@ -27,6 +27,8 @@ from app.db import (
 )
 from app.services.email_service import email_service
 from app.services.fonoster import (
+    TelephonyConfig,
+    resolve_telephony_config,
     send_escalation_call,
     send_escalation_sms,
 )
@@ -41,6 +43,69 @@ SEVERITY_COLORS = {
     "low": "#16a34a",  # Green
     "info": "#2563eb",  # Blue
 }
+
+# A step whose notifications all failed (Twilio 500, SMTP down, ...) is retried
+# this many times in total before the escalation moves on. Retries are scheduled
+# by pushing next_escalation_at forward, so the existing sweep
+# (process_pending_escalations, under the advisory lock) performs them: no queue,
+# and the attempt count is derived from the persisted notification_history, so a
+# crashed or duplicated sweep cannot lose or double-count attempts.
+MAX_STEP_ATTEMPTS = 3
+STEP_RETRY_DELAY_MINUTES = 1
+
+
+def policy_matches_alert(
+    severity_filter: list[str] | None,
+    rule_filter: list[str] | None,
+    alert_severity: str,
+    rule_name: str = "",
+) -> bool:
+    """Return True if an alert matches a policy's severity/rule filters.
+
+    Empty filter == match everything. A NON-empty rule_filter must NOT match an
+    alert with no rule name: the previous code skipped the filter entirely when
+    rule_name was falsy (the API schema defaults it to ""), so a policy scoped to
+    one rule fired for unrelated alerts.
+    """
+    if severity_filter:
+        if alert_severity.lower() not in [s.lower() for s in severity_filter]:
+            return False
+
+    if rule_filter:
+        if not rule_name or rule_name not in rule_filter:
+            return False
+
+    return True
+
+
+def step_attempt_number(step_index: int, notification_history: list[dict] | None) -> int:
+    """1-based attempt number for the next send of ``step_index``."""
+    for entry in reversed(notification_history or []):
+        if entry.get("step_index") != step_index:
+            break
+        if entry.get("success"):
+            break
+        return int(entry.get("attempt", 1)) + 1
+    return 1
+
+
+def next_step_index(current_step: int, notification_history: list[dict] | None) -> int:
+    """Index of the step the sweep should send next.
+
+    Normally ``current_step + 1``, but a step whose last attempt failed and still
+    has retries left is re-sent at the same index so the primary on-call is not
+    silently skipped.
+    """
+    history = notification_history or []
+    if history:
+        last = history[-1]
+        if (
+            last.get("step_index") == current_step
+            and not last.get("success")
+            and int(last.get("attempt", 1)) < MAX_STEP_ATTEMPTS
+        ):
+            return current_step
+    return current_step + 1
 
 
 class EscalationService:
@@ -136,21 +201,14 @@ class EscalationService:
         )
         policies = result.scalars().unique().all()
 
-        severity_lower = alert_severity.lower()
-
         for policy in policies:
-            # Check severity filter (empty = match all)
-            if policy.severity_filter:
-                if severity_lower not in [s.lower() for s in policy.severity_filter]:
-                    continue
-
-            # Check rule filter (empty = match all)
-            if policy.rule_filter:
-                if rule_name and rule_name not in policy.rule_filter:
-                    continue
-
-            # Policy matches
-            return policy
+            if policy_matches_alert(
+                severity_filter=policy.severity_filter,
+                rule_filter=policy.rule_filter,
+                alert_severity=alert_severity,
+                rule_name=rule_name,
+            ):
+                return policy
 
         return None
 
@@ -168,23 +226,36 @@ class EscalationService:
     ) -> bool:
         """Send notification for a specific escalation step."""
         if not policy.steps:
+            # A zero-step policy has nothing to deliver. next_escalation_at must
+            # still be cleared, otherwise the sweep re-selects this escalation
+            # every 60s forever.
+            escalation.next_escalation_at = None
+            escalation.status = EscalationStatus.COMPLETED
+            await self.db.commit()
             return False
 
         sorted_steps = sorted(policy.steps, key=lambda s: s.step_order)
         if step_index >= len(sorted_steps):
             # No more steps, escalation complete
-            escalation.status = EscalationStatus.ESCALATED
+            escalation.next_escalation_at = None
+            escalation.status = EscalationStatus.COMPLETED
             await self.db.commit()
             return False
 
         step = sorted_steps[step_index]
+        attempt = step_attempt_number(step_index, escalation.notification_history)
         success = False
+
+        telephony_config = await self._get_telephony_config(
+            step.notification_type, escalation.organization_id
+        )
 
         for target in step.targets:
             try:
                 result = await self._send_notification(
                     notification_type=step.notification_type,
                     target=target,
+                    telephony_config=telephony_config,
                     alert_id=escalation.alert_id,
                     alert_title=alert_title,
                     alert_severity=alert_severity,
@@ -206,16 +277,40 @@ class EscalationService:
             except Exception as e:
                 logger.error(f"Failed to send {step.notification_type.value} to {target}: {e}")
 
-        # Record in history
+        # Record in history (existing keys are preserved; step_index/attempt are
+        # additive and drive the bounded retry below).
         history_entry = {
             "step": step.step_order,
             "type": step.notification_type.value,
             "sent_at": utcnow().isoformat(),
             "targets": step.targets,
             "success": success,
+            "step_index": step_index,
+            "attempt": attempt,
         }
-        escalation.notification_history = escalation.notification_history + [history_entry]
+        escalation.notification_history = (escalation.notification_history or []) + [history_entry]
         escalation.current_step = step_index
+
+        if not success and step.targets and attempt < MAX_STEP_ATTEMPTS:
+            # Every target failed. Re-arm THIS step instead of advancing, so a
+            # transient provider outage does not silently skip the primary
+            # on-call. The sweep picks it up again at next_escalation_at and
+            # next_step_index() sends the same step.
+            escalation.next_escalation_at = utcnow() + timedelta(
+                minutes=STEP_RETRY_DELAY_MINUTES
+            )
+            logger.warning(
+                f"Escalation {escalation.id} step {step_index} attempt {attempt} failed; "
+                f"retrying in {STEP_RETRY_DELAY_MINUTES}m"
+            )
+            await self.db.commit()
+            return False
+
+        if not success:
+            logger.error(
+                f"Escalation {escalation.id} step {step_index} failed "
+                f"{attempt} time(s); giving up on this step"
+            )
 
         # Calculate next escalation time
         if step_index + 1 < len(sorted_steps):
@@ -228,6 +323,24 @@ class EscalationService:
 
         await self.db.commit()
         return success
+
+    async def _get_telephony_config(
+        self,
+        notification_type: EscalationNotificationType,
+        organization_id: UUID,
+    ) -> TelephonyConfig | None:
+        """Resolve the escalating organization's telephony config.
+
+        Only needed for phone/SMS steps. Without this the call went out through
+        the process-global service, i.e. under whichever tenant configured it
+        last.
+        """
+        if notification_type not in (
+            EscalationNotificationType.PHONE_CALL,
+            EscalationNotificationType.SMS,
+        ):
+            return None
+        return await resolve_telephony_config(self.db, organization_id)
 
     async def _send_notification(
         self,
@@ -244,6 +357,7 @@ class EscalationService:
         call_template: str | None = None,
         sms_template: str | None = None,
         policy: EscalationPolicy | None = None,
+        telephony_config: TelephonyConfig | None = None,
     ) -> dict[str, Any]:
         """Send a notification based on type."""
         if notification_type == EscalationNotificationType.PHONE_CALL:
@@ -258,6 +372,7 @@ class EscalationService:
                 log_source=log_source,
                 message_template=call_template,
                 escalation_id=escalation_id,
+                config=telephony_config,
             )
 
         elif notification_type == EscalationNotificationType.SMS:
@@ -271,6 +386,7 @@ class EscalationService:
                 alert_time=alert_time,
                 log_source=log_source,
                 message_template=sms_template,
+                config=telephony_config,
             )
 
         elif notification_type == EscalationNotificationType.EMAIL:
@@ -740,16 +856,20 @@ Escalation ID: {escalation_id}
                 logger.warning(
                     f"Escalation {escalation.id} references missing policy {escalation.policy_id}"
                 )
-                escalation.status = EscalationStatus.EXPIRED
+                escalation.status = EscalationStatus.CANCELLED
+                escalation.next_escalation_at = None
                 await self.db.commit()
                 continue
 
-            # Send next step notification
+            # Send next step notification -- which is the SAME step again when the
+            # previous attempt failed and retries remain.
             # Note: We'd need to fetch alert details here in production
             await self._send_step_notification(
                 escalation=escalation,
                 policy=policy,
-                step_index=escalation.current_step + 1,
+                step_index=next_step_index(
+                    escalation.current_step, escalation.notification_history
+                ),
                 alert_title=f"Alert {escalation.alert_id}",
                 alert_severity="HIGH",
             )

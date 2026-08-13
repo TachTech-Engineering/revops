@@ -9,14 +9,21 @@ import AlertForecastWidget from './AlertForecastWidget'
 import AnomalyDetectionWidget from './AnomalyDetectionWidget'
 import CoverageGapWidget from './CoverageGapWidget'
 import StaleRulesWidget from './StaleRulesWidget'
-import SystemHealthWidget from './SystemHealthWidget'
-import UserActivityWidget from './UserActivityWidget'
-import ComplianceStatusWidget from './ComplianceStatusWidget'
-import DataIngestionWidget from './DataIngestionWidget'
-import TopAnalystsWidget from './TopAnalystsWidget'
 
-// Extended widget types
-type ExtendedWidgetType = WidgetType | 'alert_forecast' | 'anomaly_detection' | 'coverage_gap' | 'stale_rules' | 'system_health' | 'user_activity' | 'compliance_status' | 'data_ingestion' | 'top_analysts'
+/**
+ * Widget types the renderer understands beyond the backend's `WidgetType`.
+ *
+ * BLOCKER: these four are NOT selectable today. The backend `WidgetType` enum
+ * (packages/backend/app/api/v1/dashboards.py) contains only alert_summary,
+ * alerts_by_severity, alerts_by_status, alerts_over_time, top_rules,
+ * recent_alerts, incident_summary, case_summary, sla_status and custom_query -
+ * `GET /dashboards/widget-types` never offers these, and saving a dashboard
+ * that carries one is rejected with a 422. They are kept because each renders
+ * real API data (forecast, anomalies, MITRE coverage, rule health) and only
+ * needs the backend enum extended to become reachable. Widgets that merely
+ * displayed fabricated data were removed instead.
+ */
+type ExtendedWidgetType = WidgetType | 'alert_forecast' | 'anomaly_detection' | 'coverage_gap' | 'stale_rules'
 
 interface WidgetRendererProps {
   widget: WidgetConfig
@@ -47,7 +54,7 @@ export function WidgetRenderer({ widget }: WidgetRendererProps) {
       return <PlaceholderWidget title="SLA Status" message="SLA tracking coming soon" />
     case 'custom_query':
       return <PlaceholderWidget title="Custom Query" message="Configure a custom query" />
-    // New widgets
+    // Not selectable until the backend WidgetType enum gains them (see above).
     case 'alert_forecast':
       return <AlertForecastWidget config={config} />
     case 'anomaly_detection':
@@ -56,16 +63,6 @@ export function WidgetRenderer({ widget }: WidgetRendererProps) {
       return <CoverageGapWidget config={config} />
     case 'stale_rules':
       return <StaleRulesWidget config={config} />
-    case 'system_health':
-      return <SystemHealthWidget config={config} />
-    case 'user_activity':
-      return <UserActivityWidget config={config} />
-    case 'compliance_status':
-      return <ComplianceStatusWidget config={config} />
-    case 'data_ingestion':
-      return <DataIngestionWidget config={config} />
-    case 'top_analysts':
-      return <TopAnalystsWidget config={config} />
     default:
       return <PlaceholderWidget title="Unknown Widget" message={`Widget type: ${widget.widget_type}`} />
   }
@@ -104,17 +101,11 @@ export const widgetTypeLabels: Record<string, string> = {
   case_summary: 'Case Summary',
   sla_status: 'SLA Status',
   custom_query: 'Custom Query',
-  // New widgets
+  // Rendered but not selectable until the backend WidgetType enum gains them.
   alert_forecast: 'Alert Volume Forecast',
   anomaly_detection: 'Anomaly Detection',
   coverage_gap: 'MITRE Coverage Gaps',
   stale_rules: 'Stale Rules',
-  // Additional widgets
-  system_health: 'System Health',
-  user_activity: 'User Activity',
-  compliance_status: 'Compliance Status',
-  data_ingestion: 'Data Ingestion',
-  top_analysts: 'Top Analysts',
 }
 
 export {
@@ -128,9 +119,4 @@ export {
   AnomalyDetectionWidget,
   CoverageGapWidget,
   StaleRulesWidget,
-  SystemHealthWidget,
-  UserActivityWidget,
-  ComplianceStatusWidget,
-  DataIngestionWidget,
-  TopAnalystsWidget,
 }

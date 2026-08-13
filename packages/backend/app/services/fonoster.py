@@ -11,8 +11,11 @@ Supports:
 import logging
 import os
 from dataclasses import dataclass
+from uuid import UUID
 
 import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -384,20 +387,82 @@ class TelephonyService:
 # Alias for backwards compatibility
 FonosterService = TelephonyService
 
-# Global service instance
-_telephony_service: TelephonyService | None = None
-
 
 def get_fonoster_service() -> TelephonyService:
-    """Get the global telephony service instance."""
-    global _telephony_service
-    if _telephony_service is None:
-        _telephony_service = TelephonyService()
-    return _telephony_service
+    """Build a telephony service from the deployment's environment config.
+
+    This deliberately returns a NEW instance every call rather than a cached
+    module-level singleton. The singleton was process-global and mutable: the
+    config endpoint wrote one tenant's carrier credentials into it, so the next
+    tenant's escalation calls dialled out under the wrong account and caller ID.
+    Per-organization credentials now live in ``organization_telephony_config``
+    (see :func:`load_org_telephony_config`); this env-derived config is only the
+    operator-level default for organizations that have not configured their own.
+    """
+    return TelephonyService()
 
 
 # Alias
 get_telephony_service = get_fonoster_service
+
+
+async def load_org_telephony_config(
+    db: AsyncSession, organization_id: UUID
+) -> TelephonyConfig | None:
+    """Load and decrypt an organization's telephony config, or None if unset.
+
+    The provider (mock/twilio/plivo) stays a deployment-level setting; only the
+    credentials, endpoint, caller ID and voice are per organization.
+    """
+    from app.db.models import OrganizationTelephonyConfig
+    from app.services.encryption_service import decrypt_credential
+
+    result = await db.execute(
+        select(OrganizationTelephonyConfig).where(
+            OrganizationTelephonyConfig.organization_id == organization_id
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        return None
+
+    try:
+        secret = decrypt_credential(row.access_key_secret_encrypted)
+    except Exception:
+        logger.error(
+            "Failed to decrypt telephony secret for organization %s; treating as unconfigured",
+            organization_id,
+        )
+        return None
+
+    return TelephonyConfig(
+        provider=os.getenv("TELEPHONY_PROVIDER", PROVIDER_MOCK),
+        api_endpoint=row.api_endpoint,
+        account_sid=row.access_key_id,
+        auth_token=secret,
+        default_caller_id=row.default_caller_id,
+        tts_voice=row.tts_voice,
+        enabled=row.enabled,
+    )
+
+
+async def resolve_telephony_config(db: AsyncSession, organization_id: UUID) -> TelephonyConfig:
+    """Telephony config for an organization, falling back to the env defaults.
+
+    The fallback is the operator's own configuration (mock server in dev), never
+    another tenant's stored credentials.
+    """
+    config = await load_org_telephony_config(db, organization_id)
+    if config is not None:
+        return config
+    return TelephonyService()._load_config_from_env()
+
+
+async def get_telephony_service_for_org(
+    db: AsyncSession, organization_id: UUID
+) -> TelephonyService:
+    """Build a telephony service bound to one organization's configuration."""
+    return TelephonyService(await resolve_telephony_config(db, organization_id))
 
 
 async def send_escalation_call(
@@ -412,6 +477,7 @@ async def send_escalation_call(
     message_template: str | None = None,
     escalation_id: str | None = None,
     webhook_base_url: str | None = None,
+    config: TelephonyConfig | None = None,
 ) -> dict:
     """
     Send an escalation voice call for an alert.
@@ -430,8 +496,11 @@ async def send_escalation_call(
         message_template: Optional custom message template with placeholders
         escalation_id: Optional escalation ID for tracking acknowledgments
         webhook_base_url: Optional webhook URL for interactive IVR
+        config: The calling organization's telephony config. Callers that have an
+            organization in hand MUST pass it; omitting it falls back to the
+            deployment-level env config.
     """
-    service = get_fonoster_service()
+    service = TelephonyService(config) if config else get_fonoster_service()
 
     # Use custom template or default
     template = message_template or DEFAULT_CALL_TEMPLATE
@@ -467,6 +536,7 @@ async def send_escalation_sms(
     alert_time: str = "",
     log_source: str = "",
     message_template: str | None = None,
+    config: TelephonyConfig | None = None,
 ) -> dict:
     """
     Send an escalation SMS for an alert.
@@ -483,8 +553,10 @@ async def send_escalation_sms(
         alert_time: Optional timestamp of the alert
         log_source: Optional log source (e.g., AWS.CloudTrail, Okta)
         message_template: Optional custom message template with placeholders
+        config: The calling organization's telephony config (see
+            send_escalation_call).
     """
-    service = get_fonoster_service()
+    service = TelephonyService(config) if config else get_fonoster_service()
 
     # Use custom template or default
     template = message_template or DEFAULT_SMS_TEMPLATE

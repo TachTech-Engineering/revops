@@ -855,6 +855,14 @@ export interface paths {
          *
          *     If the user's organization has SSO enabled, password login is blocked
          *     and users must authenticate via SSO instead.
+         *
+         *     The SSO check runs AFTER the password verifies. Doing it first meant an
+         *     unauthenticated caller could tell a registered address in an SSO tenant
+         *     (403 naming the IdP) from an unknown address (generic 401) -- a free
+         *     account-enumeration oracle that also disclosed the organization's identity
+         *     provider. Everything reachable without a correct password is now the same
+         *     401; the provider hint survives for the user who actually proved they own
+         *     the account.
          */
         post: operations["login_api_v1_auth_login_post"];
         delete?: never;
@@ -915,6 +923,11 @@ export interface paths {
         /**
          * Refresh Tokens
          * @description Refresh access token using a valid refresh token.
+         *
+         *     Rotation is a single compare-and-revoke inside auth_service (see
+         *     ``rotate_refresh_token``); presenting an already-revoked token revokes the
+         *     user's whole token family. Reuse and plain invalidity return the identical
+         *     401 so a replaying attacker learns nothing.
          */
         post: operations["refresh_tokens_api_v1_auth_refresh_post"];
         delete?: never;
@@ -937,6 +950,10 @@ export interface paths {
          * @description Register a new user account.
          *
          *     Optionally creates a new organization if organization_name and organization_slug are provided.
+         *
+         *     Organization and user are created in a single transaction: creating the org
+         *     first and committing it meant a failing user insert (a duplicate email, say)
+         *     left an empty organization behind and burnt its unique slug forever.
          */
         post: operations["register_api_v1_auth_register_post"];
         delete?: never;
@@ -2373,12 +2390,14 @@ export interface paths {
         };
         /**
          * Get Fonoster Config
-         * @description Get current Fonoster configuration (secrets masked).
+         * @description Get the calling organization's telephony configuration (secrets masked).
+         *
+         *     The access key secret is never returned; the key id is masked.
          */
         get: operations["get_fonoster_config_api_v1_fonoster_config_get"];
         /**
          * Update Fonoster Config
-         * @description Update Fonoster configuration.
+         * @description Create or update the calling organization's telephony configuration.
          */
         put: operations["update_fonoster_config_api_v1_fonoster_config_put"];
         post?: never;
@@ -2399,7 +2418,7 @@ export interface paths {
         put?: never;
         /**
          * Test Call
-         * @description Make a test voice call.
+         * @description Make a test voice call using the calling organization's configuration.
          */
         post: operations["test_call_api_v1_fonoster_test_call_post"];
         delete?: never;
@@ -2419,7 +2438,7 @@ export interface paths {
         put?: never;
         /**
          * Test Fonoster Connection
-         * @description Test the Fonoster connection.
+         * @description Test the calling organization's telephony connection.
          */
         post: operations["test_fonoster_connection_api_v1_fonoster_test_connection_post"];
         delete?: never;
@@ -2439,7 +2458,7 @@ export interface paths {
         put?: never;
         /**
          * Test Sms
-         * @description Send a test SMS.
+         * @description Send a test SMS using the calling organization's configuration.
          */
         post: operations["test_sms_api_v1_fonoster_test_sms_post"];
         delete?: never;
@@ -3275,7 +3294,13 @@ export interface paths {
         put?: never;
         /**
          * Create Notification Internal
-         * @description Create a notification. Internal use only.
+         * @description Create a notification for a user in the caller's organization.
+         *
+         *     Admin-only: this endpoint had no role dependency at all, so any VIEWER could
+         *     forge notifications attributed to an arbitrary ``user_email``. The recipient
+         *     is now verified to be an active member of the caller's organization, and
+         *     ``created_by`` is taken from the authenticated caller rather than trusted
+         *     from the request body.
          */
         post: operations["create_notification_internal_api_v1_notifications_internal_create_post"];
         delete?: never;

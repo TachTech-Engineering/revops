@@ -142,8 +142,10 @@ export default function AlertCorrelationInsights({
           </div>
         </div>
         {data.suggested_incident && (
+          /* No /incidents/new route exists: the incidents page owns the
+             create-incident modal and opens it on ?create=1. */
           <Link
-            to="/incidents/new"
+            to="/incidents?create=1"
             className="flex items-center gap-2 px-3 py-1.5 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90"
           >
             <AlertTriangle size={14} />

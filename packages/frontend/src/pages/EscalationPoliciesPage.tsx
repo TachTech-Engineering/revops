@@ -23,6 +23,8 @@ import {
   EscalationStepCreate,
 } from '../api/pantherApi'
 import { cn } from '../lib/utils'
+import { getApiErrorMessage } from '../lib/apiError'
+import { useToast } from '../components/common/Toast'
 
 const notificationIcons: Record<string, React.ElementType> = {
   email: Mail,
@@ -35,6 +37,7 @@ const notificationIcons: Record<string, React.ElementType> = {
 }
 
 export default function EscalationPoliciesPage() {
+  const toast = useToast()
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [expandedPolicy, setExpandedPolicy] = useState<string | null>(null)
 
@@ -77,16 +80,23 @@ export default function EscalationPoliciesPage() {
         call_message_template: 'Alert from {source}: {title}. Severity: {severity}. {description}',
         sms_message_template: '[{source}] {severity} Alert: {title}. ID: {id}',
       })
+      toast.success('Escalation policy created.')
     } catch (err) {
+      // The modal stays open on failure so the entered policy is not lost.
       console.error('Failed to create policy:', err)
+      toast.error(`Could not create the policy. ${getApiErrorMessage(err)}`)
     }
   }
 
   const handleToggleActive = async (policyId: string, isActive: boolean) => {
     try {
       await updatePolicy({ id: policyId, update: { is_active: !isActive } }).unwrap()
+      toast.success(isActive ? 'Policy disabled.' : 'Policy enabled.')
     } catch (err) {
       console.error('Failed to toggle policy:', err)
+      toast.error(
+        `Could not ${isActive ? 'disable' : 'enable'} the policy. ${getApiErrorMessage(err)}`
+      )
     }
   }
 
@@ -94,8 +104,10 @@ export default function EscalationPoliciesPage() {
     if (!confirm('Are you sure you want to delete this policy?')) return
     try {
       await deletePolicy(policyId).unwrap()
+      toast.success('Policy deleted.')
     } catch (err) {
       console.error('Failed to delete policy:', err)
+      toast.error(`Could not delete the policy. ${getApiErrorMessage(err)}`)
     }
   }
 
@@ -115,8 +127,10 @@ export default function EscalationPoliciesPage() {
         notification_type: 'email',
         targets: [''],
       })
+      toast.success('Escalation step added.')
     } catch (err) {
       console.error('Failed to add step:', err)
+      toast.error(`Could not add the escalation step. ${getApiErrorMessage(err)}`)
     }
   }
 

@@ -247,23 +247,48 @@ class CorrelationService:
             organization_id: The organization this alert belongs to
 
         Returns:
-            Created Incident if threshold reached, else None
+            The first Incident created for this alert, else None. Use
+            :meth:`evaluate_alert_against_rules` when every incident matters.
         """
-        # Get all active correlation rules
+        incidents = await self.evaluate_alert_against_rules(alert, organization_id)
+        return incidents[0] if incidents else None
+
+    async def evaluate_alert_against_rules(
+        self,
+        alert: NormalizedAlert,
+        organization_id: UUID,
+    ) -> list[Incident]:
+        """
+        Evaluate an alert against *every* applicable correlation rule.
+
+        This deliberately does not stop at the first match. ``seed_default_
+        correlation_rules`` gives every organization a ``min_alerts: 1``
+        critical/high rule, so returning early meant that rule swallowed each
+        critical alert and threshold rules ("5 failed logins in 10 minutes")
+        never had an alert added to their window -- they could never fire.
+        Every rule now gets its window updated, and each rule that fires
+        produces its own incident.
+
+        Returns:
+            The incidents created for this alert, in rule evaluation order.
+        """
+        # Get all active correlation rules. Ordering is explicit so evaluation
+        # (and therefore the incidents produced) is deterministic across
+        # replicas rather than dependent on Postgres' physical row order.
         result = await self.db.execute(
-            select(CorrelationRule).where(
+            select(CorrelationRule)
+            .where(
                 and_(
                     CorrelationRule.organization_id == organization_id,
                     CorrelationRule.is_active.is_(True),
                     CorrelationRule.auto_create_incident.is_(True),
                 )
             )
+            .order_by(CorrelationRule.created_at.asc(), CorrelationRule.id.asc())
         )
         rules = result.scalars().all()
 
-        if not rules:
-            return None
-
+        incidents: list[Incident] = []
         for rule in rules:
             conditions = rule.conditions or {}
             min_alerts = conditions.get("min_alerts", 1)
@@ -277,10 +302,13 @@ class CorrelationService:
                 logger.info(
                     f"Alert {alert.id} matched single-alert rule '{rule.name}', creating incident"
                 )
-                return await self._create_incident_from_alert(alert, rule, organization_id)
+                incidents.append(
+                    await self._create_incident_from_alert(alert, rule, organization_id)
+                )
+                continue
 
             # For multi-alert rules, use time window tracking
-            window, is_new = await self._get_or_create_window(alert, rule, organization_id)
+            window, _is_new = await self._get_or_create_window(alert, rule, organization_id)
             threshold_reached = await self._check_window_threshold(window, alert, rule)
 
             if threshold_reached:
@@ -288,9 +316,11 @@ class CorrelationService:
                     f"Correlation window reached threshold ({window.alert_count}/{min_alerts}) "
                     f"for rule '{rule.name}', creating incident"
                 )
-                return await self._create_incident_from_window(window, rule, organization_id)
+                incidents.append(
+                    await self._create_incident_from_window(window, rule, organization_id)
+                )
 
-        return None
+        return incidents
 
     def _alert_matches_basic_filters(self, alert: NormalizedAlert, conditions: dict) -> bool:
         """Check if alert matches basic rule filters (severity, rule_id, source_type)."""
@@ -449,11 +479,9 @@ class CorrelationService:
         Returns:
             List of created incidents
         """
-        incidents = []
+        incidents: list[Incident] = []
         for alert in alerts:
-            incident = await self.process_alert(alert, organization_id)
-            if incident:
-                incidents.append(incident)
+            incidents.extend(await self.evaluate_alert_against_rules(alert, organization_id))
         return incidents
 
     async def cleanup_expired_windows(self, max_age_hours: int = 24) -> int:

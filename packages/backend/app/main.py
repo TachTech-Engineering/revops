@@ -14,6 +14,7 @@ from app.api.v1.router import api_router
 from app.config import settings
 from app.db import init_db
 from app.jobs.connector_sync import start_connector_sync_scheduler, stop_connector_sync_scheduler
+from app.services.encryption_service import validate_encryption_config
 from app.services.escalation_service import (
     start_escalation_scheduler,
     stop_escalation_scheduler,
@@ -70,6 +71,11 @@ async def register_syslog_handlers(syslog_receiver) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    # Fail fast on a malformed ENCRYPTION_KEY: otherwise the first
+    # encrypt/decrypt of an SSO or connector credential raises at request time,
+    # long after deploy, and looks like an unrelated 500.
+    validate_encryption_config()
+
     logger.info("Initializing database...")
     await init_db()
     logger.info("Database initialized")

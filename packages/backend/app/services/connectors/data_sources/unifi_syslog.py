@@ -22,6 +22,7 @@ from app.services.connectors.base import (
     ConnectorMetadata,
     DataSourceConnector,
 )
+from app.services.syslog_receiver import parse_syslog_timestamp
 
 
 class UniFiSyslogConnector(DataSourceConnector):
@@ -455,7 +456,7 @@ class UniFiSyslogConnector(DataSourceConnector):
                 timestamp = datetime.fromtimestamp(event_time / 1000)
             elif isinstance(event_time, str):
                 try:
-                    timestamp = datetime.fromisoformat(event_time.replace("Z", "+00:00"))
+                    timestamp = parse_syslog_timestamp(event_time)
                 except ValueError:
                     pass
 
@@ -515,7 +516,7 @@ class UniFiSyslogConnector(DataSourceConnector):
                 timestamp = datetime.fromtimestamp(alarm_time / 1000)
             elif isinstance(alarm_time, str):
                 try:
-                    timestamp = datetime.fromisoformat(alarm_time.replace("Z", "+00:00"))
+                    timestamp = parse_syslog_timestamp(alarm_time)
                 except ValueError:
                     pass
 

@@ -6,9 +6,9 @@ from pydantic import BaseModel
 from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import OrgIdDep, OrgUserDep
+from app.api.v1.deps import OrgAdminDep, OrgIdDep, OrgUserDep
 from app.core.time_utils import utcnow
-from app.db import Notification, NotificationType, get_db
+from app.db import Notification, NotificationType, User, get_db
 
 router = APIRouter()
 
@@ -271,18 +271,41 @@ async def clear_notifications(
 @router.post("/internal/create")
 async def create_notification_internal(
     data: NotificationCreate,
+    user: OrgAdminDep,
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> NotificationResponse:
-    """Create a notification. Internal use only."""
+    """Create a notification for a user in the caller's organization.
+
+    Admin-only: this endpoint had no role dependency at all, so any VIEWER could
+    forge notifications attributed to an arbitrary ``user_email``. The recipient
+    is now verified to be an active member of the caller's organization, and
+    ``created_by`` is taken from the authenticated caller rather than trusted
+    from the request body.
+    """
+    recipient = await db.execute(
+        select(User).where(
+            and_(
+                func.lower(User.email) == data.user_email.strip().lower(),
+                User.organization_id == org_id,
+            )
+        )
+    )
+    target_user = recipient.scalar_one_or_none()
+    if not target_user:
+        raise HTTPException(
+            status_code=404, detail="No such user in this organization"
+        )
+
     notification = Notification(
-        user_email=data.user_email,
+        user_email=target_user.email,
         notification_type=data.notification_type,
         title=data.title,
         message=data.message,
         resource_type=data.resource_type,
         resource_id=data.resource_id,
         organization_id=org_id,
+        created_by=user.email,
     )
     db.add(notification)
     await db.flush()

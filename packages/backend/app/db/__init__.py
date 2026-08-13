@@ -60,6 +60,8 @@ from app.db.models import (
     Organization,
     OrganizationAPIKeys,
     OrganizationSSO,
+    OrganizationTelephonyConfig,
+    PasswordResetToken,
     # Data Pipelines
     Pipeline,
     PipelineDestination,
@@ -118,6 +120,8 @@ __all__ = [
     "Organization",
     "OrganizationSSO",
     "User",
+    "OrganizationTelephonyConfig",
+    "PasswordResetToken",
     "RefreshToken",
     "SavedQuery",
     "ScheduledReport",

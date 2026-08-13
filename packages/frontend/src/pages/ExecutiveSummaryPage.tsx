@@ -9,7 +9,6 @@ import {
   Target,
   CheckCircle,
   Download,
-  RefreshCw,
   ChevronRight,
   Loader2,
 } from 'lucide-react'
@@ -19,7 +18,6 @@ import {
   useGetTopRiskAreasQuery,
   useGetTeamPerformanceQuery,
   useGetSLAComplianceQuery,
-  useExportExecutiveReportMutation,
   type MetricValue,
 } from '../api/pantherApi'
 
@@ -94,9 +92,6 @@ export default function ExecutiveSummaryPage() {
     isLoading: slaLoading,
   } = useGetSLAComplianceQuery({ days })
 
-  // Export mutation
-  const [exportReport, { isLoading: isExporting }] = useExportExecutiveReportMutation()
-
   // Build metric cards from API data
   const metricCards: MetricCard[] = useMemo(() => {
     if (!metricsData) return []
@@ -149,26 +144,6 @@ export default function ExecutiveSummaryPage() {
       },
     ]
   }, [metricsData])
-
-  const handleExport = async () => {
-    const endDate = new Date()
-    const startDate = new Date()
-    startDate.setDate(startDate.getDate() - days)
-
-    try {
-      await exportReport({
-        start_date: startDate.toISOString(),
-        end_date: endDate.toISOString(),
-        include_metrics: true,
-        include_risk_areas: true,
-        include_team_performance: true,
-        include_sla_compliance: true,
-        format: 'pdf',
-      }).unwrap()
-    } catch (error) {
-      console.error('Export failed:', error)
-    }
-  }
 
   const isLoading = metricsLoading || riskAreasLoading || teamLoading || slaLoading
 
@@ -235,22 +210,19 @@ export default function ExecutiveSummaryPage() {
             <option value="90d">Last 90 Days</option>
             <option value="ytd">Year to Date</option>
           </select>
+          {/* Export is disabled rather than wired up: there is no
+              POST /executive/export on the backend (executive_summary.py
+              exposes only /metrics, /risk-areas, /team-performance and
+              /sla-compliance), so clicking it could only ever fail. */}
           <button
-            onClick={handleExport}
-            disabled={isExporting}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50"
+            type="button"
+            disabled
+            title="PDF export is not available yet."
+            aria-label="Export PDF (not available yet)"
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md opacity-50 cursor-not-allowed"
           >
-            {isExporting ? (
-              <>
-                <RefreshCw size={16} className="animate-spin" />
-                Exporting...
-              </>
-            ) : (
-              <>
-                <Download size={16} />
-                Export PDF
-              </>
-            )}
+            <Download size={16} />
+            Export PDF
           </button>
         </div>
       </div>
