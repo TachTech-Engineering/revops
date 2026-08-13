@@ -34,8 +34,6 @@ class EscalationStepResponse(BaseModel):
     delay_minutes: int
     notification_type: str
     targets: list
-    use_oncall_schedule: bool
-    oncall_schedule_id: str | None
 
     class Config:
         from_attributes = True
@@ -82,8 +80,6 @@ class EscalationStepCreate(BaseModel):
     delay_minutes: int
     notification_type: str  # email, slack, pagerduty, teams, webhook
     targets: list[str]
-    use_oncall_schedule: bool = False
-    oncall_schedule_id: str | None = None
 
 
 class EscalationPolicyCreate(BaseModel):
@@ -118,8 +114,6 @@ def serialize_step(step: EscalationStep) -> EscalationStepResponse:
         delay_minutes=step.delay_minutes,
         notification_type=step.notification_type.value,
         targets=step.targets,
-        use_oncall_schedule=step.use_oncall_schedule,
-        oncall_schedule_id=str(step.oncall_schedule_id) if step.oncall_schedule_id else None,
     )
 
 
@@ -252,10 +246,6 @@ async def create_escalation_policy(
             delay_minutes=step_data.delay_minutes,
             notification_type=EscalationNotificationType(step_data.notification_type),
             targets=step_data.targets,
-            use_oncall_schedule=step_data.use_oncall_schedule,
-            oncall_schedule_id=UUID(step_data.oncall_schedule_id)
-            if step_data.oncall_schedule_id
-            else None,
         )
         db.add(step)
 
@@ -352,8 +342,6 @@ async def add_escalation_step(
         delay_minutes=request.delay_minutes,
         notification_type=EscalationNotificationType(request.notification_type),
         targets=request.targets,
-        use_oncall_schedule=request.use_oncall_schedule,
-        oncall_schedule_id=UUID(request.oncall_schedule_id) if request.oncall_schedule_id else None,
     )
     db.add(step)
     await db.commit()

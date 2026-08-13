@@ -61,7 +61,6 @@ export default function EscalationPoliciesPage() {
     delay_minutes: 15,
     notification_type: 'email',
     targets: [''],
-    use_oncall_schedule: false,
   })
 
   const handleCreate = async () => {
@@ -115,7 +114,6 @@ export default function EscalationPoliciesPage() {
         delay_minutes: 15,
         notification_type: 'email',
         targets: [''],
-        use_oncall_schedule: false,
       })
     } catch (err) {
       console.error('Failed to add step:', err)
@@ -138,7 +136,6 @@ export default function EscalationPoliciesPage() {
       delay_minutes: 15,
       notification_type: 'email',
       targets: [''],
-      use_oncall_schedule: false,
     })
   }
 

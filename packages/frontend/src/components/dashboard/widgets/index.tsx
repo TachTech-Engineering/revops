@@ -9,7 +9,6 @@ import AlertForecastWidget from './AlertForecastWidget'
 import AnomalyDetectionWidget from './AnomalyDetectionWidget'
 import CoverageGapWidget from './CoverageGapWidget'
 import StaleRulesWidget from './StaleRulesWidget'
-import OnCallWidget from './OnCallWidget'
 import SystemHealthWidget from './SystemHealthWidget'
 import UserActivityWidget from './UserActivityWidget'
 import ComplianceStatusWidget from './ComplianceStatusWidget'
@@ -17,7 +16,7 @@ import DataIngestionWidget from './DataIngestionWidget'
 import TopAnalystsWidget from './TopAnalystsWidget'
 
 // Extended widget types
-type ExtendedWidgetType = WidgetType | 'alert_forecast' | 'anomaly_detection' | 'coverage_gap' | 'stale_rules' | 'oncall_status' | 'system_health' | 'user_activity' | 'compliance_status' | 'data_ingestion' | 'top_analysts'
+type ExtendedWidgetType = WidgetType | 'alert_forecast' | 'anomaly_detection' | 'coverage_gap' | 'stale_rules' | 'system_health' | 'user_activity' | 'compliance_status' | 'data_ingestion' | 'top_analysts'
 
 interface WidgetRendererProps {
   widget: WidgetConfig
@@ -57,8 +56,6 @@ export function WidgetRenderer({ widget }: WidgetRendererProps) {
       return <CoverageGapWidget config={config} />
     case 'stale_rules':
       return <StaleRulesWidget config={config} />
-    case 'oncall_status':
-      return <OnCallWidget config={config} />
     case 'system_health':
       return <SystemHealthWidget config={config} />
     case 'user_activity':
@@ -112,7 +109,6 @@ export const widgetTypeLabels: Record<string, string> = {
   anomaly_detection: 'Anomaly Detection',
   coverage_gap: 'MITRE Coverage Gaps',
   stale_rules: 'Stale Rules',
-  oncall_status: 'On-Call Status',
   // Additional widgets
   system_health: 'System Health',
   user_activity: 'User Activity',
@@ -132,7 +128,6 @@ export {
   AnomalyDetectionWidget,
   CoverageGapWidget,
   StaleRulesWidget,
-  OnCallWidget,
   SystemHealthWidget,
   UserActivityWidget,
   ComplianceStatusWidget,

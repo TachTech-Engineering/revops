@@ -30,7 +30,6 @@ from app.api.v1 import (
     nl_queries,
     notes,
     notifications,
-    oncall,
     pipelines,
     playbook_templates,
     playbooks,
@@ -46,7 +45,6 @@ from app.api.v1 import (
     scheduled_reports,
     settings,
     # SOC Collaboration Features
-    shift_handoff,
     simulations,
     sla,
     sso_config,
@@ -127,13 +125,11 @@ api_router.include_router(triage.router, prefix="/triage", tags=["triage"])
 api_router.include_router(nl_queries.router, prefix="/queries", tags=["nl-queries"])
 api_router.include_router(alert_clusters.router, prefix="/alert-clusters", tags=["alert-clusters"])
 api_router.include_router(escalation.router, prefix="/escalation-policies", tags=["escalation"])
-api_router.include_router(oncall.router, prefix="/oncall", tags=["oncall"])
 api_router.include_router(trend_analytics.router, prefix="/analytics", tags=["trend-analytics"])
 api_router.include_router(fonoster.router, prefix="/fonoster", tags=["fonoster"])
 api_router.include_router(twilio_webhook.router, prefix="/twilio", tags=["twilio-webhook"])
 
 # SOC Collaboration Features
-api_router.include_router(shift_handoff.router, prefix="/shift-handoffs", tags=["shift-handoff"])
 api_router.include_router(presence.router, prefix="/presence", tags=["presence"])
 
 # Threat Hunting

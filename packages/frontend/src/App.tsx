@@ -46,7 +46,6 @@ const AlertDetailPage = lazy(() => import('./pages/AlertDetailPage'))
 const ClusteredAlertsPage = lazy(() => import('./pages/ClusteredAlertsPage'))
 const ClusteredAlertDetailPage = lazy(() => import('./pages/ClusteredAlertDetailPage'))
 const EscalationPoliciesPage = lazy(() => import('./pages/EscalationPoliciesPage'))
-const OnCallSchedulesPage = lazy(() => import('./pages/OnCallSchedulesPage'))
 const AssetCriticalityPage = lazy(() => import('./pages/AssetCriticalityPage'))
 const RuleHealthDashboardPage = lazy(() => import('./pages/RuleHealthDashboardPage'))
 const PlaybookGeneratorPage = lazy(() => import('./pages/PlaybookGeneratorPage'))
@@ -124,7 +123,6 @@ function App() {
                     <Route path="/incidents" element={<IncidentsPage />} />
                     <Route path="/incidents/:id" element={<IncidentDetailPage />} />
                     {/* On-Call & Escalation */}
-                    <Route path="/oncall" element={<OnCallSchedulesPage />} />
                     <Route path="/escalation-policies" element={<EscalationPoliciesPage />} />
                     {/* Automation */}
                     <Route path="/connectors" element={<ConnectorsPage />} />

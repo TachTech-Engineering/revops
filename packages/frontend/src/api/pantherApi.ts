@@ -104,7 +104,7 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
 export const revopsApi = createApi({
   reducerPath: 'revopsApi',
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'Settings', 'Webhook', 'UserRole', 'User', 'AuditLog', 'ScheduledReport', 'Incident', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'OnCallSchedule', 'TrendAnalytics', 'Anomaly', 'AISettings', 'ComplianceFramework', 'ComplianceControl', 'ComplianceAssessment', 'ExecutiveMetrics', 'ThreatHunt', 'HuntResult'],
+  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'Settings', 'Webhook', 'UserRole', 'User', 'AuditLog', 'ScheduledReport', 'Incident', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'TrendAnalytics', 'Anomaly', 'AISettings', 'ComplianceFramework', 'ComplianceControl', 'ComplianceAssessment', 'ExecutiveMetrics', 'ThreatHunt', 'HuntResult'],
   endpoints: (builder) => ({
     // Alerts
     listAlerts: builder.query<PaginatedResponse<AlertSummary>, AlertFilters>({
@@ -1500,67 +1500,6 @@ export const revopsApi = createApi({
       providesTags: ['EscalationPolicy'],
     }),
 
-    // ==================== Feature 8: On-Call Scheduling ====================
-    listOnCallSchedules: builder.query<OnCallScheduleResponse[], { isActive?: boolean }>({
-      query: (params) => ({
-        url: '/oncall/schedules',
-        params: { is_active: params.isActive },
-      }),
-      providesTags: ['OnCallSchedule'],
-    }),
-
-    getOnCallSchedule: builder.query<OnCallScheduleResponse, string>({
-      query: (id) => `/oncall/schedules/${id}`,
-      providesTags: (_result, _error, id) => [{ type: 'OnCallSchedule', id }],
-    }),
-
-    createOnCallSchedule: builder.mutation<OnCallScheduleResponse, OnCallScheduleCreate>({
-      query: (data) => ({
-        url: '/oncall/schedules',
-        method: 'POST',
-        body: data,
-      }),
-      invalidatesTags: ['OnCallSchedule'],
-    }),
-
-    updateOnCallSchedule: builder.mutation<OnCallScheduleResponse, { id: string; update: Partial<OnCallScheduleCreate> }>({
-      query: ({ id, update }) => ({
-        url: `/oncall/schedules/${id}`,
-        method: 'PATCH',
-        body: update,
-      }),
-      invalidatesTags: (_result, _error, { id }) => [{ type: 'OnCallSchedule', id }, 'OnCallSchedule'],
-    }),
-
-    deleteOnCallSchedule: builder.mutation<void, string>({
-      query: (id) => ({
-        url: `/oncall/schedules/${id}`,
-        method: 'DELETE',
-      }),
-      invalidatesTags: ['OnCallSchedule'],
-    }),
-
-    getCurrentOnCall: builder.query<CurrentOnCallResponse[], void>({
-      query: () => '/oncall/current',
-      providesTags: ['OnCallSchedule'],
-    }),
-
-    createOnCallOverride: builder.mutation<OnCallOverrideResponse, OnCallOverrideCreate>({
-      query: (data) => ({
-        url: '/oncall/override',
-        method: 'POST',
-        body: data,
-      }),
-      invalidatesTags: ['OnCallSchedule'],
-    }),
-
-    getOnCallCalendar: builder.query<OnCallCalendarEvent[], { scheduleId?: string; startDate: string; endDate: string }>({
-      query: (params) => ({
-        url: '/oncall/calendar',
-        params: { schedule_id: params.scheduleId, start_date: params.startDate, end_date: params.endDate },
-      }),
-      providesTags: ['OnCallSchedule'],
-    }),
 
     // ==================== Feature 9: Trend Analysis ====================
     getTrends: builder.query<TrendResponse, { bucketType?: string; days?: number }>({
@@ -3244,8 +3183,6 @@ export interface EscalationStepResponse {
   delay_minutes: number
   notification_type: string
   targets: string[]
-  use_oncall_schedule: boolean
-  oncall_schedule_id: string | null
 }
 
 export interface EscalationPolicyResponse {
@@ -3267,8 +3204,6 @@ export interface EscalationStepCreate {
   delay_minutes: number
   notification_type: string
   targets: string[]
-  use_oncall_schedule?: boolean
-  oncall_schedule_id?: string
 }
 
 export interface EscalationPolicyCreate {
@@ -3295,92 +3230,6 @@ export interface AlertEscalationResponse {
   notification_history: Array<{ step: number; type: string; sent_at: string; targets: string[] }>
 }
 
-// ==================== Feature 8: On-Call Scheduling Types ====================
-export interface OnCallMemberResponse {
-  id: string
-  user_email: string
-  user_name: string | null
-  rotation_order: number
-  role: string
-  phone_number: string | null
-  slack_user_id: string | null
-}
-
-export interface OnCallScheduleResponse {
-  id: string
-  name: string
-  description: string | null
-  timezone: string
-  rotation_type: string
-  handoff_time: string
-  handoff_day: number | null
-  rotation_length_days: number | null
-  is_active: boolean
-  members: OnCallMemberResponse[]
-  created_by: string
-  created_at: string
-}
-
-export interface OnCallMemberCreate {
-  user_email: string
-  user_name?: string
-  rotation_order: number
-  role?: string
-  phone_number?: string
-  slack_user_id?: string
-}
-
-export interface OnCallScheduleCreate {
-  name: string
-  description?: string
-  timezone?: string
-  rotation_type?: string
-  handoff_time?: string
-  handoff_day?: number
-  rotation_length_days?: number
-  is_active?: boolean
-  members?: OnCallMemberCreate[]
-}
-
-export interface OnCallOverrideResponse {
-  id: string
-  schedule_id: string
-  override_user_email: string
-  original_user_email: string | null
-  start_time: string
-  end_time: string
-  reason: string | null
-  created_by: string
-  created_at: string
-}
-
-export interface OnCallOverrideCreate {
-  schedule_id: string
-  override_user_email: string
-  original_user_email?: string
-  start_time: string
-  end_time: string
-  reason?: string
-}
-
-export interface CurrentOnCallResponse {
-  schedule_id: string
-  schedule_name: string
-  primary: OnCallMemberResponse | null
-  backup: OnCallMemberResponse | null
-  is_override: boolean
-  override_end: string | null
-}
-
-export interface OnCallCalendarEvent {
-  date: string
-  schedule_id: string
-  schedule_name: string
-  primary_email: string
-  primary_name: string | null
-  backup_email: string | null
-  backup_name: string | null
-}
 
 // ==================== Feature 9: Trend Analysis Types ====================
 export interface TrendDataPoint {
@@ -3989,15 +3838,6 @@ export const {
   useListActiveEscalationsQuery,
   useAcknowledgeAlertEscalationMutation,
   useGetAlertEscalationQuery,
-  // Feature 8: On-Call Scheduling
-  useListOnCallSchedulesQuery,
-  useGetOnCallScheduleQuery,
-  useCreateOnCallScheduleMutation,
-  useUpdateOnCallScheduleMutation,
-  useDeleteOnCallScheduleMutation,
-  useGetCurrentOnCallQuery,
-  useCreateOnCallOverrideMutation,
-  useGetOnCallCalendarQuery,
   // Feature 9: Trend Analysis
   useGetTrendsQuery,
   useGetForecastQuery,

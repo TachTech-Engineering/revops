@@ -70,7 +70,6 @@ const navSections: NavSection[] = [
       { path: '/alerts', label: 'Alerts', icon: Bell },
       { path: '/alerts/clusters', label: 'Alert Clusters', icon: LayoutGrid },
       { path: '/incidents', label: 'Incidents', icon: AlertTriangle },
-      { path: '/oncall', label: 'On-Call', icon: Users },
       { path: '/escalation-policies', label: 'Escalation', icon: Bell },
     ],
   },

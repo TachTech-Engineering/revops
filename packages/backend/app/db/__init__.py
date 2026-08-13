@@ -55,11 +55,7 @@ from app.db.models import (
     NoteResourceType,
     Notification,
     NotificationType,
-    OnCallOverride,
-    OnCallRole,
-    OnCallRotationMember,
     # On-Call Schedules
-    OnCallSchedule,
     # Authentication
     Organization,
     OrganizationAPIKeys,
@@ -79,7 +75,6 @@ from app.db.models import (
     PlaybookTemplate,
     RefreshToken,
     ReportFrequency,
-    RotationType,
     RuleChangeType,
     # Rule Health & AI Features
     RuleHealth,
@@ -88,7 +83,6 @@ from app.db.models import (
     SavedQuery,
     ScheduledReport,
     # SOC Collaboration
-    ShiftHandoff,
     SLAMetric,
     SLAPolicy,
     SLAStatus,
@@ -218,17 +212,11 @@ __all__ = [
     "EscalationStatus",
     "AlertEscalation",
     # On-Call Schedules
-    "OnCallSchedule",
-    "OnCallRotationMember",
-    "OnCallOverride",
-    "RotationType",
-    "OnCallRole",
     # Alert Trends
     "AlertTrendCache",
     # Anomaly Detection
     "AnomalyType",
     "AnomalyDetection",
     # SOC Collaboration
-    "ShiftHandoff",
     "AlertPresence",
 ]
