@@ -6,6 +6,7 @@ namespace: revops
 resources:
 - ../../base
 - hpa.yaml
+- db-backup.yaml
 
   # Production TLS uses the pre-existing Google-managed certificate
   # "ttrevops-ssl" (gcloud compute ssl-certificates, covers ttrevops.com,

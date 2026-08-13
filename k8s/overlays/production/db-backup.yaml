@@ -1,0 +1,124 @@
+# Nightly pg_dump of the UNMANAGED in-cluster postgres to GCS.
+#
+# Production-only: the database this backs up (Deployment "postgres", PVC
+# "postgres-pvc") exists only in the revops namespace and is deliberately not
+# managed by kustomize (see k8s/base/postgres-deployment.yaml).
+#
+# GCP prerequisites (bucket, GSA, Workload Identity binding) are provisioned
+# by scripts/gke-backup-setup.sh. The bucket has a 30-day lifecycle delete
+# rule; the GSA can only CREATE objects (write-only), so a compromised pod
+# cannot read or delete existing backups.
+#
+# Restore: see the header of scripts/gke-backup-setup.sh.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: db-backup
+  labels:
+    app: db-backup
+  annotations:
+    iam.gke.io/gcp-service-account: revops-db-backup@revops-486917.iam.gserviceaccount.com
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: db-backup
+  labels:
+    app: db-backup
+spec:
+  # 03:00 America/Chicago nightly (cluster is 1.35; timeZone needs k8s 1.27+).
+  schedule: "0 3 * * *"
+  timeZone: "America/Chicago"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: db-backup
+        spec:
+          serviceAccountName: db-backup
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          # pg_dump runs as an init container so the upload only starts after
+          # a complete, successful dump.
+          initContainers:
+            - name: dump
+              # Same pinned image as k8s/base/postgres-deployment.yaml.
+              image: postgres:15-alpine@sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f
+              command: ["sh", "-ec"]
+              args:
+                - |
+                  STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+                  echo "dumping revops -> /backup/revops-${STAMP}.dump"
+                  pg_dump -h postgres -U revops -d revops -Fc \
+                    -f "/backup/revops-${STAMP}.dump"
+                  ls -l /backup
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: backend-secrets
+                      key: DATABASE_PASSWORD
+              securityContext:
+                # uid 70 = postgres user in the alpine image; pg_dump needs no
+                # capabilities, only network egress + write access to /backup.
+                runAsUser: 70
+                runAsGroup: 70
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "256Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
+          containers:
+            - name: upload
+              image: gcr.io/google.com/cloudsdktool/google-cloud-cli:alpine@sha256:dc14269da7afffe6ef1c8ed2f959891aa95fef802224ba9ff0e37adaca013fae
+              command: ["sh", "-ec"]
+              args:
+                - |
+                  gsutil cp /backup/*.dump \
+                    "gs://revops-486917-db-backups/$(date -u +%Y/%m)/"
+                  echo "upload complete"
+              env:
+                # gsutil writes state under $HOME; the image default is /root,
+                # unwritable as uid 65534.
+                - name: HOME
+                  value: /tmp
+              securityContext:
+                runAsUser: 65534
+                runAsGroup: 65534
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+              volumeMounts:
+                - name: backup
+                  mountPath: /backup
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: "100m"
+                  memory: "256Mi"
+                limits:
+                  cpu: "500m"
+                  memory: "512Mi"
+          volumes:
+            - name: backup
+              emptyDir:
+                sizeLimit: 5Gi
