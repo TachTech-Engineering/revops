@@ -333,8 +333,15 @@ class FieldMapper:
         if canonical_field in cls.FIELD_MAPPINGS:
             return cls.FIELD_MAPPINGS[canonical_field].get(target_platform, canonical_field.lower())
 
-        # Default: convert to snake_case for most platforms
-        if target_platform in ["panther", "sql", "aql"]:
+        # Panther log schemas keep the SOURCE's native field names (CloudTrail
+        # eventName, Okta eventType, ...); an unmapped field passed through
+        # to_canonical unchanged, so inventing snake_case here would silently
+        # break the generated rule. Pass it through untouched.
+        if target_platform == "panther":
+            return canonical_field
+
+        # Default: convert to snake_case for SQL-flavored platforms
+        if target_platform in ["sql", "aql"]:
             s1 = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", canonical_field)
             return re.sub("([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
         elif target_platform in ["eql", "esql"]:
@@ -632,8 +639,22 @@ class SPLToSigma(ToSigmaConverter):
                 else:
                     detection["selection"][field_name] = value
 
-        # Parse search terms (field=value patterns)
-        field_patterns = re.findall(r'(\w+)\s*=\s*["\']?([^"\'\s|]+)["\']?', source)
+        # Parse IN lists: field IN ("v1", "v2") -> Sigma value list (OR semantics)
+        for field_name, group in re.findall(r"([\w.]+)\s+IN\s*\(([^)]*)\)", source, re.IGNORECASE):
+            if field_name.lower() in ["index", "sourcetype", "source"]:
+                continue
+            values = [v.strip().strip("\"'") for v in group.split(",") if v.strip()]
+            if not values:
+                continue
+            normalized = self._normalize_field(field_name)
+            if any("*" in v for v in values):
+                detection["selection"][f"{normalized}|contains"] = [v.strip("*") for v in values]
+            else:
+                detection["selection"][normalized] = values
+
+        # Parse search terms (field=value patterns; [\w.]+ keeps dotted fields
+        # like outcome.result intact instead of capturing only the last segment)
+        field_patterns = re.findall(r'([\w.]+)\s*=\s*["\']?([^"\'\s|]+)["\']?', source)
         for field_name, value in field_patterns:
             if field_name.lower() not in ["index", "sourcetype", "source"]:
                 normalized = self._normalize_field(field_name)
@@ -1328,9 +1349,7 @@ class PantherToSigma(ToSigmaConverter):
 
         # Parse rule function for conditions
         # Look for event.get() calls
-        re.findall(
-            r'event\.get\(["\']([^"\']+)["\']\s*(?:,\s*["\'][^"\']*["\'])?\)', source
-        )
+        re.findall(r'event\.get\(["\']([^"\']+)["\']\s*(?:,\s*["\'][^"\']*["\'])?\)', source)
 
         # Look for 'in' checks (e.g., if "value" in field)
         in_matches = re.findall(
@@ -1546,39 +1565,35 @@ class SigmaToPanther(FromSigmaConverter):
             if modifier in [">=", "<=", ">", "<", "!=", "="]:
                 continue
 
+            # Dotted fields (e.g. outcome.result) need deep_get on Panther events.
+            if "." in panther_field:
+                get = f'event.deep_get("{panther_field}", "")'
+                get_nd = f'event.deep_get("{panther_field}")'
+            else:
+                get = f'event.get("{panther_field}", "")'
+                get_nd = f'event.get("{panther_field}")'
+
             if isinstance(value, list):
                 value_checks = []
                 for v in value:
                     if modifier == "contains":
-                        value_checks.append(
-                            f'"{v}".lower() in event.get("{panther_field}", "").lower()'
-                        )
+                        value_checks.append(f'"{v}".lower() in {get}.lower()')
                     elif modifier == "endswith":
-                        value_checks.append(
-                            f'event.get("{panther_field}", "").lower().endswith("{v}".lower())'
-                        )
+                        value_checks.append(f'{get}.lower().endswith("{v}".lower())')
                     elif modifier == "startswith":
-                        value_checks.append(
-                            f'event.get("{panther_field}", "").lower().startswith("{v}".lower())'
-                        )
+                        value_checks.append(f'{get}.lower().startswith("{v}".lower())')
                     else:
-                        value_checks.append(f'event.get("{panther_field}") == "{v}"')
+                        value_checks.append(f'{get_nd} == "{v}"')
                 conditions.append(f"({' or '.join(value_checks)})")
             else:
                 if modifier == "contains":
-                    conditions.append(
-                        f'"{value}".lower() in event.get("{panther_field}", "").lower()'
-                    )
+                    conditions.append(f'"{value}".lower() in {get}.lower()')
                 elif modifier == "endswith":
-                    conditions.append(
-                        f'event.get("{panther_field}", "").lower().endswith("{value}".lower())'
-                    )
+                    conditions.append(f'{get}.lower().endswith("{value}".lower())')
                 elif modifier == "startswith":
-                    conditions.append(
-                        f'event.get("{panther_field}", "").lower().startswith("{value}".lower())'
-                    )
+                    conditions.append(f'{get}.lower().startswith("{value}".lower())')
                 else:
-                    conditions.append(f'event.get("{panther_field}") == "{value}"')
+                    conditions.append(f'{get_nd} == "{value}"')
 
         # Generate rule function
         lines.append("def rule(event):")
@@ -1602,8 +1617,11 @@ class SigmaToPanther(FromSigmaConverter):
                         lines.append(f"        {cond}")
                 lines.append("    )")
         else:
-            lines.append("    # TODO: Add detection logic based on original query")
-            lines.append("    return True  # Match all events - refine as needed")
+            # FAIL CLOSED: no conditions were converted. Returning True would
+            # alert on every event of the log type (alert storm).
+            lines.append("    # TODO: No conditions could be converted from the source rule.")
+            lines.append("    # This rule is INERT (never fires) until detection logic is added.")
+            lines.append("    return False")
         lines.append("")
         lines.append("")
 

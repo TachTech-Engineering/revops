@@ -239,59 +239,21 @@ class ShimEvent(dict):
         return cur
 
 
-def _install_enhanced_dialect_shim():
-    """The enhanced converter emits `from panther_sdk import detection, PantherEvent`
-    and `from panther_sdk.helpers import deep_get` (official-SDK style). Provide
-    stub modules so that dialect can be executed and behaviorally tested."""
-    import types
-
-    import panther_sdk
-
-    if hasattr(panther_sdk, "detection"):
-        return
-
-    class _Severity:
-        def __getattr__(self, name):
-            return name
-
-    class _Rule:
-        pass
-
-    det = types.ModuleType("panther_sdk.detection")
-    det.Rule = _Rule
-    det.Severity = _Severity()
-    helpers = types.ModuleType("panther_sdk.helpers")
-
-    def deep_get(event, path, default=None):
-        cur = event
-        for part in path.split("."):
-            if not isinstance(cur, dict) or part not in cur:
-                return default
-            cur = cur[part]
-        return cur
-
-    helpers.deep_get = deep_get
-    panther_sdk.detection = det
-    panther_sdk.PantherEvent = dict
-    panther_sdk.helpers = helpers
-    sys.modules["panther_sdk.detection"] = det
-    sys.modules["panther_sdk.helpers"] = helpers
-
-
 def exec_rule_module(source_code: str):
-    """Exec generated code; return a callable rule(event) -> bool."""
-    _install_enhanced_dialect_shim()
+    """Exec generated code; return a callable rule(event) -> bool.
+
+    Executes against the vendored SDK only: every engine must emit the ONE
+    supported dialect (panther_sdk.detections class style, or Panther-native
+    module-level rule(event) for YARA-L/AQL).
+    """
     mod: dict = {}
     exec(compile(source_code, "<generated>", "exec"), mod)
-    from panther_sdk.detection import Rule as EnhancedRule
-    from panther_sdk.detections import Rule
+    from panther_sdk.detections import Rule, ScheduledRule
 
     classes = [
         v
         for v in mod.values()
-        if isinstance(v, type)
-        and issubclass(v, (Rule, EnhancedRule))
-        and v not in (Rule, EnhancedRule)
+        if isinstance(v, type) and issubclass(v, Rule) and v not in (Rule, ScheduledRule)
     ]
     if classes:
         assert len(classes) == 1, f"expected 1 Rule subclass, got {len(classes)}"
@@ -340,9 +302,73 @@ async def test_converter_corpus(service, entry):
     if any("inert" in t.lower() for t in todos):
         assert exec_rule_module(code)({"any": "event"}) is False
 
-    # 3. behavioral cases
+    # 3. single-dialect contract: every SPL rule must execute against the
+    # vendored SDK (catches dialect drift between the two engines).
+    if entry["fmt"] == "spl":
+        exec_rule_module(code)
+
+    # 4. behavioral cases
     if entry.get("events"):
         rule_fn = exec_rule_module(code)
         for i, (event, expected) in enumerate(entry["events"]):
             got = rule_fn(event)
             assert bool(got) == expected, f"case {i}: event={event} expected {expected}, got {got}"
+
+
+# =============================================================================
+# Migrate-path converter (migration_service, the stack MigrationPage uses)
+# =============================================================================
+
+from app.services.migration_service import SIEMFormat, migration_service  # noqa: E402
+
+MIGRATE_CORPUS = [
+    {
+        "name": "migrate_spl_in",
+        "src": 'index=aws eventName IN ("ConsoleLogin", "AssumeRole")',
+        "events": [
+            ({"eventName": "ConsoleLogin"}, True),
+            ({"eventName": "AssumeRole"}, True),
+            ({"eventName": "PutObject"}, False),
+        ],
+    },
+    {
+        "name": "migrate_spl_dotted_field",
+        "src": 'index=okta eventType="user.session.start" outcome.result=FAILURE',
+        "events": [
+            ({"eventType": "user.session.start", "outcome": {"result": "FAILURE"}}, True),
+            ({"eventType": "user.session.start", "outcome": {"result": "SUCCESS"}}, False),
+        ],
+    },
+    {
+        # Unmapped fields must keep their native casing (Panther schemas use
+        # the source's field names) -- snake_casing them broke every rule.
+        "name": "migrate_native_casing",
+        "src": "index=aws sourceIPAddress=1.2.3.4",
+        "events": [
+            ({"sourceIPAddress": "1.2.3.4"}, True),
+            ({"sourceIPAddress": "5.6.7.8"}, False),
+        ],
+    },
+    {
+        # Nothing convertible -> rule must FAIL CLOSED, not match-all.
+        "name": "migrate_inert_fails_closed",
+        "src": "index=proxy | lookup threat_intel domain OUTPUT is_threat",
+        "events": [({"anything": "at all"}, False)],
+    },
+]
+
+
+@pytest.mark.parametrize("entry", MIGRATE_CORPUS, ids=[e["name"] for e in MIGRATE_CORPUS])
+def test_migrate_path_corpus(entry):
+    out = migration_service.convert(
+        source_code=entry["src"],
+        source_format=SIEMFormat.SPL,
+        target_format=SIEMFormat.PANTHER,
+    )
+    ast.parse(out)
+    mod: dict = {}
+    exec(compile(out, "<generated>", "exec"), mod)
+    rule = mod["rule"]
+    for i, (event, expected) in enumerate(entry["events"]):
+        got = rule(ShimEvent(event))
+        assert bool(got) == expected, f"case {i}: event={event} expected {expected}, got {got}"

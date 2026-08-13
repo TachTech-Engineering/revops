@@ -1708,8 +1708,7 @@ def spl_mvjoin(mv, delimiter=" "):
             f"{original_spl}",
             '"""',
             "",
-            "from panther_sdk import detection, PantherEvent",
-            "from panther_sdk.helpers import deep_get",
+            "from panther_sdk.detections import Rule, ScheduledRule, Severity, deep_get",
             "import re",
         ]
 
@@ -1720,12 +1719,12 @@ def spl_mvjoin(mv, delimiter=" "):
             [
                 "",
                 "",
-                f"class {class_name}(detection.Rule):",
+                f"class {class_name}(Rule):",
                 f'    id = "{rule_id}"',
                 f'    log_types = ["{log_type}"]',
-                f"    severity = detection.Severity.{severity.upper()}",
+                f"    severity = Severity.{severity.upper()}",
                 "",
-                "    def rule(self, event: PantherEvent) -> bool:",
+                "    def rule(self, event: dict) -> bool:",
                 '        """Detection logic converted from Splunk SPL."""',
             ]
         )
@@ -1774,7 +1773,7 @@ def spl_mvjoin(mv, delimiter=" "):
         code_lines.extend(
             [
                 "",
-                "    def title(self, event: PantherEvent) -> str:",
+                "    def title(self, event: dict) -> str:",
                 f'        return f"{class_name}: '
                 f"{{deep_get(event, '{title_field}', 'unknown')}}\"",
                 "",
@@ -2019,8 +2018,7 @@ def spl_mvjoin(mv, delimiter=" "):
             "This query runs on a schedule and aggregates data over time.",
             '"""',
             "",
-            "from panther_sdk import detection, PantherEvent",
-            "from panther_sdk.helpers import deep_get",
+            "from panther_sdk.detections import Rule, ScheduledRule, Severity, deep_get",
         ]
 
         for helper in helpers:
@@ -2030,17 +2028,20 @@ def spl_mvjoin(mv, delimiter=" "):
             [
                 "",
                 "",
-                f"class {class_name}(detection.ScheduledRule):",
+                f"class {class_name}(ScheduledRule):",
                 f'    id = "{rule_id}"',
                 f'    log_types = ["{log_type}"]',
-                f"    severity = detection.Severity.{severity.upper()}",
+                f"    severity = Severity.{severity.upper()}",
                 "",
-                "    # Scheduled rule SQL query",
-                '    query = """',
+                '    schedule_expression = "rate(1 hour)"  # TODO: set your schedule',
+                "",
+                "    @property",
+                "    def scheduled_query(self) -> str:",
+                '        return """',
                 f"{sql_query}",
                 '    """',
                 "",
-                "    def rule(self, event: PantherEvent) -> bool:",
+                "    def rule(self, event: dict) -> bool:",
                 '        """Evaluate each row returned by the scheduled query."""',
             ]
         )
@@ -2059,7 +2060,7 @@ def spl_mvjoin(mv, delimiter=" "):
         code_lines.extend(
             [
                 "",
-                "    def title(self, event: PantherEvent) -> str:",
+                "    def title(self, event: dict) -> str:",
                 f'        return f"{class_name}: {title_context}"',
                 "",
             ]
