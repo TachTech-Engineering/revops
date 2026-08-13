@@ -1,99 +1,166 @@
-# Bug bash backlog — verified-but-unfixed (2026-08-13)
+# Bug bash backlog — 2026-08-13
 
-Fixed and deployed in `1d1b77b`: reset-token leak, SSO/SAML open redirect,
-rules/queries unauthenticated, playbooks + correlation_rules IDOR, role enum,
-llm_service signature + cache scoping.
+## Fixed and deployed
 
-Everything below was reported by a finder agent. Items marked **[verified]**
-I confirmed myself; the rest are agent-reported and still need confirmation
-before acting.
+**`1d1b77b`** (first pass): password-reset token returned in the API response
+(anonymous account takeover); SSO + SAML open redirect leaking access/refresh
+tokens; `rules.py`/`queries.py` reachable unauthenticated (detection-rule CRUD
++ SSRF via `X-Panther-Host`); `playbooks.py` and `correlation_rules.py` with
+zero org filtering (cross-tenant read/mutate/execute); `UserRoleType(role.upper())`
+always raising so role changes were impossible; four models built without their
+NOT NULL `organization_id`.
 
-## Tier 1 — security, fix next
+**`a451ab1`** (second pass — the list below):
 
-1. **[verified] `ai.py:913-1007` — LLM-generated SQL executed via raw `text()`**
-   with no post-generation check that the org filter is present. Only guard is
-   a keyword blocklist that permits any SELECT. Fix: parameterize + enforce
-   `organization_id = :org` server-side, or drop the feature.
-2. **[verified] `nl_queries.py:118-144` — `validate_sql_safety` accepts `org_id`
-   and never uses it**; only checks the literal substring "organization_id"
-   appears. Also `UNION` absent from DANGEROUS_KEYWORDS, and `title ILIKE
-   '%{term}%'` interpolates raw user input.
-3. `ioc_search.py:71-124` — `request.indicator` f-string-interpolated into
-   Snowflake SQL, no escaping.
-4. `auth_service.py:252` — password reset tokens in a module-level dict:
-   broken across replicas (we run 3), lost on restart, unbounded growth.
-5. `fonoster.py:64-83` — per-org Fonoster config written to a process-global
-   singleton; one tenant's carrier credentials overwrite another's.
-6. Frontend `NotesPanel.tsx:113-115,328` — `dangerouslySetInnerHTML` on
-   unescaped note bodies = stored XSS; tokens are in localStorage.
-7. Frontend `AIChatWidget.tsx:561-577` — same sink on LLM output.
-8. Frontend `authSlice.ts:161` — no `revopsApi.util.resetApiState()` on logout;
-   next tenant on the same browser sees cached prior-tenant data.
+- LLM-generated SQL executed with no enforced tenant filter (`/ai/ask`), and
+  `nl_queries.validate_sql_safety` accepting `org_id` and never using it. Both
+  now go through `app/core/sql_guard.py`: single SELECT, no set operations, and
+  every `organization_id` literal must equal the caller's org.
+- `ioc_search` interpolating a raw indicator into Snowflake SQL.
+- Stored XSS in `NotesPanel` (note bodies) and `AIChatWidget` (LLM output +
+  unfiltered link href).
+- RTK Query cache never reset on logout → next tenant saw cached data.
+- `enrichment_service.enrich_alert` running every org's pipelines;
+  `rule_recommendation` accept/dismiss/dedupe unscoped; `attack_simulation`
+  `get_run` id-only.
+- 16 service methods rejecting the `organization_id` their callers passed
+  (TypeError 500 across simulations, recommendations, enrichment, AI summaries).
+- `alert_poller` calling `list_alerts` with the wrong kwarg and treating a tuple
+  as a dict — it had never delivered an alert.
+- `process_pending_escalations` with zero callers (multi-step escalation never
+  advanced); now scheduled, under a Postgres advisory lock so 3 replicas don't
+  page on-call three times.
+- Route shadowing hiding `/workflows/node-types`,
+  `/workflows/executions/recent`, `/scheduled-reports/types` behind `/{uuid}`
+  (422). `list_report_types` also gained the auth dep it never had.
+- `presence.py` calling `UUID()` on an already-UUID value (3 endpoints 500'd).
+- `ai.py` chat referencing `NormalizedAlert.timestamp`, `.source_system`,
+  `Incident.alert_count` — none of which exist.
+- `MigrationPage` fabricating validation results, rule inventory and a
+  compatibility score when its endpoints 404'd.
+- Alert websocket never sending `?token=`, so real-time alerting was dead.
 
-## Tier 2 — broken functionality (features that cannot work today)
+---
 
-9. **[verified] 14 remaining service signature mismatches** — callers pass
-   `organization_id=`, signatures don't accept it → TypeError 500.
-   `attack_simulation_service` (8 methods), `rule_recommendation_service`
-   (6 methods). Fix = add the param AND use it to scope; note
-   `rule_recommendation_service.accept/dismiss_recommendation` currently load
-   by id with no org filter (latent IDOR that goes live once signatures work).
-10. **[verified] `alert_poller.py:63`** — calls `list_alerts(created_at_after=)`
-    but the signature is `created_after`; also treats a tuple return as a dict.
-    Poller has never delivered an alert; exception swallowed.
-11. **[verified] `escalation_service.py:713` `process_pending_escalations` has
-    zero callers** — multi-step escalation never advances past step 1. No phone
-    call after the Slack message.
-12. `case_service.py:46` / `playbook_service.py:55` / `enrichment_service.py:80`
-    — build rows omitting NOT NULL `organization_id` → IntegrityError.
-13. `users.py`-style FastAPI route ordering: `workflows.py:240 vs 757`
-    (`/node-types`), `:656 vs 717` (`/executions/recent`),
-    `scheduled_reports.py:101 vs 290` (`/types`) — shadowed by `/{uuid}` → 422.
-14. `presence.py:108,120,145` — `UUID(user.id)` on an already-UUID value →
-    AttributeError 500 on 3 of 4 presence endpoints.
-15. `ai.py:1026,1039,1075,1136` — references nonexistent model attrs
-    (`NormalizedAlert.timestamp`, `.source_system`, `Incident.alert_count`);
-    all three advertised chat capabilities 500.
-16. Frontend `MigrationPage.tsx:900-935` — `POST /migrate/validate` doesn't
-    exist; both branches hardcode `valid: true`. Every migrated rule shows a
-    green "validated" badge without validation running. Also `:797-822`
-    fabricates a 5-rule inventory on 404, and `:749-790` a fake 85%
-    compatibility score.
-17. Frontend `useWebSocket.ts:146-164` — alert socket omits `?token=`; backend
-    closes 4401, client retries 10x then gives up. Real-time alerting dead.
-18. Frontend `LoginPage.tsx:218-223` — network error grants a fake authenticated
-    session with no tokens ("demo mode").
+## Still open
 
-## Tier 3 — correctness / robustness
+Ordered by severity. None of these are verified-and-trivial; each needs a
+judgment call or a schema/infra change.
 
-19. `escalation_service.py:147` — empty `rule_name` bypasses a policy's
-    `rule_filter` (unrelated alert triggers a scoped policy).
-20. `syslog_receiver.py:451` — 3-digit fractional timestamps parse tz-aware and
-    later compare against naive → TypeError after the buffer was already
-    drained; UniFi syslog alerts lost every cycle.
-21. `correlation_service.py:276` — returns on first matching rule; a seeded
-    `min_alerts: 1` rule starves all threshold rules.
-22. `feed_service.py:375` — one transient error sets feed status ERROR forever
-    (auto-sync only selects ACTIVE).
-23. `connector_sync.py:75` — unreferenced `asyncio.create_task` + no in-flight
-    guard + no unique constraint on
-    `(organization_id, connector_id, external_id)` → duplicate alerts.
-24. `case_service.py:9-32` — case numbers from a global cross-tenant counter;
-    also string-sorts (breaks past 9999) and races to duplicate-key.
-25. `auth.py` registration — org committed before user creation; failure
-    orphans the org and burns the unique slug.
-26. Login returns a distinct 403 for SSO orgs → user enumeration.
-27. Websocket authorizes once; token expiry / is_active / org membership never
-    re-checked for the life of the connection.
-28. Refresh-token rotation is non-atomic, no reuse detection.
-29. `encryption_service.py:20-40` — silently derives the Fernet key from
-    SECRET_KEY when ENCRYPTION_KEY is missing *or malformed*; couples JWT key
-    rotation to stored-credential decryptability.
-30. Frontend: dead routes `/rules`, `/playbooks`, `/incidents/new` render blank
-    (no catch-all); bulk alert actions report success when all items failed;
-    escalation mutations fail silently (no toast infra).
+### Security / correctness
 
-## Mechanical checks worth adding to CI
-- signature scan: API call sites passing `organization_id=` vs service params.
-- AST scan: model constructions omitting a `nullable=False` `organization_id`.
-Both classes accounted for most of the Tier-2 damage.
+1. **Password reset tokens live in a module-level dict**
+   (`auth_service.py:252`). We run 3 replicas, so a reset minted on one pod is
+   rejected by the others; tokens are also lost on restart and never bounded.
+   Needs a DB table (or Redis) with an index on the token hash and a TTL.
+   *Note:* the reset flow is now safe but still effectively broken in prod —
+   worth doing before advertising password reset to users.
+
+2. **Fonoster config is a process-global singleton** (`fonoster.py:64-83`).
+   One tenant's carrier credentials overwrite another's; escalation calls can
+   dial out under the wrong account. Needs per-org storage like every other
+   connector credential.
+
+3. **Websocket authorizes once and never re-checks** — token expiry,
+   `is_active`, and org membership are all snapshotted at connect. A disabled
+   or moved user keeps receiving their old org's broadcasts until they
+   disconnect.
+
+4. **Refresh-token rotation is non-atomic and has no reuse detection**
+   (`auth.py:211-225`). Concurrent refreshes both succeed; a stolen token is
+   never detected. Needs a compare-and-revoke plus token-family invalidation.
+
+5. **Login reveals whether an account exists** — SSO orgs get a distinct 403
+   naming the provider, non-existent emails get a generic 401.
+
+6. **`encryption_service` silently derives the Fernet key from `SECRET_KEY`**
+   when `ENCRYPTION_KEY` is missing *or malformed* (`except Exception: pass`).
+   A typo'd key encrypts under the wrong key with no error, and rotating
+   `SECRET_KEY` makes stored SSO/connector credentials undecryptable. Should
+   fail loudly instead.
+
+7. **`notifications.py:271`** — `/notifications/internal/create` is not
+   role-gated; any viewer can forge notifications attributed to arbitrary
+   `user_email` within their org.
+
+8. **`escalation.py:353-367`** — `remove_escalation_step` never constrains the
+   step to the `{policy_id}` in the path, so any step in the org can be deleted
+   through any policy's URL.
+
+### Reliability
+
+9. **Escalation `rule_filter` bypassed when `rule_name` is empty**
+   (`escalation_service.py:147`) — an unrelated alert can trigger a policy
+   scoped to one rule. The request schema defaults `rule_name` to `""`.
+
+10. **UniFi syslog alerts lost every cycle** (`syslog_receiver.py:451`) —
+    3-digit fractional timestamps parse tz-aware, then compare against a naive
+    datetime and raise. The buffer is already drained at that point, so the
+    messages are gone.
+
+11. **One matching single-alert correlation rule starves the rest**
+    (`correlation_service.py:276`) — returns on first match with no ordering,
+    and a seeded `min_alerts: 1` rule exists for every org, so threshold rules
+    never accumulate a window.
+
+12. **A transient error takes a feed permanently offline**
+    (`feed_service.py:375`) — status is set to ERROR and auto-sync only selects
+    ACTIVE. Needs a retry/backoff rather than a terminal state.
+
+13. **Connector sync can double-run and duplicate alerts**
+    (`connector_sync.py:75`) — unreferenced `asyncio.create_task`, no
+    in-flight guard, and no unique constraint on
+    `(organization_id, connector_id, external_id)`. The constraint is the real
+    fix and needs a migration.
+
+14. **Case numbers come from a global cross-tenant counter**
+    (`case_service.py:9-32`) — leaks platform-wide volume, races to duplicate
+    key, and string-sorts (breaks past 9999).
+
+15. **Registration orphans an organization** when user creation fails after the
+    org is committed, permanently burning the unique slug.
+
+16. **Failed escalation notifications are never retried** and the step advances
+    anyway (`escalation_service.py:182-229`).
+
+17. **One Redis hiccup silences live alerts for every connected dashboard**
+    (`notification_service.py:170`) — the listen loop exits and only restarts on
+    a new `subscribe()`.
+
+18. **Zero-step escalation policies re-select forever**
+    (`_send_step_notification` returns without clearing `next_escalation_at`) —
+    a no-op every 60s, but noisy.
+
+### Frontend
+
+19. **`LoginPage.tsx:218-223` grants a fake authenticated session** on any
+    network error ("demo mode") — user lands in the shell with no token, then
+    gets bounced by the first 401.
+
+20. **Dead routes render blank** — `/rules`, `/playbooks`, `/incidents/new` are
+    linked from MobileNav/Layout/AlertCorrelationInsights but not in `App.tsx`,
+    and there is no `path="*"` fallback.
+
+21. **Bulk alert actions report success when every item failed** — the
+    `{success, failed}` response is discarded.
+
+22. **Mutations fail silently across the app** (escalation policies, exec
+    export) — `console.error` only; there is no toast infrastructure.
+
+23. **`AlertsPage.tsx` is orphaned** (322 lines, never imported) and nine
+    dashboard widget types are unreachable because the backend `WidgetType`
+    enum doesn't contain them.
+
+---
+
+## Worth adding to CI
+
+Two mechanical scans would have caught most of the Tier-2 damage:
+
+- API call sites passing `organization_id=` vs. the target service signature.
+- Model constructions omitting a `nullable=False` `organization_id`.
+
+Caveat learned the hard way: the signature scan only sees
+`service_obj.method(...)` calls. `enrichment_service` exposes bare module-level
+functions, so its three mismatches were invisible to it — widen the scan to
+plain-name calls before trusting a green result.
