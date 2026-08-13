@@ -90,6 +90,7 @@ class RuleRecommendationService:
     async def get_recommendations(
         self,
         db: AsyncSession,
+        organization_id: uuid.UUID,
         log_sources: list[str] | None = None,
         status: RecommendationStatus | None = None,
         page: int = 1,
@@ -100,6 +101,7 @@ class RuleRecommendationService:
 
         Args:
             db: Database session
+            organization_id: Organization the recommendations belong to
             log_sources: Filter by log sources (if None, returns all)
             status: Filter by status
             page: Page number
@@ -108,7 +110,7 @@ class RuleRecommendationService:
         Returns:
             Tuple of (recommendations, total_count)
         """
-        conditions = []
+        conditions = [RuleRecommendation.organization_id == organization_id]
 
         if log_sources:
             conditions.append(RuleRecommendation.log_source.in_(log_sources))
@@ -117,16 +119,14 @@ class RuleRecommendationService:
             conditions.append(RuleRecommendation.status == status)
 
         # Get total count
-        count_query = select(func.count()).select_from(RuleRecommendation)
-        if conditions:
-            count_query = count_query.where(and_(*conditions))
+        count_query = (
+            select(func.count()).select_from(RuleRecommendation).where(and_(*conditions))
+        )
         count_result = await db.execute(count_query)
         total = count_result.scalar() or 0
 
         # Get paginated results
-        query = select(RuleRecommendation)
-        if conditions:
-            query = query.where(and_(*conditions))
+        query = select(RuleRecommendation).where(and_(*conditions))
 
         offset = (page - 1) * page_size
         query = (
@@ -144,6 +144,7 @@ class RuleRecommendationService:
         self,
         db: AsyncSession,
         log_sources: list[str],
+        organization_id: uuid.UUID,
     ) -> dict:
         """
         Generate recommendations for given log sources based on catalog.
@@ -151,6 +152,7 @@ class RuleRecommendationService:
         Args:
             db: Database session
             log_sources: List of log source names
+            organization_id: Organization the recommendations are generated for
 
         Returns:
             Dictionary with generation results
@@ -167,10 +169,11 @@ class RuleRecommendationService:
                 continue
 
             for source in matching_sources:
-                # Check if recommendation already exists
+                # Check if recommendation already exists for this organization
                 existing = await db.execute(
                     select(RuleRecommendation).where(
                         and_(
+                            RuleRecommendation.organization_id == organization_id,
                             RuleRecommendation.rule_id == rule["id"],
                             RuleRecommendation.log_source == source,
                         )
@@ -182,6 +185,7 @@ class RuleRecommendationService:
 
                 # Create new recommendation
                 recommendation = RuleRecommendation(
+                    organization_id=organization_id,
                     log_source=source,
                     rule_name=rule["name"],
                     rule_id=rule["id"],
@@ -206,6 +210,7 @@ class RuleRecommendationService:
         self,
         db: AsyncSession,
         panther_service,
+        organization_id: uuid.UUID,
     ) -> list[dict]:
         """
         Identify coverage gaps based on log sources and existing rules.
@@ -227,10 +232,13 @@ class RuleRecommendationService:
         except Exception:
             pass
 
-        # Get accepted recommendations
+        # Get accepted recommendations for this organization
         accepted_result = await db.execute(
             select(RuleRecommendation).where(
-                RuleRecommendation.status == RecommendationStatus.ACCEPTED
+                and_(
+                    RuleRecommendation.organization_id == organization_id,
+                    RuleRecommendation.status == RecommendationStatus.ACCEPTED,
+                )
             )
         )
         accepted = {r.rule_id for r in accepted_result.scalars().all()}
@@ -284,6 +292,7 @@ class RuleRecommendationService:
         self,
         db: AsyncSession,
         recommendation_id: uuid.UUID,
+        organization_id: uuid.UUID,
         panther_service,
         user_email: str,
     ) -> dict:
@@ -293,6 +302,7 @@ class RuleRecommendationService:
         Args:
             db: Database session
             recommendation_id: Recommendation ID
+            organization_id: Organization the recommendation must belong to
             panther_service: Panther service instance
             user_email: User accepting the recommendation
 
@@ -300,7 +310,12 @@ class RuleRecommendationService:
             Dictionary with acceptance results
         """
         result = await db.execute(
-            select(RuleRecommendation).where(RuleRecommendation.id == recommendation_id)
+            select(RuleRecommendation).where(
+                and_(
+                    RuleRecommendation.id == recommendation_id,
+                    RuleRecommendation.organization_id == organization_id,
+                )
+            )
         )
         recommendation = result.scalar_one_or_none()
 
@@ -343,6 +358,7 @@ class RuleRecommendationService:
         self,
         db: AsyncSession,
         recommendation_id: uuid.UUID,
+        organization_id: uuid.UUID,
         user_email: str,
         reason: str | None = None,
     ) -> dict:
@@ -352,6 +368,7 @@ class RuleRecommendationService:
         Args:
             db: Database session
             recommendation_id: Recommendation ID
+            organization_id: Organization the recommendation must belong to
             user_email: User dismissing the recommendation
             reason: Optional dismissal reason
 
@@ -359,7 +376,12 @@ class RuleRecommendationService:
             Dictionary with dismissal results
         """
         result = await db.execute(
-            select(RuleRecommendation).where(RuleRecommendation.id == recommendation_id)
+            select(RuleRecommendation).where(
+                and_(
+                    RuleRecommendation.id == recommendation_id,
+                    RuleRecommendation.organization_id == organization_id,
+                )
+            )
         )
         recommendation = result.scalar_one_or_none()
 
@@ -371,6 +393,7 @@ class RuleRecommendationService:
 
         # Create dismissal record
         dismissal = RuleRecommendationDismissal(
+            organization_id=organization_id,
             recommendation_id=recommendation_id,
             dismissed_by=user_email,
             reason=reason,
@@ -388,22 +411,24 @@ class RuleRecommendationService:
             "reason": reason,
         }
 
-    async def get_stats(self, db: AsyncSession) -> dict:
-        """Get recommendation statistics."""
+    async def get_stats(self, db: AsyncSession, organization_id: uuid.UUID) -> dict:
+        """Get recommendation statistics for an organization."""
+        org_filter = RuleRecommendation.organization_id == organization_id
+
         # Total counts by status
         status_counts = {}
         for status in RecommendationStatus:
             result = await db.execute(
                 select(func.count())
                 .select_from(RuleRecommendation)
-                .where(RuleRecommendation.status == status)
+                .where(and_(org_filter, RuleRecommendation.status == status))
             )
             status_counts[status.value] = result.scalar() or 0
 
         # By log source
         source_result = await db.execute(
             select(RuleRecommendation.log_source, func.count())
-            .where(RuleRecommendation.status == RecommendationStatus.PENDING)
+            .where(and_(org_filter, RuleRecommendation.status == RecommendationStatus.PENDING))
             .group_by(RuleRecommendation.log_source)
         )
         by_source = {row[0]: row[1] for row in source_result.all()}

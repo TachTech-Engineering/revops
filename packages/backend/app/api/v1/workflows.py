@@ -174,6 +174,184 @@ class WorkflowListResponse(BaseModel):
     page_size: int
 
 
+# Note: literal paths (/node-types, /executions/recent) must be registered BEFORE
+# the parameterized routes below, or FastAPI matches /{workflow_id} and
+# /executions/{execution_id} first and rejects them as invalid UUIDs (422).
+
+
+@router.get("/node-types")
+async def list_node_types(
+    user: OrgUserDep,
+) -> list[dict]:
+    """List all available node types with their configuration schemas."""
+    node_types = [
+        {
+            "type": "trigger_alert",
+            "category": "trigger",
+            "label": "Alert Trigger",
+            "description": "Triggered when an alert matches conditions",
+            "handles": {"outputs": ["default"]},
+            "config_schema": {
+                "type": "object",
+                "properties": {
+                    "severities": {"type": "array", "items": {"type": "string"}},
+                    "rule_ids": {"type": "array", "items": {"type": "string"}},
+                    "connector_ids": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+        },
+        {
+            "type": "trigger_schedule",
+            "category": "trigger",
+            "label": "Schedule Trigger",
+            "description": "Triggered on a cron schedule",
+            "handles": {"outputs": ["default"]},
+            "config_schema": {
+                "type": "object",
+                "properties": {
+                    "cron": {"type": "string", "description": "Cron expression"},
+                    "timezone": {"type": "string", "default": "UTC"},
+                },
+                "required": ["cron"],
+            },
+        },
+        {
+            "type": "trigger_webhook",
+            "category": "trigger",
+            "label": "Webhook Trigger",
+            "description": "Triggered by incoming webhook",
+            "handles": {"outputs": ["default"]},
+            "config_schema": {
+                "type": "object",
+                "properties": {
+                    "secret": {"type": "string", "description": "Webhook secret for validation"},
+                },
+            },
+        },
+        {
+            "type": "trigger_manual",
+            "category": "trigger",
+            "label": "Manual Trigger",
+            "description": "Triggered manually by user",
+            "handles": {"outputs": ["default"]},
+            "config_schema": {"type": "object", "properties": {}},
+        },
+        {
+            "type": "http_request",
+            "category": "action",
+            "label": "HTTP Request",
+            "description": "Make an HTTP API call",
+            "handles": {"inputs": ["default"], "outputs": ["default"]},
+            "config_schema": {
+                "type": "object",
+                "properties": {
+                    "method": {"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
+                    "url": {"type": "string"},
+                    "headers": {"type": "object"},
+                    "query_params": {"type": "object"},
+                    "body": {"type": "object"},
+                },
+                "required": ["method", "url"],
+            },
+        },
+        {
+            "type": "connector_action",
+            "category": "action",
+            "label": "Connector Action",
+            "description": "Execute action via configured connector",
+            "handles": {"inputs": ["default"], "outputs": ["default"]},
+            "config_schema": {
+                "type": "object",
+                "properties": {
+                    "connector_id": {"type": "string"},
+                    "action_config": {"type": "object"},
+                },
+                "required": ["connector_id"],
+            },
+        },
+        {
+            "type": "condition",
+            "category": "logic",
+            "label": "Condition",
+            "description": "Branch based on conditions",
+            "handles": {"inputs": ["default"], "outputs": ["true", "false"]},
+            "config_schema": {
+                "type": "object",
+                "properties": {
+                    "conditions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "field": {"type": "string"},
+                                "operator": {"type": "string"},
+                                "value": {},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+        {
+            "type": "transform",
+            "category": "logic",
+            "label": "Transform",
+            "description": "Transform and reshape data",
+            "handles": {"inputs": ["default"], "outputs": ["default"]},
+            "config_schema": {
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["template", "extract", "merge", "map"]},
+                    "template": {"type": "object"},
+                    "field": {"type": "string"},
+                    "sources": {"type": "array"},
+                },
+            },
+        },
+        {
+            "type": "delay",
+            "category": "logic",
+            "label": "Delay",
+            "description": "Wait for specified duration",
+            "handles": {"inputs": ["default"], "outputs": ["default"]},
+            "config_schema": {
+                "type": "object",
+                "properties": {
+                    "seconds": {"type": "integer", "minimum": 0, "maximum": 300},
+                },
+            },
+        },
+        {
+            "type": "loop",
+            "category": "logic",
+            "label": "Loop",
+            "description": "Iterate over array",
+            "handles": {"inputs": ["default"], "outputs": ["loop_item", "loop_complete"]},
+            "config_schema": {
+                "type": "object",
+                "properties": {
+                    "items": {"description": "Array to iterate (can be template)"},
+                    "max_iterations": {"type": "integer", "default": 100},
+                },
+            },
+        },
+        {
+            "type": "set_variable",
+            "category": "utility",
+            "label": "Set Variable",
+            "description": "Set workflow variables",
+            "handles": {"inputs": ["default"], "outputs": ["default"]},
+            "config_schema": {
+                "type": "object",
+                "properties": {
+                    "variables": {"type": "object"},
+                },
+            },
+        },
+    ]
+    return node_types
+
+
 # ==================== Workflow Endpoints ====================
 
 
@@ -653,6 +831,43 @@ async def list_workflow_executions(
     }
 
 
+@router.get("/executions/recent")
+async def list_recent_executions(
+    user: OrgUserDep,
+    org_id: OrgIdDep,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = Query(10, ge=1, le=50),
+) -> list[ExecutionResponse]:
+    """List recent workflow executions across all workflows for the current organization."""
+    query = (
+        select(WorkflowExecution)
+        .where(WorkflowExecution.organization_id == org_id)
+        .order_by(desc(WorkflowExecution.created_at))
+        .limit(limit)
+    )
+    result = await db.execute(query)
+    executions = result.scalars().all()
+
+    return [
+        ExecutionResponse(
+            id=e.id,
+            workflow_id=e.workflow_id,
+            workflow_version=e.workflow_version,
+            status=e.status,
+            trigger_data=e.trigger_data,
+            context=e.context,
+            variables=e.variables,
+            started_at=e.started_at.isoformat() if e.started_at else None,
+            completed_at=e.completed_at.isoformat() if e.completed_at else None,
+            error_message=e.error_message,
+            failed_node_key=e.failed_node_key,
+            triggered_by=e.triggered_by,
+            created_at=e.created_at.isoformat(),
+        )
+        for e in executions
+    ]
+
+
 @router.get("/executions/{execution_id}")
 async def get_execution(
     execution_id: UUID,
@@ -712,216 +927,3 @@ async def get_execution(
             for s in steps
         ],
     }
-
-
-@router.get("/executions/recent")
-async def list_recent_executions(
-    user: OrgUserDep,
-    org_id: OrgIdDep,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    limit: int = Query(10, ge=1, le=50),
-) -> list[ExecutionResponse]:
-    """List recent workflow executions across all workflows for the current organization."""
-    query = (
-        select(WorkflowExecution)
-        .where(WorkflowExecution.organization_id == org_id)
-        .order_by(desc(WorkflowExecution.created_at))
-        .limit(limit)
-    )
-    result = await db.execute(query)
-    executions = result.scalars().all()
-
-    return [
-        ExecutionResponse(
-            id=e.id,
-            workflow_id=e.workflow_id,
-            workflow_version=e.workflow_version,
-            status=e.status,
-            trigger_data=e.trigger_data,
-            context=e.context,
-            variables=e.variables,
-            started_at=e.started_at.isoformat() if e.started_at else None,
-            completed_at=e.completed_at.isoformat() if e.completed_at else None,
-            error_message=e.error_message,
-            failed_node_key=e.failed_node_key,
-            triggered_by=e.triggered_by,
-            created_at=e.created_at.isoformat(),
-        )
-        for e in executions
-    ]
-
-
-# ==================== Node Type Info ====================
-
-
-@router.get("/node-types")
-async def list_node_types(
-    user: OrgUserDep,
-) -> list[dict]:
-    """List all available node types with their configuration schemas."""
-    node_types = [
-        {
-            "type": "trigger_alert",
-            "category": "trigger",
-            "label": "Alert Trigger",
-            "description": "Triggered when an alert matches conditions",
-            "handles": {"outputs": ["default"]},
-            "config_schema": {
-                "type": "object",
-                "properties": {
-                    "severities": {"type": "array", "items": {"type": "string"}},
-                    "rule_ids": {"type": "array", "items": {"type": "string"}},
-                    "connector_ids": {"type": "array", "items": {"type": "string"}},
-                },
-            },
-        },
-        {
-            "type": "trigger_schedule",
-            "category": "trigger",
-            "label": "Schedule Trigger",
-            "description": "Triggered on a cron schedule",
-            "handles": {"outputs": ["default"]},
-            "config_schema": {
-                "type": "object",
-                "properties": {
-                    "cron": {"type": "string", "description": "Cron expression"},
-                    "timezone": {"type": "string", "default": "UTC"},
-                },
-                "required": ["cron"],
-            },
-        },
-        {
-            "type": "trigger_webhook",
-            "category": "trigger",
-            "label": "Webhook Trigger",
-            "description": "Triggered by incoming webhook",
-            "handles": {"outputs": ["default"]},
-            "config_schema": {
-                "type": "object",
-                "properties": {
-                    "secret": {"type": "string", "description": "Webhook secret for validation"},
-                },
-            },
-        },
-        {
-            "type": "trigger_manual",
-            "category": "trigger",
-            "label": "Manual Trigger",
-            "description": "Triggered manually by user",
-            "handles": {"outputs": ["default"]},
-            "config_schema": {"type": "object", "properties": {}},
-        },
-        {
-            "type": "http_request",
-            "category": "action",
-            "label": "HTTP Request",
-            "description": "Make an HTTP API call",
-            "handles": {"inputs": ["default"], "outputs": ["default"]},
-            "config_schema": {
-                "type": "object",
-                "properties": {
-                    "method": {"type": "string", "enum": ["GET", "POST", "PUT", "PATCH", "DELETE"]},
-                    "url": {"type": "string"},
-                    "headers": {"type": "object"},
-                    "query_params": {"type": "object"},
-                    "body": {"type": "object"},
-                },
-                "required": ["method", "url"],
-            },
-        },
-        {
-            "type": "connector_action",
-            "category": "action",
-            "label": "Connector Action",
-            "description": "Execute action via configured connector",
-            "handles": {"inputs": ["default"], "outputs": ["default"]},
-            "config_schema": {
-                "type": "object",
-                "properties": {
-                    "connector_id": {"type": "string"},
-                    "action_config": {"type": "object"},
-                },
-                "required": ["connector_id"],
-            },
-        },
-        {
-            "type": "condition",
-            "category": "logic",
-            "label": "Condition",
-            "description": "Branch based on conditions",
-            "handles": {"inputs": ["default"], "outputs": ["true", "false"]},
-            "config_schema": {
-                "type": "object",
-                "properties": {
-                    "conditions": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "field": {"type": "string"},
-                                "operator": {"type": "string"},
-                                "value": {},
-                            },
-                        },
-                    },
-                },
-            },
-        },
-        {
-            "type": "transform",
-            "category": "logic",
-            "label": "Transform",
-            "description": "Transform and reshape data",
-            "handles": {"inputs": ["default"], "outputs": ["default"]},
-            "config_schema": {
-                "type": "object",
-                "properties": {
-                    "mode": {"type": "string", "enum": ["template", "extract", "merge", "map"]},
-                    "template": {"type": "object"},
-                    "field": {"type": "string"},
-                    "sources": {"type": "array"},
-                },
-            },
-        },
-        {
-            "type": "delay",
-            "category": "logic",
-            "label": "Delay",
-            "description": "Wait for specified duration",
-            "handles": {"inputs": ["default"], "outputs": ["default"]},
-            "config_schema": {
-                "type": "object",
-                "properties": {
-                    "seconds": {"type": "integer", "minimum": 0, "maximum": 300},
-                },
-            },
-        },
-        {
-            "type": "loop",
-            "category": "logic",
-            "label": "Loop",
-            "description": "Iterate over array",
-            "handles": {"inputs": ["default"], "outputs": ["loop_item", "loop_complete"]},
-            "config_schema": {
-                "type": "object",
-                "properties": {
-                    "items": {"description": "Array to iterate (can be template)"},
-                    "max_iterations": {"type": "integer", "default": 100},
-                },
-            },
-        },
-        {
-            "type": "set_variable",
-            "category": "utility",
-            "label": "Set Variable",
-            "description": "Set workflow variables",
-            "handles": {"inputs": ["default"], "outputs": ["default"]},
-            "config_schema": {
-                "type": "object",
-                "properties": {
-                    "variables": {"type": "object"},
-                },
-            },
-        },
-    ]
-    return node_types

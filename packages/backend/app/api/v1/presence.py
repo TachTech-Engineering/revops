@@ -5,7 +5,6 @@ Tracks which users are currently viewing alerts for collaboration awareness.
 """
 
 from datetime import timedelta
-from uuid import UUID
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
@@ -105,7 +104,7 @@ async def send_heartbeat(
         select(AlertPresence)
         .where(AlertPresence.organization_id == org_id)
         .where(AlertPresence.alert_id == request.alert_id)
-        .where(AlertPresence.user_id == UUID(user.id))
+        .where(AlertPresence.user_id == user.id)
     )
     presence = result.scalar_one_or_none()
 
@@ -117,7 +116,7 @@ async def send_heartbeat(
         presence = AlertPresence(
             organization_id=org_id,
             alert_id=request.alert_id,
-            user_id=UUID(user.id),
+            user_id=user.id,
             user_email=user.email,
             user_name=user.name,
             started_viewing_at=utcnow(),
@@ -142,7 +141,7 @@ async def leave_alert(
         delete(AlertPresence)
         .where(AlertPresence.organization_id == org_id)
         .where(AlertPresence.alert_id == request.alert_id)
-        .where(AlertPresence.user_id == UUID(user.id))
+        .where(AlertPresence.user_id == user.id)
     )
     await db.commit()
 
@@ -159,7 +158,7 @@ async def clear_user_presence(
     await db.execute(
         delete(AlertPresence)
         .where(AlertPresence.organization_id == org_id)
-        .where(AlertPresence.user_id == UUID(user.id))
+        .where(AlertPresence.user_id == user.id)
     )
     await db.commit()
 

@@ -303,7 +303,9 @@ async def test_enrichment_pipeline(
     if not pipeline:
         raise HTTPException(status_code=404, detail="Enrichment pipeline not found")
 
-    enrichment_result = await run_enrichment(db, pipeline, request.value)
+    enrichment_result = await run_enrichment(
+        db, pipeline, request.value, organization_id=analyst.organization_id
+    )
 
     return {
         "pipeline_id": str(pipeline_id),

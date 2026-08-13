@@ -4,6 +4,7 @@ Escalation Service
 Handles automatic triggering and processing of escalation policies for alerts.
 """
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -781,3 +782,94 @@ async def trigger_escalation_for_alert(
         alert_time=alert.get("createdAt", ""),
         log_source=alert.get("logSource", "") or alert.get("log_source", ""),
     )
+
+
+# Advisory lock id for the cross-replica escalation sweep. Distinct from the
+# schema lock in app/db/run_migrations.py (0x52564F50 "RVOP"); 0x52455343 is
+# ascii "RESC".
+ESCALATION_SWEEP_LOCK_ID = 0x52455343
+
+
+class EscalationScheduler:
+    """
+    Periodically advances multi-step escalations.
+
+    Without this loop nothing ever calls process_pending_escalations(), so an
+    escalation only ever delivers its first step (e.g. the Slack message) and
+    never the follow-up SMS/phone call. Follows the same start/stop convention
+    as ConnectorSyncScheduler (app/jobs/connector_sync.py).
+    """
+
+    def __init__(self, check_interval_seconds: int = 60):
+        self._running = False
+        self._check_interval = check_interval_seconds
+
+    async def start(self):
+        """Start the escalation scheduler loop."""
+        if self._running:
+            logger.warning("Escalation scheduler already running")
+            return
+
+        self._running = True
+        logger.info(f"Starting escalation scheduler ({self._check_interval}s interval)")
+
+        while self._running:
+            try:
+                await self._process_due_escalations()
+            except Exception:
+                logger.exception("Error in escalation scheduler")
+
+            await asyncio.sleep(self._check_interval)
+
+    def stop(self):
+        """Stop the escalation scheduler."""
+        self._running = False
+        logger.info("Escalation scheduler stopped")
+
+    async def _process_due_escalations(self):
+        """Advance every escalation whose next step is due.
+
+        Guarded by a Postgres advisory lock: this sweep is a global,
+        cross-organization job, and the backend runs multiple replicas. Without
+        the lock every replica would advance the same escalations on the same
+        60s tick and page the on-call engineer once per replica. pg_try_advisory_lock
+        is non-blocking -- a replica that does not get the lock simply skips
+        this tick, and the lock is released when the session closes.
+        """
+        from sqlalchemy import text
+
+        from app.db.session import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            acquired = (
+                await db.execute(
+                    text("SELECT pg_try_advisory_lock(:lock_id)"),
+                    {"lock_id": ESCALATION_SWEEP_LOCK_ID},
+                )
+            ).scalar()
+            if not acquired:
+                logger.debug("Escalation sweep already running on another replica; skipping tick")
+                return
+            try:
+                processed = await EscalationService(db).process_pending_escalations()
+                if processed:
+                    logger.info(f"Advanced {processed} pending escalation(s)")
+            finally:
+                await db.execute(
+                    text("SELECT pg_advisory_unlock(:lock_id)"),
+                    {"lock_id": ESCALATION_SWEEP_LOCK_ID},
+                )
+
+
+# Global escalation scheduler instance
+escalation_scheduler = EscalationScheduler()
+
+
+async def start_escalation_scheduler():
+    """Start the global escalation scheduler."""
+    await escalation_scheduler.start()
+
+
+def stop_escalation_scheduler():
+    """Stop the global escalation scheduler."""
+    escalation_scheduler.stop()

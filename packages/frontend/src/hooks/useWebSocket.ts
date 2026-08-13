@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { useSelector } from 'react-redux'
+import type { RootState } from '../store'
 
 export interface WebSocketMessage {
   type: string
@@ -21,6 +23,8 @@ interface UseWebSocketOptions {
   onAlert?: (alert: AlertNotification) => void
   reconnectInterval?: number
   maxReconnectAttempts?: number
+  /** When false, no socket is opened (e.g. no auth token available yet). */
+  enabled?: boolean
 }
 
 interface UseWebSocketReturn {
@@ -36,6 +40,7 @@ export function useWebSocket({
   onAlert,
   reconnectInterval = 5000,
   maxReconnectAttempts = 10,
+  enabled = true,
 }: UseWebSocketOptions): UseWebSocketReturn {
   const [isConnected, setIsConnected] = useState(false)
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null)
@@ -44,6 +49,9 @@ export function useWebSocket({
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const connect = useCallback(() => {
+    if (!enabled) {
+      return
+    }
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return
     }
@@ -96,7 +104,7 @@ export function useWebSocket({
     } catch (e) {
       console.error('Failed to create WebSocket:', e)
     }
-  }, [url, onMessage, onAlert, reconnectInterval, maxReconnectAttempts])
+  }, [url, onMessage, onAlert, reconnectInterval, maxReconnectAttempts, enabled])
 
   const disconnect = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -144,6 +152,14 @@ export function useWebSocket({
 }
 
 export function useAlertWebSocket(onAlert?: (alert: AlertNotification) => void) {
+  // The backend (app/api/v1/websocket.py) authenticates the socket from a
+  // `token` query parameter and closes with 4401 when it is missing or
+  // invalid -- browsers cannot set an Authorization header on a WebSocket
+  // handshake. Same token the REST client uses (auth slice, persisted in
+  // localStorage). A token change (refresh) rebuilds the URL, which
+  // reconnects with the fresh credential.
+  const accessToken = useSelector((state: RootState) => state.auth.accessToken)
+
   // Use API base URL if set, otherwise fall back to window.location
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || ''
   let wsUrl: string
@@ -157,8 +173,15 @@ export function useAlertWebSocket(onAlert?: (alert: AlertNotification) => void) 
     wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws/alerts`
   }
 
+  if (accessToken) {
+    wsUrl = `${wsUrl}?token=${encodeURIComponent(accessToken)}`
+  }
+
   return useWebSocket({
     url: wsUrl,
     onAlert,
+    // Without a token the handshake is guaranteed to be closed 4401, so don't
+    // burn the reconnect budget on it -- wait until one exists.
+    enabled: Boolean(accessToken),
   })
 }

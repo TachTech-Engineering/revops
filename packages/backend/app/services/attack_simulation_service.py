@@ -266,6 +266,7 @@ class AttackSimulationService:
         template_id: str,
         targets: list[str],
         triggered_by: str,
+        organization_id: uuid.UUID,
         mode: ExecutionMode = ExecutionMode.MANUAL,
         parameters: dict | None = None,
     ) -> SimulationRun:
@@ -286,6 +287,7 @@ class AttackSimulationService:
 
         # Create simulation run
         run = SimulationRun(
+            organization_id=organization_id,
             template_id=template.id,
             status=SimulationStatus.PENDING,
             targets=targets,
@@ -303,6 +305,7 @@ class AttackSimulationService:
             # Create result records for each target
             for target in targets:
                 sim_result = SimulationResult(
+                    organization_id=organization_id,
                     run_id=run.id,
                     target=target,
                     success=True,  # Manual execution assumed successful
@@ -338,6 +341,7 @@ class AttackSimulationService:
                 )
 
                 sim_result = SimulationResult(
+                    organization_id=organization_id,
                     run_id=run.id,
                     target=target,
                     success=exec_result.get("success", False),
@@ -436,11 +440,12 @@ class AttackSimulationService:
         self,
         db: AsyncSession,
         run_id: uuid.UUID,
+        organization_id: uuid.UUID,
     ) -> dict:
         """
         Clean up resources created by a Stratus RT detonation.
         """
-        run = await self.get_run(db, run_id)
+        run = await self.get_run(db, run_id, organization_id=organization_id)
         if not run:
             raise ValueError("Simulation run not found")
 
@@ -488,35 +493,40 @@ class AttackSimulationService:
         self,
         db: AsyncSession,
         run_id: uuid.UUID,
+        organization_id: uuid.UUID,
     ) -> SimulationRun | None:
-        """Get a simulation run by ID."""
-        result = await db.execute(select(SimulationRun).where(SimulationRun.id == run_id))
+        """Get a simulation run by ID, scoped to the caller's organization."""
+        result = await db.execute(
+            select(SimulationRun).where(
+                and_(
+                    SimulationRun.id == run_id,
+                    SimulationRun.organization_id == organization_id,
+                )
+            )
+        )
         return result.scalar_one_or_none()
 
     async def list_runs(
         self,
         db: AsyncSession,
+        organization_id: uuid.UUID,
         status: SimulationStatus | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[SimulationRun], int]:
-        """List simulation runs with optional filtering."""
-        conditions = []
+        """List simulation runs for an organization with optional filtering."""
+        conditions = [SimulationRun.organization_id == organization_id]
 
         if status:
             conditions.append(SimulationRun.status == status)
 
         # Get total count
-        count_query = select(func.count()).select_from(SimulationRun)
-        if conditions:
-            count_query = count_query.where(and_(*conditions))
+        count_query = select(func.count()).select_from(SimulationRun).where(and_(*conditions))
         count_result = await db.execute(count_query)
         total = count_result.scalar() or 0
 
         # Get paginated results
-        query = select(SimulationRun)
-        if conditions:
-            query = query.where(and_(*conditions))
+        query = select(SimulationRun).where(and_(*conditions))
 
         offset = (page - 1) * page_size
         query = query.order_by(SimulationRun.created_at.desc()).offset(offset).limit(page_size)
@@ -530,9 +540,17 @@ class AttackSimulationService:
         self,
         db: AsyncSession,
         run_id: uuid.UUID,
+        organization_id: uuid.UUID,
     ) -> list[SimulationResult]:
-        """Get results for a simulation run."""
-        result = await db.execute(select(SimulationResult).where(SimulationResult.run_id == run_id))
+        """Get results for a simulation run, scoped to the caller's organization."""
+        result = await db.execute(
+            select(SimulationResult).where(
+                and_(
+                    SimulationResult.run_id == run_id,
+                    SimulationResult.organization_id == organization_id,
+                )
+            )
+        )
         return list(result.scalars().all())
 
     async def verify_detection(
@@ -540,11 +558,12 @@ class AttackSimulationService:
         db: AsyncSession,
         run_id: uuid.UUID,
         panther_service,
+        organization_id: uuid.UUID,
     ) -> dict:
         """
         Verify if the simulation triggered any detections in Panther.
         """
-        run = await self.get_run(db, run_id)
+        run = await self.get_run(db, run_id, organization_id=organization_id)
         if not run:
             raise ValueError("Simulation run not found")
 
@@ -632,11 +651,12 @@ class AttackSimulationService:
         self,
         db: AsyncSession,
         run_id: uuid.UUID,
+        organization_id: uuid.UUID,
     ) -> SimulationRun:
         """
         Mark a manual run as executed (user confirmed they ran the commands).
         """
-        run = await self.get_run(db, run_id)
+        run = await self.get_run(db, run_id, organization_id=organization_id)
         if not run:
             raise ValueError("Simulation run not found")
 
@@ -647,10 +667,14 @@ class AttackSimulationService:
         await db.refresh(run)
         return run
 
-    async def get_stats(self, db: AsyncSession) -> dict:
-        """Get simulation statistics."""
+    async def get_stats(self, db: AsyncSession, organization_id: uuid.UUID) -> dict:
+        """Get simulation statistics for an organization."""
+        org_filter = SimulationRun.organization_id == organization_id
+
         # Total runs
-        total_result = await db.execute(select(func.count()).select_from(SimulationRun))
+        total_result = await db.execute(
+            select(func.count()).select_from(SimulationRun).where(org_filter)
+        )
         total = total_result.scalar() or 0
 
         # By status
@@ -659,7 +683,7 @@ class AttackSimulationService:
             result = await db.execute(
                 select(func.count())
                 .select_from(SimulationRun)
-                .where(SimulationRun.status == status)
+                .where(and_(org_filter, SimulationRun.status == status))
             )
             status_counts[status.value] = result.scalar() or 0
 
@@ -667,7 +691,7 @@ class AttackSimulationService:
         detected_result = await db.execute(
             select(func.count())
             .select_from(SimulationRun)
-            .where(SimulationRun.detection_found.is_(True))
+            .where(and_(org_filter, SimulationRun.detection_found.is_(True)))
         )
         detected = detected_result.scalar() or 0
 

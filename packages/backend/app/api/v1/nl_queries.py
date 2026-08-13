@@ -13,6 +13,7 @@ from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgIdDep, OrgUserDep
+from app.core.sql_guard import validate_generated_sql
 from app.db import NLQueryHistory, get_db
 from app.services.llm_service import llm_service
 
@@ -116,32 +117,14 @@ EXAMPLE_QUERIES = [
 
 
 def validate_sql_safety(sql: str, org_id: UUID) -> tuple[bool, str]:
+    """Validate that model-generated SQL is safe to execute for this caller.
+
+    Delegates to the shared guard in app.core.sql_guard. The previous
+    implementation accepted `org_id` and never used it -- it only checked that
+    the substring "organization_id" appeared somewhere, so a query filtering on
+    ANOTHER tenant's organization id passed validation and executed.
     """
-    Validate that SQL is safe to execute.
-
-    Args:
-        sql: The SQL query to validate
-        org_id: Organization ID for filter validation
-
-    Returns:
-        Tuple of (is_safe, error_message)
-    """
-    sql_upper = sql.upper().strip()
-
-    # Must be a SELECT query
-    if not sql_upper.startswith("SELECT"):
-        return False, "Only SELECT queries are allowed"
-
-    # Check for dangerous keywords
-    for keyword in DANGEROUS_KEYWORDS:
-        if keyword.upper() in sql_upper:
-            return False, f"Query contains forbidden keyword: {keyword}"
-
-    # Check for organization filter (required for multi-tenant safety)
-    if "organization_id" not in sql.lower():
-        return False, "Query must include organization_id filter"
-
-    return True, ""
+    return validate_generated_sql(sql, org_id)
 
 
 async def translate_nl_to_sql_llm(

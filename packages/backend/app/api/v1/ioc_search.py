@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -68,8 +69,36 @@ def detect_indicator_type(indicator: str) -> str:
     return "username"
 
 
+# Indicators are interpolated into Snowflake SQL sent to Panther (there is no
+# bind-parameter channel through that API), so the value must be constrained
+# rather than trusted. Real IOCs -- IPs, domains, hashes, emails, usernames,
+# URLs -- never need quotes, semicolons, backslashes or comment markers, which
+# is exactly what a break-out payload requires.
+_SAFE_INDICATOR = re.compile(r"^[A-Za-z0-9._:@/%?=&+~\[\]-]{1,255}$")
+
+
+class UnsafeIndicatorError(ValueError):
+    """Raised when an indicator cannot be safely embedded in a query."""
+
+
+def _validate_indicator(indicator: str) -> str:
+    value = (indicator or "").strip()
+    if not _SAFE_INDICATOR.match(value):
+        raise UnsafeIndicatorError(
+            "Indicator contains unsupported characters. Provide a plain IP, "
+            "domain, hash, email, username, or URL."
+        )
+    return value
+
+
 def build_search_query(indicator: str, indicator_type: str, days: int) -> str:
-    """Build SQL query based on indicator type."""
+    """Build SQL query based on indicator type.
+
+    ``indicator`` is validated against a strict character allowlist and
+    ``days`` is coerced to a bounded int before either is interpolated.
+    """
+    indicator = _validate_indicator(indicator)
+    days = max(1, min(int(days), 365))
     base_query = f"""
 SELECT
     p_log_type as source,
@@ -96,8 +125,7 @@ WHERE p_event_time > current_timestamp - interval '{days}' day
         )
     elif indicator_type in ("hash_md5", "hash_sha1", "hash_sha256"):
         return (
-            base_query
-            + f"  AND (ARRAY_CONTAINS('{indicator}'::variant, p_any_md5_hashes)"
+            base_query + f"  AND (ARRAY_CONTAINS('{indicator}'::variant, p_any_md5_hashes)"
             f" OR ARRAY_CONTAINS('{indicator}'::variant, p_any_sha1_hashes)"
             f" OR ARRAY_CONTAINS('{indicator}'::variant, p_any_sha256_hashes))"
             "\nLIMIT 500"
@@ -133,6 +161,13 @@ async def search_ioc(
 ) -> IOCSearchResult:
     """Search for an IOC across all log sources."""
     indicator_type = request.indicator_type or detect_indicator_type(request.indicator)
+
+    # A rejected indicator is a client error, not a 500 -- and must not fall
+    # into the generic handler below, which would mask it as a search failure.
+    try:
+        request.indicator = _validate_indicator(request.indicator)
+    except UnsafeIndicatorError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     try:
         sql = build_search_query(request.indicator, indicator_type, request.time_range_days)

@@ -17,6 +17,19 @@ interface NotesPanelProps {
   resourceId: string
 }
 
+// Note bodies are attacker-controllable (any analyst in the org can post one)
+// and are rendered through dangerouslySetInnerHTML so that @mentions can be
+// highlighted. Escape the text FIRST so the only markup that survives into the
+// DOM is the mention spans generated below -- anything the author typed is
+// inert text.
+const escapeHtml = (text: string): string =>
+  text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
 export default function NotesPanel({ resourceType, resourceId }: NotesPanelProps) {
   const [newNote, setNewNote] = useState('')
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null)
@@ -111,7 +124,12 @@ export default function NotesPanel({ resourceType, resourceId }: NotesPanelProps
   }
 
   const highlightMentions = (content: string) => {
-    return content.replace(/@(\S+)/g, '<span class="text-blue-600 dark:text-blue-400 font-medium">@$1</span>')
+    // escapeHtml runs before the mention markup is injected; the capture group
+    // therefore only ever contains already-escaped, inert text.
+    return escapeHtml(content).replace(
+      /@(\S+)/g,
+      '<span class="text-blue-600 dark:text-blue-400 font-medium">@$1</span>'
+    )
   }
 
   const formatDate = (dateStr: string) => {

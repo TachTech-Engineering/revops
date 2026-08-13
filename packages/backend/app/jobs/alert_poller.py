@@ -42,8 +42,10 @@ class AlertPoller:
         while self._running:
             try:
                 await self._poll_alerts(panther_service)
-            except Exception as e:
-                logger.error(f"Error polling alerts: {e}")
+            except Exception:
+                # Log with traceback - swallowing this silently hid a broken
+                # list_alerts() call site for the entire life of the poller.
+                logger.exception("Error polling alerts")
 
             await asyncio.sleep(interval_seconds)
 
@@ -59,14 +61,14 @@ class AlertPoller:
             end_time = utcnow()
             start_time = end_time - timedelta(minutes=5)
 
-            # Fetch recent alerts
-            result = await panther_service.list_alerts(
-                created_at_after=start_time.isoformat() + "Z",
-                created_at_before=end_time.isoformat() + "Z",
+            # Fetch recent alerts. list_alerts takes datetimes (the SDK isoformats
+            # them itself) and returns a (alerts, next_cursor) tuple.
+            alerts, _next_cursor = await panther_service.list_alerts(
+                created_after=start_time,
+                created_before=end_time,
                 page_size=100,
             )
 
-            alerts = result.get("alerts", [])
             new_alerts = []
 
             for alert in alerts:
@@ -121,6 +123,7 @@ class AlertPoller:
                 logger.info(f"Broadcasted {len(new_alerts)} new alerts")
 
         except Exception as e:
+            # Traceback is logged by the caller's handler in start().
             logger.error(f"Failed to poll alerts: {e}")
             raise
 
@@ -142,8 +145,10 @@ class AlertPoller:
                     logger.info(
                         f"Triggered escalation {escalation.id} for alert {alert_data.get('id')}"
                     )
-        except Exception as e:
-            logger.error(f"Failed to trigger escalation for alert {alert_data.get('id')}: {e}")
+        except Exception:
+            logger.exception(
+                f"Failed to trigger escalation for alert {alert_data.get('id')}"
+            )
 
 
 # Global alert poller instance

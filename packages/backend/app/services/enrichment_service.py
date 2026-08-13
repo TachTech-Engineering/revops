@@ -28,13 +28,15 @@ async def get_cached_enrichment(
     db: AsyncSession,
     pipeline_id: UUID,
     input_value: str,
+    organization_id: UUID,
 ) -> dict | None:
-    """Check if we have a valid cached enrichment result."""
+    """Check if we have a valid cached enrichment result for this organization."""
     input_hash = await get_cache_key(input_value)
 
     result = await db.execute(
         select(EnrichmentCache).where(
             and_(
+                EnrichmentCache.organization_id == organization_id,
                 EnrichmentCache.pipeline_id == pipeline_id,
                 EnrichmentCache.input_hash == input_hash,
                 EnrichmentCache.expires_at > utcnow(),
@@ -55,9 +57,10 @@ async def store_cached_enrichment(
     input_value: str,
     result: dict,
     ttl_minutes: int,
+    organization_id: UUID,
     error_message: str | None = None,
 ) -> EnrichmentCache:
-    """Store an enrichment result in the cache."""
+    """Store an enrichment result in the cache, scoped to an organization."""
     input_hash = await get_cache_key(input_value)
     expires_at = utcnow() + timedelta(minutes=ttl_minutes)
 
@@ -65,6 +68,7 @@ async def store_cached_enrichment(
     existing = await db.execute(
         select(EnrichmentCache).where(
             and_(
+                EnrichmentCache.organization_id == organization_id,
                 EnrichmentCache.pipeline_id == pipeline_id,
                 EnrichmentCache.input_hash == input_hash,
             )
@@ -78,6 +82,7 @@ async def store_cached_enrichment(
         cache_entry.expires_at = expires_at
     else:
         cache_entry = EnrichmentCache(
+            organization_id=organization_id,
             pipeline_id=pipeline_id,
             input_value=input_value,
             input_hash=input_hash,
@@ -233,10 +238,16 @@ async def run_enrichment(
     db: AsyncSession,
     pipeline: EnrichmentPipeline,
     value: str,
+    organization_id: UUID | None = None,
 ) -> dict:
-    """Run enrichment for a given value using the specified pipeline."""
+    """Run enrichment for a given value using the specified pipeline.
+
+    Cache reads and writes are scoped to the pipeline's organization.
+    """
+    organization_id = organization_id or pipeline.organization_id
+
     # Check cache first
-    cached = await get_cached_enrichment(db, pipeline.id, value)
+    cached = await get_cached_enrichment(db, pipeline.id, value, organization_id=organization_id)
     if cached:
         return {"source": "cache", "data": cached}
 
@@ -268,7 +279,13 @@ async def run_enrichment(
     # Store in cache
     error_message = result.get("error") if "error" in result else None
     await store_cached_enrichment(
-        db, pipeline.id, value, result, pipeline.cache_ttl_minutes, error_message
+        db,
+        pipeline.id,
+        value,
+        result,
+        pipeline.cache_ttl_minutes,
+        organization_id=organization_id,
+        error_message=error_message,
     )
 
     return {"source": "live", "data": result}
@@ -279,18 +296,22 @@ async def enrich_alert(
     alert_id: str,
     alert_data: dict,
     user_email: str,
+    organization_id: UUID,
     pipeline_ids: list[UUID] | None = None,
 ) -> list[dict]:
-    """Enrich an alert using all active pipelines or specified pipelines."""
+    """Enrich an alert using the organization's active pipelines.
+
+    Only pipelines owned by ``organization_id`` are ever executed, so one
+    tenant's alert data can never be sent to another tenant's custom API.
+    """
+    conditions = [
+        EnrichmentPipeline.organization_id == organization_id,
+        EnrichmentPipeline.is_active.is_(True),
+    ]
     if pipeline_ids:
-        query = select(EnrichmentPipeline).where(
-            and_(
-                EnrichmentPipeline.id.in_(pipeline_ids),
-                EnrichmentPipeline.is_active.is_(True),
-            )
-        )
-    else:
-        query = select(EnrichmentPipeline).where(EnrichmentPipeline.is_active.is_(True))
+        conditions.append(EnrichmentPipeline.id.in_(pipeline_ids))
+
+    query = select(EnrichmentPipeline).where(and_(*conditions))
 
     result = await db.execute(query)
     pipelines = result.scalars().all()
@@ -312,10 +333,13 @@ async def enrich_alert(
             continue
 
         # Run enrichment
-        enrichment_result = await run_enrichment(db, pipeline, str(value))
+        enrichment_result = await run_enrichment(
+            db, pipeline, str(value), organization_id=organization_id
+        )
 
         # Store enrichment for this alert
         alert_enrichment = AlertEnrichment(
+            organization_id=organization_id,
             alert_id=alert_id,
             pipeline_id=pipeline.id,
             source_field=pipeline.source_field,
@@ -344,12 +368,19 @@ async def enrich_alert(
 async def get_alert_enrichments(
     db: AsyncSession,
     alert_id: str,
+    organization_id: UUID,
 ) -> list[dict]:
-    """Get all enrichments for an alert."""
+    """Get all enrichments for an alert within an organization."""
     result = await db.execute(
         select(AlertEnrichment, EnrichmentPipeline)
         .join(EnrichmentPipeline, AlertEnrichment.pipeline_id == EnrichmentPipeline.id)
-        .where(AlertEnrichment.alert_id == alert_id)
+        .where(
+            and_(
+                AlertEnrichment.alert_id == alert_id,
+                AlertEnrichment.organization_id == organization_id,
+                EnrichmentPipeline.organization_id == organization_id,
+            )
+        )
         .order_by(AlertEnrichment.created_at.desc())
     )
 

@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.deps import OrgAdminDep, OrgAnalystDep, OrgIdDep, OrgUserDep, get_panther_service
 from app.config import settings
+from app.core.sql_guard import validate_generated_sql
 from app.core.time_utils import utcnow
 from app.db.models import (
     AISummaryCache,
@@ -707,8 +708,7 @@ async def ai_convert_rule(
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Provider '{provider.value}' is not configured. "
-                "Configure API key in AI Settings."
+                f"Provider '{provider.value}' is not configured. Configure API key in AI Settings."
             ),
         )
 
@@ -779,8 +779,7 @@ async def ai_explain_rule(
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Provider '{provider.value}' is not configured. "
-                "Configure API key in AI Settings."
+                f"Provider '{provider.value}' is not configured. Configure API key in AI Settings."
             ),
         )
 
@@ -849,8 +848,7 @@ async def ai_enhance_rule(
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Provider '{provider.value}' is not configured. "
-                "Configure API key in AI Settings."
+                f"Provider '{provider.value}' is not configured. Configure API key in AI Settings."
             ),
         )
 
@@ -969,10 +967,14 @@ async def ask_your_data(
         result = await llm_service._call_llm_with_key(prompt, llm_provider, org_api_key, org_model)
         generated_sql = result["summary"].strip().replace("```sql", "").replace("```", "").strip()
 
-        # Security Check: Basic SQL injection prevention
-        forbidden = ["DROP", "DELETE", "UPDATE", "INSERT", "ALTER", "TRUNCATE", "GRANT", "REVOKE"]
-        if any(word in generated_sql.upper() for word in forbidden):
-            raise ValueError("Generated query contains forbidden keywords for safety.")
+        # Security check. The org filter in the prompt above is only a soft
+        # instruction -- the model can omit it or emit another tenant's id, and
+        # nothing downstream re-checked it. This gate is server-side and fails
+        # closed: single SELECT, no set operations, and every organization_id
+        # literal must equal the caller's own org.
+        is_safe, reason = validate_generated_sql(generated_sql, org_id)
+        if not is_safe:
+            raise ValueError(f"Generated query rejected: {reason}")
 
         # 4. Execute the SQL
         from sqlalchemy import text
@@ -1023,7 +1025,7 @@ async def _execute_alert_lookup(
         )
         stmt = stmt.where(search_filter)
 
-    stmt = stmt.order_by(NormalizedAlert.timestamp.desc()).limit(limit)
+    stmt = stmt.order_by(NormalizedAlert.created_at_source.desc()).limit(limit)
 
     result = await db.execute(stmt)
     alerts = result.scalars().all()
@@ -1036,8 +1038,8 @@ async def _execute_alert_lookup(
                 "title": a.title,
                 "severity": a.severity,
                 "status": a.status,
-                "source": a.source_system,
-                "timestamp": a.timestamp.isoformat() if a.timestamp else None,
+                "source": a.source_type,
+                "timestamp": a.created_at_source.isoformat() if a.created_at_source else None,
                 "rule_name": a.rule_name,
             }
             for a in alerts
@@ -1063,6 +1065,23 @@ async def _execute_incident_lookup(
     result = await db.execute(stmt)
     incidents = result.scalars().all()
 
+    # Incident has no alert_count column -- the count comes from the
+    # IncidentAlert link table. One grouped query, org-scoped, rather than a
+    # per-incident query.
+    counts: dict = {}
+    if incidents:
+        count_rows = await db.execute(
+            select(IncidentAlert.incident_id, func.count())
+            .where(
+                and_(
+                    IncidentAlert.organization_id == org_id,
+                    IncidentAlert.incident_id.in_([i.id for i in incidents]),
+                )
+            )
+            .group_by(IncidentAlert.incident_id)
+        )
+        counts = {row[0]: row[1] for row in count_rows.all()}
+
     return {
         "count": len(incidents),
         "incidents": [
@@ -1072,7 +1091,7 @@ async def _execute_incident_lookup(
                 "severity": i.severity.value if i.severity else None,
                 "status": i.status.value if i.status else None,
                 "created_at": i.created_at.isoformat() if i.created_at else None,
-                "alert_count": i.alert_count,
+                "alert_count": counts.get(i.id, 0),
             }
             for i in incidents
         ],
@@ -1133,7 +1152,10 @@ async def _get_alert_stats(db: AsyncSession, org_id: UUID) -> dict:
     # Get recent count (last 24h)
     yesterday = utcnow() - timedelta(hours=24)
     recent_stmt = select(func.count(NormalizedAlert.id)).where(
-        and_(NormalizedAlert.organization_id == org_id, NormalizedAlert.timestamp >= yesterday)
+        and_(
+            NormalizedAlert.organization_id == org_id,
+            NormalizedAlert.created_at_source >= yesterday,
+        )
     )
     recent_result = await db.execute(recent_stmt)
     recent_count = recent_result.scalar() or 0
@@ -1303,8 +1325,7 @@ async def ai_chat(
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Provider '{provider.value}' is not configured. "
-                "Configure API key in AI Settings."
+                f"Provider '{provider.value}' is not configured. Configure API key in AI Settings."
             ),
         )
 

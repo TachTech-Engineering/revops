@@ -67,6 +67,28 @@ const SIEM_FORMATS = [
 
 type FormatId = typeof SIEM_FORMATS[number]['id']
 
+// Formats POST /api/v1/converter/validate can actually parse (see
+// ValidateRequest.sourceFormat in packages/backend/app/api/v1/converter.py).
+const VALIDATABLE_FORMATS = ['spl', 'yaral', 'aql'] as const
+type ValidatableFormat = typeof VALIDATABLE_FORMATS[number]
+const isValidatableFormat = (format: FormatId): format is ValidatableFormat =>
+  (VALIDATABLE_FORMATS as readonly string[]).includes(format)
+
+// Best-effort human-readable description of a failed response.
+const describeHttpFailure = async (response: Response): Promise<string> => {
+  try {
+    const data = await response.json()
+    const detail = (data as { detail?: unknown })?.detail
+    if (typeof detail === 'string' && detail) return detail
+  } catch {
+    // Body was not JSON -- fall through to the status line.
+  }
+  return `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`
+}
+
+const describeError = (err: unknown): string =>
+  err instanceof Error ? err.message : 'Unknown error'
+
 // Popular migration paths
 const QUICK_CONVERT_PATHS: Array<{ from: FormatId; to: FormatId; label: string; popular: boolean }> = [
   { from: 'spl', to: 'yaral', label: 'Splunk → Google SecOps', popular: true },
@@ -321,9 +343,16 @@ export default function MigrationPage() {
     converted: string
     status: 'pending' | 'converting' | 'success' | 'error' | 'validating' | 'validated'
     validationResult?: { valid: boolean; issues: string[]; suggestions: string[] }
+    /** Set when validation could not be performed; the rule stays unvalidated. */
+    validationError?: string
   }>>([])
   const [isMigrating, setIsMigrating] = useState(false)
   const [migrationProgress, setMigrationProgress] = useState({ current: 0, total: 0, phase: '' })
+  // Surfaced when a wizard step cannot complete. Previously these failures were
+  // swallowed and replaced with fabricated results (a canned rule inventory, a
+  // hardcoded compatibility score, a green "validated" badge on every rule);
+  // an honest error is the only correct thing to show.
+  const [wizardError, setWizardError] = useState<string | null>(null)
 
   // Helper to create headers with auth
   const getAuthHeaders = useCallback(() => {
@@ -745,6 +774,7 @@ export default function MigrationPage() {
     if (!aiAvailable) return
 
     setIsPlanning(true)
+    setWizardError(null)
     try {
       const response = await fetch(`${API_BASE}/api/v1/migrate/plan`, {
         method: 'POST',
@@ -761,29 +791,21 @@ export default function MigrationPage() {
         const data = await response.json()
         setMigrationPlan(data)
       } else {
-        setMigrationPlan({
-          summary: `Migration from ${wizardSourceFormat.toUpperCase()} to ${wizardTargetFormat.toUpperCase()} with ${extractedRules.filter(r => r.selected).length} rules selected.`,
-          recommendations: [
-            'Review complex aggregation queries manually after conversion',
-            'Test converted rules in a staging environment first',
-            'Validate field mappings match your data schema',
-          ],
-          risks: [
-            'Some platform-specific functions may not have direct equivalents',
-            'Time-based functions may need adjustment for timezone handling',
-          ],
-          estimatedComplexity: extractedRules.length > 50 ? 'high' : extractedRules.length > 20 ? 'medium' : 'low',
-          compatibilityScore: 85,
-        })
+        // No fabricated plan: the previous fallback invented a summary,
+        // recommendations, risks and an 85% "compatibility score" that no
+        // analysis ever produced.
+        setMigrationPlan(null)
+        setWizardError(
+          `Could not generate a migration plan (${await describeHttpFailure(response)}). ` +
+            'Planning is unavailable; you can continue to conversion without it.'
+        )
       }
-    } catch {
-      setMigrationPlan({
-        summary: `Ready to migrate ${extractedRules.filter(r => r.selected).length} rules from ${wizardSourceFormat.toUpperCase()} to ${wizardTargetFormat.toUpperCase()}.`,
-        recommendations: ['Review converted rules before deployment'],
-        risks: ['Some rules may require manual adjustment'],
-        estimatedComplexity: 'medium',
-        compatibilityScore: 80,
-      })
+    } catch (err) {
+      setMigrationPlan(null)
+      setWizardError(
+        `Could not generate a migration plan: ${describeError(err)}. ` +
+          'Planning is unavailable; you can continue to conversion without it.'
+      )
     } finally {
       setIsPlanning(false)
     }
@@ -793,6 +815,7 @@ export default function MigrationPage() {
     if (!selectedConnector) return
 
     setIsExtracting(true)
+    setWizardError(null)
     try {
       const response = await fetch(`${API_BASE}/api/v1/connectors/${selectedConnector}/rules`, {
         headers: getAuthHeaders(),
@@ -804,19 +827,21 @@ export default function MigrationPage() {
           selected: true,
         })) || [])
       } else {
-        setExtractedRules([
-          { id: '1', name: 'Suspicious PowerShell Execution', content: 'index=windows EventCode=4688 | where like(NewProcessName, "%powershell.exe%")', selected: true },
-          { id: '2', name: 'Failed Login Attempts', content: 'index=windows EventCode=4625 | stats count by src_ip, user | where count > 5', selected: true },
-          { id: '3', name: 'Lateral Movement Detection', content: 'index=windows EventCode=4648 | where dest_ip != src_ip', selected: true },
-          { id: '4', name: 'Privilege Escalation', content: 'index=windows EventCode=4672 | where user != "SYSTEM"', selected: true },
-          { id: '5', name: 'Data Exfiltration Alert', content: 'index=network bytes_out > 10000000 | stats sum(bytes_out) by src_ip', selected: true },
-        ])
+        // No fabricated inventory: the previous fallback presented five
+        // hardcoded sample SPL queries as if they had been read off the
+        // customer's connector.
+        setExtractedRules([])
+        setWizardError(
+          `Could not read rules from this connector (${await describeHttpFailure(response)}). ` +
+            'No rules were imported -- upload rule files instead.'
+        )
       }
-    } catch {
-      setExtractedRules([
-        { id: '1', name: 'Sample Rule 1', content: 'index=main | head 10', selected: true },
-        { id: '2', name: 'Sample Rule 2', content: 'index=main | stats count', selected: true },
-      ])
+    } catch (err) {
+      setExtractedRules([])
+      setWizardError(
+        `Could not read rules from this connector: ${describeError(err)}. ` +
+          'No rules were imported -- upload rule files instead.'
+      )
     } finally {
       setIsExtracting(false)
     }
@@ -883,10 +908,26 @@ export default function MigrationPage() {
   }
 
   const validateConvertedRules = async () => {
-    if (!aiAvailable) return
-
     const successfulRules = convertedRules.filter(r => r.status === 'success')
+    if (successfulRules.length === 0) return
+
+    // The real validator is POST /api/v1/converter/validate, which parses SPL,
+    // YARA-L and AQL only. For any other target format there is nothing that
+    // can validate the output, so say so instead of stamping every rule
+    // "validated" (which is what the old /migrate/validate call did on its
+    // 404 fallback path).
+    if (!isValidatableFormat(wizardTargetFormat)) {
+      setWizardError(
+        `Syntax validation is not available for ${wizardTargetFormat.toUpperCase()} rules ` +
+          '-- the converter can only validate SPL, YARA-L and AQL. The converted rules were left unvalidated.'
+      )
+      return
+    }
+
+    setWizardError(null)
     setMigrationProgress({ current: 0, total: successfulRules.length, phase: 'Validating rules...' })
+
+    let failures = 0
 
     for (let i = 0; i < successfulRules.length; i++) {
       const rule = successfulRules[i]
@@ -896,49 +937,70 @@ export default function MigrationPage() {
         r.id === rule.id ? { ...r, status: 'validating' } : r
       ))
 
+      // Marks the rule as NOT validated and records why.
+      const markUnvalidated = (message: string) => {
+        failures += 1
+        setConvertedRules(prev => prev.map(r =>
+          r.id === rule.id
+            ? { ...r, status: 'success', validationResult: undefined, validationError: message }
+            : r
+        ))
+      }
+
       try {
-        const response = await fetch(`${API_BASE}/api/v1/migrate/validate`, {
+        const response = await fetch(`${API_BASE}/api/v1/converter/validate`, {
           method: 'POST',
           headers: getAuthHeaders(),
           body: JSON.stringify({
-            format: wizardTargetFormat,
-            code: rule.converted,
-            provider: selectedProvider,
+            // The endpoint's field is named `spl` for backwards compatibility;
+            // it carries the rule text for whichever sourceFormat is given.
+            spl: rule.converted,
+            sourceFormat: wizardTargetFormat,
           }),
         })
 
         if (response.ok) {
-          const data = await response.json()
+          const data = await response.json() as {
+            valid?: boolean
+            error?: string
+            recommendationReasons?: unknown
+          }
+          const suggestions = Array.isArray(data.recommendationReasons)
+            ? data.recommendationReasons.map(String)
+            : []
           setConvertedRules(prev => prev.map(r =>
             r.id === rule.id ? {
               ...r,
               status: 'validated',
-              validationResult: data,
+              validationError: undefined,
+              validationResult: {
+                valid: data.valid === true,
+                issues: data.error ? [data.error] : [],
+                suggestions,
+              },
             } : r
           ))
         } else {
-          setConvertedRules(prev => prev.map(r =>
-            r.id === rule.id ? {
-              ...r,
-              status: 'validated',
-              validationResult: { valid: true, issues: [], suggestions: [] },
-            } : r
-          ))
+          markUnvalidated(await describeHttpFailure(response))
         }
-      } catch {
-        setConvertedRules(prev => prev.map(r =>
-          r.id === rule.id ? {
-            ...r,
-            status: 'validated',
-            validationResult: { valid: true, issues: [], suggestions: [] },
-          } : r
-        ))
+      } catch (err) {
+        markUnvalidated(describeError(err))
       }
 
       await new Promise(resolve => setTimeout(resolve, 50))
     }
 
-    setMigrationProgress({ current: successfulRules.length, total: successfulRules.length, phase: 'Validation complete!' })
+    setMigrationProgress({
+      current: successfulRules.length,
+      total: successfulRules.length,
+      phase: failures > 0 ? 'Validation finished with errors' : 'Validation complete!',
+    })
+
+    if (failures > 0) {
+      setWizardError(
+        `${failures} of ${successfulRules.length} rule(s) could not be validated; they are shown as unvalidated.`
+      )
+    }
   }
 
   const downloadConvertedRules = () => {
@@ -960,6 +1022,7 @@ export default function MigrationPage() {
     setMigrationPlan(null)
     setConvertedRules([])
     setMigrationProgress({ current: 0, total: 0, phase: '' })
+    setWizardError(null)
   }
 
   const getFormatById = (id: FormatId) => SIEM_FORMATS.find(f => f.id === id)!
@@ -1755,6 +1818,8 @@ export default function MigrationPage() {
           validateConvertedRules={validateConvertedRules}
           downloadConvertedRules={downloadConvertedRules}
           resetWizard={resetWizard}
+          wizardError={wizardError}
+          dismissWizardError={() => setWizardError(null)}
           aiAvailable={aiAvailable}
           aiProviders={aiProviders}
           selectedProvider={selectedProvider}
@@ -1886,6 +1951,8 @@ function MigrationWizard({
   setSelectedConnector,
   downloadConvertedRules,
   resetWizard,
+  wizardError,
+  dismissWizardError,
 }: {
   wizardStep: number
   setWizardStep: (step: number) => void
@@ -1903,7 +1970,7 @@ function MigrationWizard({
   migrationPlan: { summary: string; recommendations: string[]; risks: string[]; estimatedComplexity: string; compatibilityScore: number } | null
   isPlanning: boolean
   generateMigrationPlan: () => void
-  convertedRules: Array<{ id: string; name: string; original: string; converted: string; status: string; validationResult?: { valid: boolean; issues: string[]; suggestions: string[] } }>
+  convertedRules: Array<{ id: string; name: string; original: string; converted: string; status: string; validationResult?: { valid: boolean; issues: string[]; suggestions: string[] }; validationError?: string }>
   isMigrating: boolean
   migrationProgress: { current: number; total: number; phase: string }
   runMigration: () => void
@@ -1916,9 +1983,26 @@ function MigrationWizard({
   setSelectedProvider: (id: string) => void
   getFormatById: (id: FormatId) => typeof SIEM_FORMATS[number]
   getFormatIcon: (id: FormatId) => { icon: string; color: string; bgColor: string }
+  wizardError: string | null
+  dismissWizardError: () => void
 }) {
   return (
     <div className="space-y-6">
+      {/* Honest failure state for steps that call the backend. Never replaced
+          with fabricated results. */}
+      {wizardError && (
+        <div className="p-4 rounded-lg border border-destructive/50 bg-destructive/10 flex items-start gap-3">
+          <AlertCircle size={18} className="text-destructive shrink-0 mt-0.5" />
+          <p className="text-sm text-destructive flex-1">{wizardError}</p>
+          <button
+            onClick={dismissWizardError}
+            className="text-xs text-muted-foreground hover:text-foreground"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Step Progress */}
       <div className="p-4 rounded-lg border bg-card">
         <div className="flex items-center justify-between">

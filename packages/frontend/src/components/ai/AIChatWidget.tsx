@@ -53,6 +53,64 @@ interface ChatContext {
   lastConversion?: string
 }
 
+// --- Safe "markdown-ish" rendering -------------------------------------------
+// Message content is rendered through dangerouslySetInnerHTML so **bold** and
+// [links](url) work. The content is NOT trusted: it comes back from the LLM,
+// which in turn echoes user input and uploaded file contents. So we escape the
+// whole line first and only then splice in the small set of tags we generate
+// ourselves, and we vet every href's scheme (a `javascript:` URL in a link
+// would otherwise execute on click).
+
+const escapeHtml = (text: string): string =>
+  text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
+// Inverse of escapeHtml, used to recover the raw href before parsing it as a
+// URL (escapeHtml is applied again when the vetted href is written back into
+// the attribute).
+const unescapeHtml = (text: string): string =>
+  text
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+
+const SAFE_URL_PROTOCOLS = ['http:', 'https:', 'mailto:']
+
+// Returns the href to use, or null if the URL must not be linkified.
+const sanitizeHref = (raw: string): string | null => {
+  const trimmed = raw.trim()
+  // Same-origin relative links (e.g. "/migrate") -- keep them relative.
+  // The `(?!\/)` guard rejects protocol-relative "//evil.example".
+  if (/^\/(?!\/)/.test(trimmed)) return trimmed
+  try {
+    const url = new URL(trimmed, window.location.origin)
+    return SAFE_URL_PROTOCOLS.includes(url.protocol) ? url.href : null
+  } catch {
+    return null
+  }
+}
+
+const renderMessageLine = (line: string): string => {
+  const escaped = escapeHtml(line)
+  const bolded = escaped.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+  return bolded.replace(
+    /\[([^\]]+)\]\(([^)]+)\)/g,
+    (match, text: string, href: string) => {
+      const safe = sanitizeHref(unescapeHtml(href))
+      // Unsafe scheme: leave the (already escaped) markdown as literal text
+      // rather than producing a clickable link.
+      if (!safe) return match
+      return `<a href="${escapeHtml(safe)}" rel="noopener noreferrer" class="text-primary hover:underline">${text}</a>`
+    }
+  )
+}
+
 export default function AIChatWidget() {
   const { accessToken } = useSelector((state: RootState) => state.auth)
   const [isOpen, setIsOpen] = useState(false)
@@ -558,24 +616,12 @@ What would you like help with?`
                   )}
                   {/* Message content with markdown-like rendering */}
                   <div className="whitespace-pre-wrap break-words prose prose-sm dark:prose-invert max-w-none">
-                    {message.content.split('\n').map((line, i) => {
-                      // Bold text
-                      const boldProcessed = line.replace(
-                        /\*\*(.*?)\*\*/g,
-                        '<strong>$1</strong>'
-                      )
-                      // Links
-                      const linkProcessed = boldProcessed.replace(
-                        /\[([^\]]+)\]\(([^)]+)\)/g,
-                        '<a href="$2" class="text-primary hover:underline">$1</a>'
-                      )
-                      return (
-                        <span
-                          key={i}
-                          dangerouslySetInnerHTML={{ __html: linkProcessed }}
-                        />
-                      )
-                    }).reduce((acc: React.ReactNode[], elem, i) => {
+                    {message.content.split('\n').map((line, i) => (
+                      <span
+                        key={i}
+                        dangerouslySetInnerHTML={{ __html: renderMessageLine(line) }}
+                      />
+                    )).reduce((acc: React.ReactNode[], elem, i) => {
                       if (i === 0) return [elem]
                       return [...acc, <br key={`br-${i}`} />, elem]
                     }, [])}

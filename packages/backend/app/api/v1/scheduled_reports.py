@@ -98,6 +98,22 @@ async def list_scheduled_reports(
     ]
 
 
+# Note: literal paths must be registered BEFORE /{report_id} or FastAPI matches
+# the parameterized route first and rejects them as invalid UUIDs (422).
+@router.get("/types")
+async def list_report_types(user: OrgUserDep) -> list[dict]:
+    """List available report types."""
+    return [
+        {
+            "id": "alert_summary",
+            "name": "Alert Summary",
+            "description": "Summary of alerts by severity and status",
+        },
+        {"id": "rule_summary", "name": "Rule Summary", "description": "Summary of rule triggers"},
+        {"id": "sla_metrics", "name": "SLA Metrics", "description": "SLA compliance metrics"},
+    ]
+
+
 @router.get("/{report_id}")
 async def get_scheduled_report(
     report_id: UUID,
@@ -285,17 +301,3 @@ async def run_report_now(
         "email_sent": email_sent,
         "recipients": report.recipients if email_sent else [],
     }
-
-
-@router.get("/types")
-async def list_report_types() -> list[dict]:
-    """List available report types."""
-    return [
-        {
-            "id": "alert_summary",
-            "name": "Alert Summary",
-            "description": "Summary of alerts by severity and status",
-        },
-        {"id": "rule_summary", "name": "Rule Summary", "description": "Summary of rule triggers"},
-        {"id": "sla_metrics", "name": "SLA Metrics", "description": "SLA compliance metrics"},
-    ]
