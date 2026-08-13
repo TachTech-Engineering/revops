@@ -531,7 +531,7 @@ async def create_hunt(
         data_sources=request.data_sources,
         status=HuntStatus.DRAFT,
         priority=request.priority,
-        created_by=user.username,
+        created_by=user.email,
         assigned_to=request.assigned_to,
         tags=request.tags,
     )
@@ -805,9 +805,9 @@ async def update_hunt(
             hunt.status = new_status
 
             # Set timestamps based on status
-            if new_status == HuntStatus.IN_PROGRESS and hunt.started_at is None:
+            if new_status == HuntStatus.ACTIVE and hunt.started_at is None:
                 hunt.started_at = utcnow()
-            elif new_status in [HuntStatus.COMPLETED, HuntStatus.CANCELLED]:
+            elif new_status in [HuntStatus.COMPLETED, HuntStatus.ARCHIVED]:
                 hunt.completed_at = utcnow()
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid status: {request.status}")
@@ -961,14 +961,14 @@ async def execute_hunt_query(
         hunt_id=hunt_id,
         query_id=query_id,
         status=HuntResultStatus.RUNNING,
-        executed_by=user.username,
+        executed_by=user.email,
     )
     db.add(result)
     await db.flush()
 
     # Update hunt status if starting
     if hunt.status == HuntStatus.DRAFT:
-        hunt.status = HuntStatus.IN_PROGRESS
+        hunt.status = HuntStatus.ACTIVE
         hunt.started_at = utcnow()
 
     start_time = utcnow()
