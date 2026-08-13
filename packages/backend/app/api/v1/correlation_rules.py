@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import OrgAnalystDep, OrgUserDep
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
 from app.db import CorrelationRule, get_db
 
 router = APIRouter()
@@ -54,11 +54,16 @@ class CorrelationRuleResponse(BaseModel):
 @router.get("")
 async def list_correlation_rules(
     user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     active_only: bool = False,
 ) -> list[CorrelationRuleResponse]:
     """List all correlation rules."""
-    query = select(CorrelationRule).order_by(CorrelationRule.created_at.desc())
+    query = (
+        select(CorrelationRule)
+        .where(CorrelationRule.organization_id == org_id)
+        .order_by(CorrelationRule.created_at.desc())
+    )
     if active_only:
         query = query.where(CorrelationRule.is_active.is_(True))
 
@@ -85,10 +90,16 @@ async def list_correlation_rules(
 async def get_correlation_rule(
     rule_id: UUID,
     user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CorrelationRuleResponse:
     """Get a correlation rule by ID."""
-    result = await db.execute(select(CorrelationRule).where(CorrelationRule.id == rule_id))
+    result = await db.execute(
+        select(CorrelationRule).where(
+            CorrelationRule.id == rule_id,
+            CorrelationRule.organization_id == org_id,
+        )
+    )
     rule = result.scalar_one_or_none()
     if not rule:
         raise HTTPException(status_code=404, detail="Correlation rule not found")
@@ -110,12 +121,15 @@ async def get_correlation_rule(
 async def create_correlation_rule(
     rule: CorrelationRuleCreate,
     analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CorrelationRuleResponse:
     """Create a new correlation rule. Requires analyst role."""
     email = analyst.email
 
     db_rule = CorrelationRule(
+        # organization_id is NOT NULL; omitting it made every create 500.
+        organization_id=org_id,
         name=rule.name,
         description=rule.description,
         conditions=rule.conditions.model_dump(),
@@ -145,10 +159,16 @@ async def update_correlation_rule(
     rule_id: UUID,
     update: CorrelationRuleUpdate,
     analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CorrelationRuleResponse:
     """Update a correlation rule. Requires analyst role."""
-    result = await db.execute(select(CorrelationRule).where(CorrelationRule.id == rule_id))
+    result = await db.execute(
+        select(CorrelationRule).where(
+            CorrelationRule.id == rule_id,
+            CorrelationRule.organization_id == org_id,
+        )
+    )
     rule = result.scalar_one_or_none()
     if not rule:
         raise HTTPException(status_code=404, detail="Correlation rule not found")
@@ -180,10 +200,16 @@ async def update_correlation_rule(
 async def delete_correlation_rule(
     rule_id: UUID,
     analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete a correlation rule. Requires analyst role."""
-    result = await db.execute(select(CorrelationRule).where(CorrelationRule.id == rule_id))
+    result = await db.execute(
+        select(CorrelationRule).where(
+            CorrelationRule.id == rule_id,
+            CorrelationRule.organization_id == org_id,
+        )
+    )
     rule = result.scalar_one_or_none()
     if not rule:
         raise HTTPException(status_code=404, detail="Correlation rule not found")

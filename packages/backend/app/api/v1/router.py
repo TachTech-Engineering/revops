@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.api.v1 import (
     # Phase 5: Advanced Features
@@ -60,6 +60,8 @@ from app.api.v1 import (
     websocket,
     workflows,
 )
+from app.api.v1.deps import get_current_user_with_org, require_org_role
+from app.db import UserRoleType
 
 api_router = APIRouter()
 
@@ -72,10 +74,25 @@ api_router.include_router(health.router, tags=["health"])
 api_router.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
 # Note: rule_health must be registered BEFORE rules to avoid /{rule_id} catching /health
 api_router.include_router(rule_health.router, prefix="/rules/health", tags=["rule-health"])
-api_router.include_router(rules.router, prefix="/rules", tags=["rules"])
+api_router.include_router(
+    rules.router,
+    prefix="/rules",
+    tags=["rules"],
+    # These handlers take no auth dep of their own; without this the whole
+    # router was reachable unauthenticated. Analyst is the floor because
+    # every mutating detection-rule endpoint lives here.
+    dependencies=[Depends(require_org_role(UserRoleType.ANALYST))],
+)
 api_router.include_router(converter.router, prefix="/converter", tags=["converter"])
 api_router.include_router(migrate.router, prefix="/migrate", tags=["migration"])
-api_router.include_router(queries.router, prefix="/queries", tags=["queries"])
+api_router.include_router(
+    queries.router,
+    prefix="/queries",
+    tags=["queries"],
+    # No auth dep in the handler; query execution reaches an operator-supplied
+    # Panther host, so unauthenticated access was an SSRF vector.
+    dependencies=[Depends(get_current_user_with_org)],
+)
 api_router.include_router(analytics.router, prefix="/analytics", tags=["analytics"])
 api_router.include_router(saved_queries.router, prefix="/saved-queries", tags=["saved-queries"])
 api_router.include_router(suppression.router, prefix="/suppression-rules", tags=["suppression"])

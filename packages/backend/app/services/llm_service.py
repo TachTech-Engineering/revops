@@ -59,6 +59,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
         db: AsyncSession,
         alert_id: str,
         alert_data: dict,
+        organization_id: uuid.UUID,
         provider: LLMProvider | None = None,
         force_refresh: bool = False,
     ) -> dict:
@@ -79,7 +80,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
 
         # Check cache first
         if not force_refresh:
-            cached = await self._get_cached_summary(db, "alert", alert_id)
+            cached = await self._get_cached_summary(db, "alert", alert_id, organization_id)
             if cached:
                 return {
                     "summary": cached.summary_text,
@@ -103,6 +104,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
             db,
             resource_type="alert",
             resource_id=alert_id,
+            organization_id=organization_id,
             summary_text=result["summary"],
             model_used=result["model"],
             provider=provider,
@@ -125,6 +127,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
         db: AsyncSession,
         incident_id: str,
         incident_data: dict,
+        organization_id: uuid.UUID,
         provider: LLMProvider | None = None,
         force_refresh: bool = False,
     ) -> dict:
@@ -145,7 +148,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
 
         # Check cache first
         if not force_refresh:
-            cached = await self._get_cached_summary(db, "incident", incident_id)
+            cached = await self._get_cached_summary(db, "incident", incident_id, organization_id)
             if cached:
                 return {
                     "summary": cached.summary_text,
@@ -169,6 +172,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
             db,
             resource_type="incident",
             resource_id=incident_id,
+            organization_id=organization_id,
             summary_text=result["summary"],
             model_used=result["model"],
             provider=provider,
@@ -316,11 +320,17 @@ Be concise but thorough. This summary should enable quick decision-making."""
         db: AsyncSession,
         resource_type: str,
         resource_id: str,
+        organization_id: uuid.UUID,
     ) -> AISummaryCache | None:
-        """Get a cached summary if it exists and hasn't expired."""
+        """Get a cached summary if it exists and hasn't expired.
+
+        Scoped by organization: an unscoped lookup served one tenant's
+        AI-generated summary of a resource id to any other tenant.
+        """
         result = await db.execute(
             select(AISummaryCache).where(
                 and_(
+                    AISummaryCache.organization_id == organization_id,
                     AISummaryCache.resource_type == resource_type,
                     AISummaryCache.resource_id == resource_id,
                     AISummaryCache.expires_at > utcnow(),
@@ -334,6 +344,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
         db: AsyncSession,
         resource_type: str,
         resource_id: str,
+        organization_id: uuid.UUID,
         summary_text: str,
         model_used: str,
         provider: LLMProvider,
@@ -346,6 +357,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
         result = await db.execute(
             select(AISummaryCache).where(
                 and_(
+                    AISummaryCache.organization_id == organization_id,
                     AISummaryCache.resource_type == resource_type,
                     AISummaryCache.resource_id == resource_id,
                 )
@@ -357,6 +369,8 @@ Be concise but thorough. This summary should enable quick decision-making."""
 
         # Create new cache entry
         cache_entry = AISummaryCache(
+            # NOT NULL on the model -- omitting it made every cache write fail.
+            organization_id=organization_id,
             resource_type=resource_type,
             resource_id=resource_id,
             summary_text=summary_text,

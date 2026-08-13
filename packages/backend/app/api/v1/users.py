@@ -66,7 +66,7 @@ async def list_users(
 
     if role:
         try:
-            role_enum = UserRoleType(role.upper())
+            role_enum = UserRoleType(role.lower())
             query = query.where(User.role == role_enum)
         except ValueError:
             pass
@@ -167,7 +167,7 @@ async def update_user(
     # Update fields
     if update.role is not None:
         try:
-            target_user.role = UserRoleType(update.role.upper())
+            target_user.role = UserRoleType(update.role.lower())
         except ValueError:
             raise HTTPException(
                 status_code=400,

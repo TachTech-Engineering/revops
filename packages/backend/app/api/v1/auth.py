@@ -2,6 +2,8 @@
 Authentication API endpoints.
 """
 
+import logging
+from urllib.parse import urlparse
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -46,8 +48,48 @@ from app.services.sso_service import (
     process_saml_response,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
+
+
+def _safe_frontend_redirect(candidate: str | None) -> str:
+    """Return `candidate` only if it is an allowed frontend origin.
+
+    SSO/SAML completion appends the freshly minted access and refresh tokens
+    to this URL as a fragment. An unvalidated value therefore hands a
+    victim's session to any attacker-chosen host, so anything not explicitly
+    allowlisted falls back to the configured frontend origin.
+
+    The allowlist is CORS_ORIGINS (the origins already trusted to drive this
+    API) plus PUBLIC_BASE_URL. Comparison is on scheme+host+port only.
+    """
+    allowed = {
+        origin.strip().rstrip("/")
+        for origin in settings.cors_origins_list
+        if origin.strip() and origin.strip() != "*"
+    }
+    if settings.public_base_url:
+        allowed.add(settings.public_base_url.rstrip("/"))
+
+    default = next(iter(sorted(allowed)), "http://localhost:3000")
+
+    if not candidate:
+        return default
+    try:
+        parsed = urlparse(candidate)
+    except ValueError:
+        logger.warning("Rejected unparseable SSO redirect target")
+        return default
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        logger.warning("Rejected non-absolute SSO redirect target: %r", parsed.scheme)
+        return default
+    origin = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+    if origin not in allowed:
+        logger.warning("Rejected SSO redirect to non-allowlisted origin: %s", origin)
+        return default
+    return origin
 
 
 # Request/Response models
@@ -294,8 +336,10 @@ async def forgot_password(
     """
     Request a password reset.
 
-    In production, this would send an email with the reset link.
-    For development, the token is returned in the response.
+    The reset token is NEVER returned in the response outside development:
+    doing so lets any anonymous caller mint a reset token for an arbitrary
+    email and take over the account. It is echoed only when
+    settings.is_development is true (local/test), where no real accounts exist.
     """
     user = await get_user_by_email(db, request.email)
 
@@ -308,11 +352,17 @@ async def forgot_password(
     # Create reset token
     reset_token = await create_password_reset_token(db, user.id)
 
-    # In production: send email with reset link
-    # For dev: return token in response
+    # TODO: deliver the token by email. Until then it is only exposed in
+    # development -- returning it in production is an account-takeover hole.
+    if settings.is_development:
+        return ForgotPasswordResponse(
+            message="If an account with that email exists, a password reset link has been sent.",
+            reset_token=reset_token,
+        )
+
+    logger.info("Password reset token issued for user %s", user.id)
     return ForgotPasswordResponse(
-        message="If an account with that email exists, a password reset link has been sent.",
-        reset_token=reset_token,  # Remove this in production!
+        message="If an account with that email exists, a password reset link has been sent."
     )
 
 
@@ -498,8 +548,9 @@ async def sso_callback(
 
         token_response = generate_token_response(user, refresh_token)
 
-        # Get frontend redirect URI from session or use default
-        frontend_redirect = request.session.pop("sso_redirect_uri", "http://localhost:3000")
+        # Get frontend redirect URI from session, allowlisted -- the tokens
+        # are appended to this URL, so an arbitrary value exfiltrates them.
+        frontend_redirect = _safe_frontend_redirect(request.session.pop("sso_redirect_uri", None))
         request.session.pop("sso_config_id", None)
 
         # Redirect to frontend with tokens in URL fragment (for SPA)
@@ -710,15 +761,12 @@ async def saml_acs(
         return_to = request.session.pop("saml_return_to", None)
         request.session.pop("saml_config_id", None)
 
-        # Check RelayState for return URL
+        # Check RelayState for return URL. RelayState is attacker-controllable
+        # (it round-trips through the IdP), and the tokens are appended to this
+        # URL -- so it must be allowlisted, not merely "starts with http".
         form = await request.form()
         relay_state = form.get("RelayState")
-        if relay_state and relay_state.startswith("http"):
-            return_to = relay_state
-
-        # Default frontend URL
-        if not return_to:
-            return_to = "http://localhost:3000"
+        return_to = _safe_frontend_redirect(relay_state or return_to)
 
         # Redirect to frontend with tokens in URL fragment (for SPA)
         redirect_url = (

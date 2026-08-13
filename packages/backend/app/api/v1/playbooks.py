@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.deps import OrgAnalystDep, OrgUserDep
+from app.api.v1.deps import OrgAnalystDep, OrgIdDep, OrgUserDep
 from app.db import ExecutionStatus, Playbook, PlaybookExecution, PlaybookStatus, get_db
 from app.services.playbook_service import PlaybookService
 
@@ -83,11 +83,16 @@ class ExecutePlaybookRequest(BaseModel):
 @router.get("")
 async def list_playbooks(
     user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     status: PlaybookStatus | None = None,
 ) -> list[PlaybookResponse]:
     """List all playbooks."""
-    query = select(Playbook).order_by(desc(Playbook.created_at))
+    query = (
+        select(Playbook)
+        .where(Playbook.organization_id == org_id)
+        .order_by(desc(Playbook.created_at))
+    )
     if status:
         query = query.where(Playbook.status == status)
 
@@ -115,10 +120,13 @@ async def list_playbooks(
 async def get_playbook(
     playbook_id: UUID,
     user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlaybookResponse:
     """Get a playbook by ID."""
-    result = await db.execute(select(Playbook).where(Playbook.id == playbook_id))
+    result = await db.execute(
+        select(Playbook).where(Playbook.id == playbook_id, Playbook.organization_id == org_id)
+    )
     playbook = result.scalar_one_or_none()
     if not playbook:
         raise HTTPException(status_code=404, detail="Playbook not found")
@@ -141,12 +149,16 @@ async def get_playbook(
 async def create_playbook(
     playbook: PlaybookCreate,
     analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlaybookResponse:
     """Create a new playbook. Requires analyst role."""
     email = analyst.email
 
     db_playbook = Playbook(
+        # organization_id is NOT NULL on the model; omitting it made every
+        # create fail with an IntegrityError.
+        organization_id=org_id,
         name=playbook.name,
         description=playbook.description,
         trigger_conditions=playbook.trigger_conditions.model_dump()
@@ -180,10 +192,13 @@ async def update_playbook(
     playbook_id: UUID,
     update: PlaybookUpdate,
     analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlaybookResponse:
     """Update a playbook. Requires analyst role."""
-    result = await db.execute(select(Playbook).where(Playbook.id == playbook_id))
+    result = await db.execute(
+        select(Playbook).where(Playbook.id == playbook_id, Playbook.organization_id == org_id)
+    )
     playbook = result.scalar_one_or_none()
     if not playbook:
         raise HTTPException(status_code=404, detail="Playbook not found")
@@ -219,10 +234,13 @@ async def update_playbook(
 async def delete_playbook(
     playbook_id: UUID,
     analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, str]:
     """Delete a playbook. Requires analyst role."""
-    result = await db.execute(select(Playbook).where(Playbook.id == playbook_id))
+    result = await db.execute(
+        select(Playbook).where(Playbook.id == playbook_id, Playbook.organization_id == org_id)
+    )
     playbook = result.scalar_one_or_none()
     if not playbook:
         raise HTTPException(status_code=404, detail="Playbook not found")
@@ -236,13 +254,16 @@ async def execute_playbook(
     playbook_id: UUID,
     request: ExecutePlaybookRequest,
     analyst: OrgAnalystDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ExecutionResponse:
     """Execute a playbook for an alert. Requires analyst role."""
     email = analyst.email
 
     # Get playbook
-    result = await db.execute(select(Playbook).where(Playbook.id == playbook_id))
+    result = await db.execute(
+        select(Playbook).where(Playbook.id == playbook_id, Playbook.organization_id == org_id)
+    )
     playbook = result.scalar_one_or_none()
     if not playbook:
         raise HTTPException(status_code=404, detail="Playbook not found")
@@ -276,6 +297,7 @@ async def execute_playbook(
 async def list_playbook_executions(
     playbook_id: UUID,
     user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -287,7 +309,10 @@ async def list_playbook_executions(
     count_query = (
         select(func.count())
         .select_from(PlaybookExecution)
-        .where(PlaybookExecution.playbook_id == playbook_id)
+        .where(
+            PlaybookExecution.playbook_id == playbook_id,
+            PlaybookExecution.organization_id == org_id,
+        )
     )
     count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
@@ -295,7 +320,10 @@ async def list_playbook_executions(
     # Get executions
     query = (
         select(PlaybookExecution)
-        .where(PlaybookExecution.playbook_id == playbook_id)
+        .where(
+            PlaybookExecution.playbook_id == playbook_id,
+            PlaybookExecution.organization_id == org_id,
+        )
         .order_by(desc(PlaybookExecution.created_at))
         .offset((page - 1) * page_size)
         .limit(page_size)
@@ -328,11 +356,17 @@ async def list_playbook_executions(
 @router.get("/executions/recent")
 async def list_recent_executions(
     user: OrgUserDep,
+    org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = Query(10, ge=1, le=50),
 ) -> list[ExecutionResponse]:
     """List recent playbook executions across all playbooks."""
-    query = select(PlaybookExecution).order_by(desc(PlaybookExecution.created_at)).limit(limit)
+    query = (
+        select(PlaybookExecution)
+        .where(PlaybookExecution.organization_id == org_id)
+        .order_by(desc(PlaybookExecution.created_at))
+        .limit(limit)
+    )
     result = await db.execute(query)
     executions = result.scalars().all()
 
