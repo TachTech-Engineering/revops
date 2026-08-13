@@ -269,9 +269,20 @@ class SPLParser:
         return None
 
     def _parse_field_comparison(self) -> FieldComparison:
-        """Parse a field comparison like field=value."""
+        """Parse a field comparison like field=value or field IN (v1, v2)."""
         field_token = self._advance()
         field_name = field_token.value
+
+        # `field IN (v1, v2, ...)` -- value is the list of alternatives.
+        if self._check(TokenType.IDENTIFIER) and self._current().value.lower() == "in":
+            self._advance()  # consume IN
+            values = self._parse_in_list()
+            return FieldComparison(
+                field=field_name,
+                operator=ComparisonOperator.IN,
+                value=values,
+                is_wildcard=any(isinstance(v, str) and ("*" in v or "?" in v) for v in values),
+            )
 
         # Get comparison operator
         operator = self._parse_comparison_operator()
@@ -282,6 +293,22 @@ class SPLParser:
         return FieldComparison(
             field=field_name, operator=operator, value=value, is_wildcard=is_wildcard
         )
+
+    def _parse_in_list(self) -> list[Any]:
+        """Parse the parenthesized value list of an IN expression."""
+        self._expect(TokenType.LPAREN)
+        values: list[Any] = []
+        while not self._check(TokenType.RPAREN):
+            value, _ = self._parse_comparison_value()
+            if value is None:
+                raise SPLParserError("Expected value in IN list", self._current())
+            values.append(value)
+            if not self._match(TokenType.COMMA):
+                break
+        self._expect(TokenType.RPAREN)
+        if not values:
+            raise SPLParserError("Empty IN list", self._current())
+        return values
 
     def _parse_comparison_operator(self) -> ComparisonOperator:
         """Parse a comparison operator."""
@@ -1027,11 +1054,20 @@ class SPLParser:
     def _peek_is_comparison(self) -> bool:
         """Check if the next token is a comparison operator."""
         next_token = self._peek()
-        return next_token.type in (
+        if next_token.type in (
             TokenType.EQUALS,
             TokenType.NOT_EQUALS,
             TokenType.LESS_THAN,
             TokenType.GREATER_THAN,
             TokenType.LESS_THAN_EQ,
             TokenType.GREATER_THAN_EQ,
+        ):
+            return True
+        # `field IN (v1, v2, ...)` -- IN lexes as an IDENTIFIER (it is only a
+        # keyword in this position), so require the following LPAREN to avoid
+        # swallowing a free-text term that happens to be the word "in".
+        return (
+            next_token.type == TokenType.IDENTIFIER
+            and next_token.value.lower() == "in"
+            and self._peek(2).type == TokenType.LPAREN
         )

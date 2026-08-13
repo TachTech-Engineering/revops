@@ -108,17 +108,23 @@ class ConverterService:
                     "ruleId": result.rule_id,
                     "className": result.class_name,
                     "logTypes": result.log_types,
-                    "severity": result.severity,
+                    "severity": str(result.severity).upper(),
                     "isThresholdRule": result.is_threshold_rule,
                     "threshold": result.threshold,
                     "todos": result.todos,
                     "testCode": result.test_code,
-                    "recommendedType": result.recommended_type.value,
+                    "recommendedType": result.recommended_type.value.lower(),
                     "recommendationReasons": result.recommendation_reasons,
                 }
 
-                # If SDK produced good results with few TODOs, return it
-                if len(sdk_result.get("todos", [])) <= 2:
+                # If SDK produced good results with few TODOs, return it.
+                # An "Unsupported command" TODO disqualifies the early return:
+                # the SDK could not convert part of the pipeline, so let the
+                # enhanced converter compete (it may support the command, and
+                # its recommendation logic sees constructs the SDK skipped).
+                sdk_todos = sdk_result.get("todos", [])
+                has_unsupported = any("unsupported command" in t.lower() for t in sdk_todos)
+                if len(sdk_todos) <= 2 and not has_unsupported:
                     return sdk_result
 
                 logger.info(
@@ -147,12 +153,12 @@ class ConverterService:
                 "ruleId": enhanced_result.rule_id,
                 "className": enhanced_result.class_name,
                 "logTypes": enhanced_result.log_types,
-                "severity": enhanced_result.severity,
+                "severity": str(enhanced_result.severity).upper(),
                 "isThresholdRule": enhanced_result.is_threshold_rule,
                 "threshold": enhanced_result.threshold,
                 "todos": enhanced_result.todos,
                 "testCode": enhanced_result.test_code,
-                "recommendedType": enhanced_result.recommended_type.value,
+                "recommendedType": enhanced_result.recommended_type.value.lower(),
                 "recommendationReasons": enhanced_result.recommendation_reasons,
             }
 
@@ -166,11 +172,23 @@ class ConverterService:
                     logger.info(
                         f"Using SDK result ({sdk_todo_count} TODOs vs {enhanced_todo_count})"
                     )
-                    return sdk_result
+                    winner, loser = sdk_result, result_dict
                 else:
                     logger.info(
                         f"Using enhanced result ({enhanced_todo_count} TODOs vs {sdk_todo_count})"
                     )
+                    winner, loser = result_dict, sdk_result
+
+                # A scheduled recommendation is a property of the QUERY, not of
+                # whichever engine generated the winning code -- if either engine
+                # determined the query can't run per-event, carry that forward.
+                if (
+                    loser.get("recommendedType") == "scheduled"
+                    and winner.get("recommendedType") != "scheduled"
+                ):
+                    winner["recommendedType"] = "scheduled"
+                    winner["recommendationReasons"] = loser.get("recommendationReasons", [])
+                return winner
 
             return result_dict
 
@@ -205,9 +223,9 @@ class ConverterService:
                             "ruleId": r.rule_id,
                             "className": r.class_name,
                             "logTypes": r.log_types,
-                            "severity": r.severity,
+                            "severity": str(r.severity).upper(),
                             "todos": r.todos,
-                            "recommendedType": r.recommended_type.value,
+                            "recommendedType": r.recommended_type.value.lower(),
                         }
                         for r in result.rules
                     ],
@@ -252,9 +270,9 @@ class ConverterService:
                         "ruleId": result.rule_id,
                         "className": result.class_name,
                         "logTypes": result.log_types,
-                        "severity": result.severity,
+                        "severity": str(result.severity).upper(),
                         "todos": result.todos,
-                        "recommendedType": result.recommended_type.value,
+                        "recommendedType": result.recommended_type.value.lower(),
                     }
                 )
 
@@ -365,12 +383,12 @@ class ConverterService:
                 "ruleId": result.rule_id,
                 "className": result.class_name,
                 "logTypes": result.log_types,
-                "severity": result.severity,
+                "severity": str(result.severity).upper(),
                 "isThresholdRule": result.is_threshold_rule,
                 "threshold": result.threshold,
                 "todos": result.todos,
                 "testCode": result.test_code,
-                "recommendedType": result.recommended_type.value,
+                "recommendedType": result.recommended_type.value.lower(),
                 "recommendationReasons": result.recommendation_reasons,
             }
         except Exception as e:
@@ -429,12 +447,14 @@ class ConverterService:
                 "ruleId": result.rule_id,
                 "className": result.class_name,
                 "logTypes": result.log_types,
-                "severity": result.severity,
+                # Normalize to the same casing the SPL path returns
+                # ("MEDIUM" / "streaming"), so API consumers see one contract.
+                "severity": (result.severity or "MEDIUM").upper(),
                 "isThresholdRule": result.is_aggregation_rule,
                 "threshold": None,
                 "todos": result.todos,
                 "testCode": "",
-                "recommendedType": "SCHEDULED" if result.is_aggregation_rule else "STREAMING",
+                "recommendedType": "scheduled" if result.is_aggregation_rule else "streaming",
                 "recommendationReasons": [
                     "Aggregation query detected"
                     if result.is_aggregation_rule
@@ -485,8 +505,7 @@ class ConverterService:
                 "description": "Splunk Search Processing Language queries",
                 "fileExtensions": [".spl", ".txt"],
                 "example": (
-                    "index=main sourcetype=access_combined status>=400 "
-                    "| stats count by src_ip"
+                    "index=main sourcetype=access_combined status>=400 | stats count by src_ip"
                 ),
                 "targetFormats": ["python"],
             },

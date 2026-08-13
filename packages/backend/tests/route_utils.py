@@ -8,8 +8,9 @@ here rather than imported, so older flat layouts keep working). Walk order
 matches starlette's first-full-match dispatch order, so the first regex+method
 match found by ``resolve`` is the route that would actually handle a request.
 """
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Any, Iterator, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ def _walk(routes) -> Iterator[HttpRoute]:
             )
 
 
-def resolve(app, path: str, method: str) -> Optional[HttpRoute]:
+def resolve(app, path: str, method: str) -> HttpRoute | None:
     """First route whose regex + method fully match, mirroring dispatch."""
     for route in iter_http_routes(app):
         if route.method == method and route.path_regex.match(path):

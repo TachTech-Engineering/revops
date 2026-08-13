@@ -174,11 +174,14 @@ class YARALConverter:
                 continue
 
             # Event variable declaration: $event.metadata.event_type = "NETWORK_CONNECTION"
-            var_match = re.match(r"\$(\w+)\.(\S+)\s*=\s*(.+)", line)
+            # (also matches != -- previously inequality conditions fell through
+            # to the raw-only branch and were DROPPED from the generated rule)
+            var_match = re.match(r"\$(\w+)\.(\S+?)\s*(!=|=)\s*(.+)", line)
             if var_match:
                 var_name = var_match.group(1)
                 field_path = var_match.group(2)
-                value = var_match.group(3).strip('"').strip("'")
+                operator = var_match.group(3)
+                value = var_match.group(4).strip('"').strip("'")
 
                 if not current_event or current_event.get("name") != var_name:
                     if current_event:
@@ -188,6 +191,7 @@ class YARALConverter:
                 current_event["conditions"].append(
                     {
                         "field": field_path,
+                        "operator": operator,
                         "value": value,
                         "raw": line,
                     }
@@ -689,10 +693,31 @@ class YARALConverter:
                     # Convert field path to deep_get
                     python_field = self._convert_field_path(field)
 
+                    # The mapping table rewrites UDM paths (e.g. metadata.event_type
+                    # -> eventType) on the assumption of a common-log shape. That is
+                    # a guess about the target schema, so say so.
+                    stripped = re.sub(r"^\$\w+\.", "", field)
+                    if python_field != stripped:
+                        note = (
+                            f"Field '{stripped}' was remapped to '{python_field}' -- "
+                            "verify it matches your Panther log schema"
+                        )
+                        if note not in todos:
+                            todos.append(note)
+
                     # Handle different comparison types
-                    if "!=" in raw or "nocase" in raw.lower():
+                    if condition.get("operator") == "!=" or "!=" in raw:
+                        # Inequality: reject when the field DOES equal the value.
                         python_lines.append(f"# {raw}")
-                        python_lines.append(f'if event.deep_get("{python_field}") != "{value}":')
+                        python_lines.append(f'if event.deep_get("{python_field}") == "{value}":')
+                        python_lines.append("    return False")
+                    elif "nocase" in raw.lower():
+                        # Case-insensitive equality.
+                        python_lines.append(f"# {raw}")
+                        python_lines.append(
+                            f'if str(event.deep_get("{python_field}", "")).lower() '
+                            f'!= "{value}".lower():'
+                        )
                         python_lines.append("    return False")
                     elif "regex" in raw.lower() or re.search(r"/.*/", value):
                         python_lines.append(f"# {raw}")

@@ -1754,10 +1754,18 @@ def spl_mvjoin(mv, delimiter=" "):
 
         # Final return
         if not base_conditions and not where_conditions:
-            code_lines.append("        # TODO: Add detection conditions")
-            code_lines.append("        return True")
+            # FAIL CLOSED: no conditions could be converted. Returning True here
+            # would alert on EVERY event of the log type (alert storm); an inert
+            # rule with a loud TODO is the safe failure mode.
+            code_lines.append("        # TODO: No conditions could be converted from the SPL.")
+            code_lines.append("        # This rule is INERT (never fires) until you add the")
+            code_lines.append("        # detection logic from the original query above.")
+            code_lines.append("        return False")
             if not todos or "Add detection conditions" not in str(todos):
-                todos.append("Add detection conditions based on the original SPL query")
+                todos.append(
+                    "NO conditions were converted -- rule is inert (returns False) "
+                    "until detection logic is added from the original SPL"
+                )
         else:
             code_lines.append("        return True")
 
@@ -1767,7 +1775,7 @@ def spl_mvjoin(mv, delimiter=" "):
             [
                 "",
                 "    def title(self, event: PantherEvent) -> str:",
-                f"        return f\"{class_name}: "
+                f'        return f"{class_name}: '
                 f"{{deep_get(event, '{title_field}', 'unknown')}}\"",
                 "",
             ]
@@ -1993,8 +2001,11 @@ def spl_mvjoin(mv, delimiter=" "):
     WHERE
         {where_clause}
     {("GROUP BY " + sql_group) if sql_group else "-- TODO: Add GROUP BY if needed"}
-    {("HAVING " + " AND ".join(having_conditions))
-     if having_conditions else "-- TODO: Add HAVING for thresholds"}
+    {
+                ("HAVING " + " AND ".join(having_conditions))
+                if having_conditions
+                else "-- TODO: Add HAVING for thresholds"
+            }
     """
 
         # Generate the rule code

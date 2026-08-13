@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -116,6 +117,9 @@ class SPLToPythonTransformer:
 
         # Transform rex patterns
         for field, pattern in self.analysis.rex_patterns:
+            # SPL rex uses PCRE named groups (?<name>...); Python requires
+            # (?P<name>...). Leave lookbehinds (?<= and (?<! untouched.
+            pattern = re.sub(r"\(\?<([A-Za-z_])", r"(?P<\1", pattern)
             var_name = f"rex_match_{self._field_counter}"
             self._field_counter += 1
             self.result.rex_extractions.append((field, pattern, var_name))
@@ -166,6 +170,23 @@ class SPLToPythonTransformer:
 
         field_access = self._get_field_access(comp.field)
         value = comp.value
+
+        # IN list: membership test, or an OR of pattern matches if any
+        # alternative contains a wildcard.
+        if comp.operator == ComparisonOperator.IN:
+            values = value if isinstance(value, list) else [value]
+            if comp.is_wildcard:
+                self.result.required_imports.add("pattern_match")
+                alternatives = []
+                for v in values:
+                    if isinstance(v, str) and ("*" in v or "?" in v):
+                        escaped = v.replace('"', '\\"')
+                        alternatives.append(f'pattern_match({field_access} or "", "{escaped}")')
+                    else:
+                        alternatives.append(f"{field_access} == {self._format_value(v)}")
+                return "(" + " or ".join(alternatives) + ")"
+            formatted = ", ".join(self._format_value(v) for v in values)
+            return f"{field_access} in ({formatted})"
 
         # Handle wildcard patterns
         if comp.is_wildcard:

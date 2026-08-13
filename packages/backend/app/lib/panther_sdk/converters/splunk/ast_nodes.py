@@ -25,6 +25,7 @@ class ComparisonOperator(Enum):
     LTE = "<="
     GTE = ">="
     LIKE = "LIKE"
+    IN = "IN"  # field IN (v1, v2, ...); value is a list
 
 
 class AggregationFunction(Enum):

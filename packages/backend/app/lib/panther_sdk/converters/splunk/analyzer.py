@@ -378,6 +378,24 @@ class SPLAnalyzer:
             elif isinstance(cmd, TransactionCommand):
                 reasons.append("Contains TRANSACTION - session/sequence analysis")
 
+            elif isinstance(cmd, UnsupportedCommand) and cmd.name.lower() in (
+                # Inherently batch/correlation constructs: these cannot run per-event,
+                # so a rule containing them belongs in a scheduled query even though
+                # the command itself could not be converted.
+                "tstats",
+                "datamodel",
+                "eventstats",
+                "streamstats",
+                "append",
+                "appendcols",
+                "map",
+                "collect",
+            ):
+                reasons.append(
+                    f"Contains {cmd.name.upper()} - batch/aggregation construct "
+                    "that cannot evaluate per-event"
+                )
+
             elif isinstance(cmd, StatsCommand):
                 # Check for complex aggregations
                 for agg in cmd.aggregations:
