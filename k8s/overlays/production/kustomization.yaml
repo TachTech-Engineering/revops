@@ -4,50 +4,52 @@ kind: Kustomization
 namespace: revops
 
 resources:
-  - ../../base
-  - hpa.yaml
+- ../../base
+- hpa.yaml
 
-patches:
-  - path: frontend-patch.yaml
-  - path: backend-patch.yaml
   # Production TLS uses the pre-existing Google-managed certificate
   # "ttrevops-ssl" (gcloud compute ssl-certificates, covers ttrevops.com,
   # auto-renews), attached since 2026-02 via the pre-shared-cert annotation.
   # Swap the base's ManagedCertificate wiring for it so the deploy never
   # detaches the working cert.
-  - target:
-      kind: Ingress
-      name: revops-ingress
-    patch: |-
-      - op: remove
-        path: /metadata/annotations/networking.gke.io~1managed-certificates
-      - op: add
-        path: /metadata/annotations/ingress.gcp.kubernetes.io~1pre-shared-cert
-        value: ttrevops-ssl
   # The base ManagedCertificate is therefore unused in production; drop it
   # (an unattached ManagedCertificate never provisions and just reads as a
   # perpetually "Provisioning" object).
-  - target:
-      kind: ManagedCertificate
+patches:
+- path: frontend-patch.yaml
+- path: backend-patch.yaml
+- patch: |-
+    - op: remove
+      path: /metadata/annotations/networking.gke.io~1managed-certificates
+    - op: add
+      path: /metadata/annotations/ingress.gcp.kubernetes.io~1pre-shared-cert
+      value: ttrevops-ssl
+  target:
+    kind: Ingress
+    name: revops-ingress
+- patch: |-
+    $patch: delete
+    apiVersion: networking.gke.io/v1
+    kind: ManagedCertificate
+    metadata:
       name: revops-cert
-    patch: |-
-      $patch: delete
-      apiVersion: networking.gke.io/v1
-      kind: ManagedCertificate
-      metadata:
-        name: revops-cert
+  target:
+    kind: ManagedCertificate
+    name: revops-cert
 
-configMapGenerator:
-  - name: backend-config
-    behavior: merge
-    literals:
-      - CORS_ORIGINS=https://ttrevops.com,https://www.ttrevops.com
-      - ENVIRONMENT=production
       # Required for Twilio webhook signature validation behind the LB.
-      - PUBLIC_BASE_URL=https://ttrevops.com
+configMapGenerator:
+- behavior: merge
+  literals:
+  - CORS_ORIGINS=https://ttrevops.com,https://www.ttrevops.com
+  - ENVIRONMENT=production
+  - PUBLIC_BASE_URL=https://ttrevops.com
+  name: backend-config
 
 images:
-  - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend
-    newTag: latest
-  - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend
-    newTag: latest
+- name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend
+  newName: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend
+  newTag: 61cc198
+- name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend
+  newName: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend
+  newTag: 61cc198

@@ -6,7 +6,7 @@ from typing import Optional
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
 
 from app.core.time_utils import utcnow
 
@@ -1421,6 +1421,19 @@ class NormalizedAlert(Base):
         Index("ix_normalized_alerts_org_connector", "organization_id", "connector_id"),
         Index("ix_normalized_alerts_org_external", "organization_id", "external_id"),
     )
+
+    @validates("source_type", "external_id", "title", "severity", "status", "rule_id", "rule_name")
+    def _clamp_to_column_width(self, key: str, value: str | None) -> str | None:
+        # These fields carry unbounded external SIEM data (Panther alert titles
+        # routinely embed full command lines and exceed 500 chars, and the
+        # connectors reuse the title as rule_name); over-long values otherwise
+        # abort the whole sync batch with StringDataRightTruncationError. The
+        # untruncated original is always preserved in raw_data.
+        if isinstance(value, str):
+            limit = getattr(type(self).__table__.columns[key].type, "length", None)
+            if limit is not None and len(value) > limit:
+                return value[:limit]
+        return value
 
 
 # ==================== WORKFLOW ENGINE MODELS ====================
