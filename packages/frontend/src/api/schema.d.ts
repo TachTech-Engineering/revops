@@ -828,8 +828,10 @@ export interface paths {
          * Forgot Password
          * @description Request a password reset.
          *
-         *     In production, this would send an email with the reset link.
-         *     For development, the token is returned in the response.
+         *     The reset token is NEVER returned in the response outside development:
+         *     doing so lets any anonymous caller mint a reset token for an arbitrary
+         *     email and take over the account. It is echoed only when
+         *     settings.is_development is true (local/test), where no real accounts exist.
          */
         post: operations["forgot_password_api_v1_auth_forgot_password_post"];
         delete?: never;
