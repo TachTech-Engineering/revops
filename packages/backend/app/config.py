@@ -47,7 +47,12 @@ class Settings(BaseSettings):
     # Single source of truth for the default LLM model id. All LLM call sites
     # resolve their model through llm_service, which falls back to this value
     # when neither the org key record nor the caller specifies one.
-    default_llm_model: str = "claude-sonnet-4-5"
+    # claude-sonnet-5 (2026-08-13): current-generation Sonnet, same list price
+    # as the previous claude-sonnet-4-5 default. NOTE: it thinks by default --
+    # response parsing must select the text block (see llm_service
+    # _extract_anthropic_text), and max_tokens budgets cover thinking + answer.
+    # Override via DEFAULT_LLM_MODEL env var without a code change.
+    default_llm_model: str = "claude-sonnet-5"
     default_llm_provider: str = "anthropic"
 
     # Attack Simulation (Phase 5)

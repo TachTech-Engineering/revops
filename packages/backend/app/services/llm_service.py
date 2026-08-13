@@ -248,8 +248,30 @@ Be concise but thorough. This summary should enable quick decision-making."""
                 "output_tokens": data.get("usage", {}).get("completion_tokens", 0),
             }
 
+    @staticmethod
+    def _extract_anthropic_text(data: dict) -> str:
+        """Extract the text answer from a Messages API response body.
+
+        Indexing content[0] directly is wrong on current models: content can be
+        empty (stop_reason "refusal"), and models with adaptive thinking on by
+        default (claude-sonnet-5 and newer) put a thinking block BEFORE the text
+        block. Pick the text block explicitly and surface refusal/truncation.
+        """
+        if data.get("stop_reason") == "refusal":
+            raise ValueError("The model declined this request (safety refusal)")
+        text = "".join(
+            block.get("text", "")
+            for block in data.get("content", [])
+            if block.get("type") == "text"
+        )
+        if not text:
+            raise ValueError("Model response contained no text content")
+        if data.get("stop_reason") == "max_tokens":
+            logger.warning("Anthropic response truncated at max_tokens; output may be incomplete")
+        return text
+
     async def _call_anthropic(
-        self, prompt: str, system: str | None = None, max_tokens: int = 2000
+        self, prompt: str, system: str | None = None, max_tokens: int = 8000
     ) -> dict:
         """Call Anthropic API."""
         if not settings.anthropic_api_key:
@@ -283,7 +305,7 @@ Be concise but thorough. This summary should enable quick decision-making."""
             data = response.json()
 
             return {
-                "summary": data["content"][0]["text"],
+                "summary": self._extract_anthropic_text(data),
                 "model": settings.default_llm_model,
                 "input_tokens": data.get("usage", {}).get("input_tokens", 0),
                 "output_tokens": data.get("usage", {}).get("output_tokens", 0),
@@ -564,9 +586,7 @@ Alerts:
                 provider = LLMProvider.OPENAI
             else:
                 raise ValueError("No LLM keys configured (system or org)")
-            result = await self._call_llm(
-                prompt, provider, system=system, max_tokens=max_tokens
-            )
+            result = await self._call_llm(prompt, provider, system=system, max_tokens=max_tokens)
 
         return result["summary"]
 
@@ -689,7 +709,10 @@ Alerts:
         api_key: str,
         model: str | None = None,
         system: str | None = None,
-        max_tokens: int = 2000,
+        # 8000 leaves room for adaptive thinking (on by default from
+        # claude-sonnet-5 onward), which spends from the same max_tokens
+        # budget as the visible answer.
+        max_tokens: int = 8000,
     ) -> dict:
         """Call Anthropic API with a custom API key."""
         model_to_use = model or settings.default_llm_model
@@ -716,12 +739,14 @@ Alerts:
 
         response = await make_request(model_to_use)
 
-        # Fallback logic for 404 Model Not Found
+        # Fallback logic for 404 Model Not Found. These must be CURRENT model
+        # ids -- the previous list (claude-3-5-sonnet-20240620 etc.) was all
+        # retired models, so every fallback itself 404'd and the chain could
+        # never rescue anything.
         if response.status_code == 404:
             fallbacks = [
-                "claude-3-5-sonnet-20240620",
-                "claude-3-sonnet-20240229",
-                "claude-3-haiku-20240307",
+                "claude-sonnet-5",
+                "claude-haiku-4-5",
             ]
             logger.warning(f"Model {model_to_use} not found. Trying fallbacks: {fallbacks}")
             for fallback_model in fallbacks:
@@ -743,7 +768,7 @@ Alerts:
         data = response.json()
 
         return {
-            "summary": data["content"][0]["text"],
+            "summary": self._extract_anthropic_text(data),
             "model": model_to_use,
             "input_tokens": data.get("usage", {}).get("input_tokens", 0),
             "output_tokens": data.get("usage", {}).get("output_tokens", 0),

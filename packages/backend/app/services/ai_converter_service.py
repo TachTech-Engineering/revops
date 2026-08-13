@@ -125,7 +125,7 @@ class AIConverterService:
                     "id": LLMProvider.ANTHROPIC.value,
                     "name": "Anthropic",
                     "model": ANTHROPIC_MODEL,
-                    "description": "Anthropic Sonnet 4 - excellent at code generation",
+                    "description": "Anthropic Claude - excellent at code generation",
                 }
             )
         if getattr(settings, "openai_api_key", None) or org_has_openai:
@@ -186,7 +186,20 @@ class AIConverterService:
                 response = client.messages.create(
                     model=model, max_tokens=max_tokens, system=system_prompt, messages=msg_list
                 )
-                content = response.content[0].text.strip()
+                # content[0] is not necessarily text: refusals return empty
+                # content, and models with adaptive thinking on by default
+                # (claude-sonnet-5+) put a thinking block first.
+                if response.stop_reason == "refusal":
+                    raise ValueError("The model declined this request (safety refusal)")
+                content = "".join(
+                    block.text for block in response.content if block.type == "text"
+                ).strip()
+                if not content:
+                    raise ValueError("Model response contained no text content")
+                if response.stop_reason == "max_tokens":
+                    logger.warning(
+                        "AI conversion truncated at max_tokens; output may be incomplete"
+                    )
 
                 # Return dict for chat mode, string for backward compatibility
                 if messages:
@@ -276,7 +289,9 @@ class AIConverterService:
                 provider=provider,
                 system_prompt=CONVERSION_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
-                max_tokens=4096,
+                # Headroom for adaptive thinking (claude-sonnet-5+), which
+                # spends from the same budget as the emitted code.
+                max_tokens=8192,
                 api_key=api_key,
                 model_override=model_override,
             )
@@ -291,7 +306,7 @@ class AIConverterService:
                     lines = lines[1:]
                 converted_code = "\n".join(lines)
 
-            return {
+            result = {
                 "converted_code": converted_code,
                 "source_format": source_format.value,
                 "target_format": target_format.value,
@@ -299,6 +314,22 @@ class AIConverterService:
                 "model": model,
                 "success": True,
             }
+
+            # LLM output is unverified: for Python targets, at least prove it
+            # parses so the UI can warn instead of presenting broken code as done.
+            if target_format == ConversionFormat.PANTHER:
+                import ast as _ast
+
+                try:
+                    _ast.parse(converted_code)
+                    result["valid_syntax"] = True
+                except SyntaxError as se:
+                    result["valid_syntax"] = False
+                    result["warning"] = (
+                        f"Generated Python has a syntax error: {se.msg} (line {se.lineno})"
+                    )
+
+            return result
 
         except Exception as e:
             logger.error(f"Conversion error with {provider}: {e}")

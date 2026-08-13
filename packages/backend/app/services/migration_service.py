@@ -1008,13 +1008,23 @@ class SigmaToKQL(FromSigmaConverter):
         else:
             lines.append("CommonSecurityLog")
 
-        # Add EventID filter for process creation
-        if category == "process_creation" and product == "windows":
-            lines.append("| where EventID == 4688")
-
         # Convert detection to where clauses
         detection = sigma.detection
         selection = detection.get("selection", {})
+
+        # Only add the process-creation EventID heuristic when the rule does
+        # not already constrain EventID -- emitting both produced queries like
+        # `| where EventID == 4688 | where EventID == "4625"` that can never
+        # match anything.
+        has_event_id = any(key.split("|")[0] == "EventID" for key in selection)
+        if category == "process_creation" and product == "windows" and not has_event_id:
+            lines.append("| where EventID == 4688")
+
+        def literal(v):
+            # EventID and other numeric values compare unquoted in KQL;
+            # quoting them ("4625" vs 4688) made the emitted typing
+            # inconsistent within a single query.
+            return str(v) if str(v).isdigit() else f'"{v}"'
 
         for key, value in selection.items():
             field = key.split("|")[0]
@@ -1027,7 +1037,7 @@ class SigmaToKQL(FromSigmaConverter):
                     if modifier == "contains":
                         conditions.append(f'{kql_field} contains "{v}"')
                     else:
-                        conditions.append(f'{kql_field} == "{v}"')
+                        conditions.append(f"{kql_field} == {literal(v)}")
                 lines.append(f"| where ({' or '.join(conditions)})")
             else:
                 if modifier == "contains":
@@ -1037,7 +1047,7 @@ class SigmaToKQL(FromSigmaConverter):
                 elif modifier == "endswith":
                     lines.append(f'| where {kql_field} endswith "{value}"')
                 else:
-                    lines.append(f'| where {kql_field} == "{value}"')
+                    lines.append(f"| where {kql_field} == {literal(value)}")
 
         # Add project
         fields = sigma.fields or [

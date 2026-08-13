@@ -372,3 +372,81 @@ def test_migrate_path_corpus(entry):
     for i, (event, expected) in enumerate(entry["events"]):
         got = rule(ShimEvent(event))
         assert bool(got) == expected, f"case {i}: event={event} expected {expected}, got {got}"
+
+
+# =============================================================================
+# Target-format emitters (SPL -> each supported output format)
+# =============================================================================
+
+EMITTER_EXPECTATIONS = {
+    # target format -> substrings that must appear in the emitted rule
+    SIEMFormat.KQL: ["SecurityEvent", "4625", "mimikatz"],
+    SIEMFormat.EQL: ["where", "4625", "mimikatz"],
+    SIEMFormat.ESQL: ["FROM", "4625", "mimikatz"],
+    SIEMFormat.AQL: ["SELECT", "4625", "mimikatz"],
+    SIEMFormat.SQL: ["SELECT", "4625", "mimikatz"],
+    SIEMFormat.CQL: ["events", "filter"],
+    SIEMFormat.YARAL: ["rule", "events:", "condition"],
+    SIEMFormat.SPL: ["EventCode=4625", "mimikatz"],
+}
+
+
+@pytest.mark.parametrize(
+    "target", list(EMITTER_EXPECTATIONS), ids=[t.value for t in EMITTER_EXPECTATIONS]
+)
+def test_emitters_produce_plausible_output(target):
+    out = migration_service.convert(
+        source_code='index=wineventlog EventCode=4625 CommandLine="*mimikatz*"',
+        source_format=SIEMFormat.SPL,
+        target_format=target,
+    )
+    assert out and out.strip(), f"{target.value}: empty output"
+    for marker in EMITTER_EXPECTATIONS[target]:
+        assert marker in out, f"{target.value}: expected {marker!r} in output:\n{out}"
+
+
+def test_kql_no_contradictory_eventid_filter():
+    # A rule that already constrains EventID must not ALSO get the hardcoded
+    # process-creation heuristic (EventID == 4688) -- the combination can
+    # never match any event.
+    out = migration_service.convert(
+        source_code="sourcetype=WinEventLog:Security EventCode=4625",
+        source_format=SIEMFormat.SPL,
+        target_format=SIEMFormat.KQL,
+    )
+    assert "4688" not in out, f"contradictory EventID filters:\n{out}"
+    assert "EventID == 4625" in out, f"EventID should compare unquoted:\n{out}"
+
+
+# =============================================================================
+# LLM response parsing (llm_service)
+# =============================================================================
+
+from app.services.llm_service import LLMService  # noqa: E402
+
+
+def test_extract_anthropic_text_skips_thinking_block():
+    # claude-sonnet-5+ think by default: content[0] is a thinking block.
+    data = {
+        "stop_reason": "end_turn",
+        "content": [
+            {"type": "thinking", "thinking": ""},
+            {"type": "text", "text": "the answer"},
+        ],
+    }
+    assert LLMService._extract_anthropic_text(data) == "the answer"
+
+
+def test_extract_anthropic_text_refusal_raises():
+    with pytest.raises(ValueError, match="declined"):
+        LLMService._extract_anthropic_text({"stop_reason": "refusal", "content": []})
+
+
+def test_extract_anthropic_text_empty_content_raises():
+    with pytest.raises(ValueError, match="no text"):
+        LLMService._extract_anthropic_text({"stop_reason": "end_turn", "content": []})
+
+
+def test_extract_anthropic_text_truncation_still_returns():
+    data = {"stop_reason": "max_tokens", "content": [{"type": "text", "text": "partial"}]}
+    assert LLMService._extract_anthropic_text(data) == "partial"
