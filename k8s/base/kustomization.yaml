@@ -11,6 +11,7 @@ resources:
   - backend-deployment.yaml
   - migration-job.yaml
   - redis-deployment.yaml
+  - pdb.yaml
   - syslog-service.yaml
   - ingress.yaml
   - managed-certificate.yaml

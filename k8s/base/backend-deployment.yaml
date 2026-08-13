@@ -17,6 +17,17 @@ spec:
       # Workload Identity: the KSA is bound to revops-backend@revops-486917 which
       # holds roles/cloudsql.client. The Cloud SQL Auth Proxy sidecar uses it.
       serviceAccountName: backend
+      # Pod-level hardening shared by both containers. runAsNonRoot is safe here:
+      # the backend image's USER is appuser (uid 1000, verified in
+      # packages/backend/Dockerfile's `useradd`) and the proxy image is
+      # distroless nonroot (uid 65532) -- both non-root, so the kubelet's
+      # runAsNonRoot admission check passes. Deliberately NO pod-level runAsUser:
+      # that would override the proxy's own 65532 uid; the backend uid is pinned
+      # at the container level instead.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       # Native sidecar (initContainer with restartPolicy: Always) for the Cloud
       # SQL Auth Proxy v2. REQUIRES GKE 1.29+ (SidecarContainers is GA). The
       # native-sidecar pattern guarantees the proxy is started and Ready BEFORE
@@ -45,6 +56,12 @@ spec:
           securityContext:
             runAsNonRoot: true
             allowPrivilegeEscalation: false
+            # Cloud SQL proxy only opens a local listener on 127.0.0.1:5432
+            # (unprivileged port) and outbound connections -- it needs no Linux
+            # capabilities, so drop them all. seccomp is inherited from the pod.
+            capabilities:
+              drop:
+                - ALL
           resources:
             requests:
               cpu: "50m"
@@ -55,6 +72,22 @@ spec:
       containers:
         - name: backend
           image: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend:latest
+          # uid/gid 1000 = appuser, created by `useradd --create-home appuser`
+          # in packages/backend/Dockerfile on python:3.11-slim. Verified against
+          # the pinned base image: useradd assigns the first free id >= UID_MIN
+          # (1000), so appuser is deterministically 1000:1000. Pinning the
+          # numeric uid also lets the kubelet satisfy runAsNonRoot (a bare
+          # runAsNonRoot with a non-numeric image USER cannot be verified).
+          # uvicorn binds :8000 and syslog :5514 (all unprivileged), so no
+          # capabilities are required -- drop them all. seccomp comes from the pod.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
             - containerPort: 8000
               name: http

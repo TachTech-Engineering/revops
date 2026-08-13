@@ -15,6 +15,15 @@ spec:
       # Workload Identity: bound to revops-backend@revops-486917 (roles/cloudsql.client).
       serviceAccountName: backend
       restartPolicy: Never
+      # Pod-level hardening (see backend-deployment.yaml for the full rationale).
+      # runAsNonRoot is safe: migrate uses the backend image (USER appuser,
+      # uid 1000) and the proxy is distroless nonroot (uid 65532). No pod-level
+      # runAsUser -- it would clobber the proxy's 65532; the migrate uid is
+      # pinned at the container level.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       # Native sidecar (initContainer with restartPolicy: Always) for the Cloud
       # SQL Auth Proxy v2. REQUIRES GKE 1.29+. This is the correct fix for the
       # classic "proxy never exits so the Job hangs forever" problem: native
@@ -49,6 +58,11 @@ spec:
           securityContext:
             runAsNonRoot: true
             allowPrivilegeEscalation: false
+            # Proxy needs no Linux capabilities (local 127.0.0.1:5432 listener +
+            # outbound only). seccomp inherited from the pod.
+            capabilities:
+              drop:
+                - ALL
           resources:
             requests:
               cpu: "50m"
@@ -60,6 +74,17 @@ spec:
         - name: migrate
           image: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend:latest
           command: ["python", "-m", "app.db.run_migrations"]
+          # Same non-root user as the backend deployment: appuser = 1000:1000
+          # (verified from packages/backend/Dockerfile). The migration runner
+          # needs no Linux capabilities. seccomp comes from the pod.
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           envFrom:
             - configMapRef:
                 name: backend-config

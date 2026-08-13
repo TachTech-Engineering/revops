@@ -1,0 +1,51 @@
+# PodDisruptionBudgets keep the app available during VOLUNTARY disruptions
+# (node drains for upgrades/autoscaling). They live in base so both overlays
+# inherit them.
+#
+# Why maxUnavailable: 1 and NOT minAvailable -- this value is drain-safe for
+# every replica count we run, with no per-overlay override:
+#   * production: backend runs 3 replicas (HPA minReplicas: 3), frontend 2.
+#     maxUnavailable: 1 lets the drain evict at most one pod at a time, always
+#     leaving >= N-1 serving, so rolling node upgrades proceed.
+#   * staging: backend and frontend each run 1 replica. A minAvailable: 1 here
+#     would set the desired-healthy floor to 1 == the whole workload, so the
+#     eviction API could NEVER allow a disruption and node drains would hang
+#     forever. maxUnavailable: 1 on a single replica instead permits exactly
+#     one disruption (allowedDisruptions = healthy - (replicas - maxUnavailable)
+#     = 1 - 0 = 1), so the pod can be evicted and rescheduled and the node
+#     drains. maxUnavailable expressed as a count (not %) avoids rounding
+#     surprises at replicas: 1.
+#
+# The selector matches by LABEL (app: <name>), never by object name. The
+# staging overlay's namePrefix rewrites metadata.name (-> staging-backend etc.)
+# and this PDB's own name, but it does NOT touch pod-template labels, so
+# `app: backend` / `app: frontend` still select the prefixed pods in the
+# staging namespace. Confirmed in `kubectl kustomize` for both overlays.
+#
+# No PDB for redis: it is a single non-HA replica. minAvailable would block
+# drains outright, and even maxUnavailable: 1 offers no real protection with no
+# redundancy (evicting the one pod is a brief outage regardless). Add a PDB once
+# redis is made HA (see follow-ups).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: backend
+  labels:
+    app: backend
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: backend
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: frontend
+  labels:
+    app: frontend
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: frontend

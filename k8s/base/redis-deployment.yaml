@@ -17,6 +17,29 @@ spec:
       containers:
         - name: redis
           image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+          # redis:7-alpine starts as root and its entrypoint drops to the redis
+          # user (uid 999) via `setpriv --reuid redis --regid redis`. We do NOT
+          # force runAsNonRoot here -- running redis directly as uid 999 is the
+          # cleaner end state but needs live validation (esp. once /data is a
+          # real volume), so it is deferred (see follow-ups).
+          #
+          # Capabilities: `drop: [ALL]` + SETUID/SETGID. Verified against the
+          # pinned image: drop-ALL alone breaks startup with
+          #   setpriv: setresuid failed: Operation not permitted
+          # SETUID/SETGID let the entrypoint drop to the redis user; the image's
+          # /data is already owned by redis (999) and no volume is mounted, so
+          # the entrypoint's chown is a no-op and CHOWN is not needed. This set
+          # was verified to start clean and answer PING/PONG.
+          securityContext:
+            allowPrivilegeEscalation: false
+            seccompProfile:
+              type: RuntimeDefault
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - SETUID
+                - SETGID
           ports:
             - containerPort: 6379
           resources:
