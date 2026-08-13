@@ -1,8 +1,15 @@
 # NOTE: This manifest is intentionally NOT included in the base kustomization.
 # It uses emptyDir storage (data is lost on every pod reschedule) and is kept
-# only as a reference. The backend expects DATABASE_URL (in the backend-secrets
-# Secret, created by scripts/gke-secrets.sh) to point at a real database such
-# as Cloud SQL.
+# only as a reference.
+#
+# PRODUCTION (decision 2026-08-13): the revops namespace runs an UNMANAGED
+# in-cluster postgres (Deployment "postgres", PVC "postgres-pvc", 10Gi,
+# user/db "revops"), deployed 2026-02 and holding live data. It is deliberately
+# left out of this kustomization so a deploy can never restart or clobber the
+# database. The backend reaches it via DATABASE_URL in the backend-secrets
+# Secret (postgresql+asyncpg://...@postgres:5432/revops). If it ever moves to
+# Cloud SQL, see scripts/gke-cloudsql-setup.sh and git history for the Auth
+# Proxy sidecar wiring.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

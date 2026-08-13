@@ -1,0 +1,19 @@
+# IAP (Identity-Aware Proxy) in front of every ingress backend. Referenced by
+# the backend and frontend Services via the cloud.google.com/backend-config
+# annotation.
+#
+# PREREQUISITE: an Opaque Secret named "iap-secret" with the OAuth client
+# credentials (client_id / client_secret) must exist in the namespace. It is
+# provisioned out-of-band (GCP console OAuth client, then kubectl create
+# secret) and is NOT managed by this kustomization. Production (revops) has
+# had it since 2026-02; a staging rollout must create its own before the
+# ingress will sync.
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: iap-config
+spec:
+  iap:
+    enabled: true
+    oauthclientCredentials:
+      secretName: iap-secret

@@ -10,15 +10,41 @@ resources:
 patches:
   - path: frontend-patch.yaml
   - path: backend-patch.yaml
+  # Production TLS uses the pre-existing Google-managed certificate
+  # "ttrevops-ssl" (gcloud compute ssl-certificates, covers ttrevops.com,
+  # auto-renews), attached since 2026-02 via the pre-shared-cert annotation.
+  # Swap the base's ManagedCertificate wiring for it so the deploy never
+  # detaches the working cert.
+  - target:
+      kind: Ingress
+      name: revops-ingress
+    patch: |-
+      - op: remove
+        path: /metadata/annotations/networking.gke.io~1managed-certificates
+      - op: add
+        path: /metadata/annotations/ingress.gcp.kubernetes.io~1pre-shared-cert
+        value: ttrevops-ssl
+  # The base ManagedCertificate is therefore unused in production; drop it
+  # (an unattached ManagedCertificate never provisions and just reads as a
+  # perpetually "Provisioning" object).
+  - target:
+      kind: ManagedCertificate
+      name: revops-cert
+    patch: |-
+      $patch: delete
+      apiVersion: networking.gke.io/v1
+      kind: ManagedCertificate
+      metadata:
+        name: revops-cert
 
 configMapGenerator:
   - name: backend-config
     behavior: merge
     literals:
       - CORS_ORIGINS=https://ttrevops.com,https://www.ttrevops.com
-      # Production Cloud SQL instance (created by scripts/gke-cloudsql-setup.sh).
-      # Distinct from the staging instance.
-      - CLOUD_SQL_INSTANCE=revops-486917:us-central1:revops-db
+      - ENVIRONMENT=production
+      # Required for Twilio webhook signature validation behind the LB.
+      - PUBLIC_BASE_URL=https://ttrevops.com
 
 images:
   - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend

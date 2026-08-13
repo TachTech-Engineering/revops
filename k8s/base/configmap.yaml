@@ -7,8 +7,7 @@ data:
   CORS_ORIGINS: "https://ttrevops.com,https://www.ttrevops.com"
   REDIS_HOST: "redis"
   REDIS_PORT: "6379"
-  # Cloud SQL instance connection name (project:region:instance) consumed by the
-  # Cloud SQL Auth Proxy sidecar via $(CLOUD_SQL_INSTANCE) arg substitution.
-  # This base value is a PLACEHOLDER: each overlay MUST override it with the real
-  # per-environment instance (staging vs production point at DIFFERENT instances).
-  CLOUD_SQL_INSTANCE: "revops-486917:us-central1:PLACEHOLDER-set-per-env"
+  # DATABASE_URL deliberately does NOT live here: it contains the DB password
+  # and belongs in the backend-secrets Secret (the pre-hardening deploy kept it
+  # in this ConfigMap; that was fixed 2026-08-13). ENVIRONMENT and
+  # PUBLIC_BASE_URL are set per-overlay.

@@ -34,14 +34,20 @@ patches:
         path: /metadata/annotations/networking.gke.io~1v1beta1.FrontendConfig
         value: staging-revops-frontend-config
 
+# NOTE: staging is NOT currently stood up. Standing it up requires, in the
+# revops-staging namespace: a database (its own postgres or Cloud SQL -- the
+# base no longer wires the Auth Proxy sidecar), the backend-secrets and
+# backend-encryption-key Secrets, an iap-secret + a patch renaming the
+# services' backend-config annotation to staging-iap-config (namePrefix does
+# not rewrite annotation values), and a staging.ttrevops.com DNS A record.
 configMapGenerator:
   - name: backend-config
     behavior: merge
     literals:
       - LOG_LEVEL=DEBUG
       - CORS_ORIGINS=https://staging.ttrevops.com
-      # Staging Cloud SQL instance (created by scripts/gke-cloudsql-setup.sh).
-      - CLOUD_SQL_INSTANCE=revops-486917:us-central1:revops-staging-db
+      - ENVIRONMENT=staging
+      - PUBLIC_BASE_URL=https://staging.ttrevops.com
 
 images:
   - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend

@@ -68,6 +68,10 @@ apiVersion: v1
 kind: Service
 metadata:
   name: frontend
+  annotations:
+    # IAP gates all ingress traffic (see iap-backendconfig.yaml).
+    cloud.google.com/backend-config: '{"default": "iap-config"}'
+    cloud.google.com/neg: '{"ingress":true}'
 spec:
   selector:
     app: frontend

@@ -12,64 +12,20 @@ spec:
       labels:
         app: backend-migrate
     spec:
-      # Workload Identity: bound to revops-backend@revops-486917 (roles/cloudsql.client).
       serviceAccountName: backend
       restartPolicy: Never
       # Pod-level hardening (see backend-deployment.yaml for the full rationale).
       # runAsNonRoot is safe: migrate uses the backend image (USER appuser,
-      # uid 1000) and the proxy is distroless nonroot (uid 65532). No pod-level
-      # runAsUser -- it would clobber the proxy's 65532; the migrate uid is
-      # pinned at the container level.
+      # uid 1000).
+      #
+      # DATABASE: migrations run against the in-cluster postgres Service via
+      # DATABASE_URL from backend-secrets (same as the backend Deployment).
+      # The Cloud SQL Auth Proxy native-sidecar variant is in git history if
+      # Cloud SQL is adopted later.
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-      # Native sidecar (initContainer with restartPolicy: Always) for the Cloud
-      # SQL Auth Proxy v2. REQUIRES GKE 1.29+. This is the correct fix for the
-      # classic "proxy never exits so the Job hangs forever" problem: native
-      # sidecars are auto-terminated by the kubelet once the main (migrate)
-      # container finishes, so the Job can Complete. Do NOT add the proxy as a
-      # regular Job container -- that would keep the pod running indefinitely.
-      #
-      # FALLBACK for clusters older than 1.29 (no SidecarContainers support):
-      # add the proxy as a normal container and have the migrate container POST
-      # to the proxy's admin endpoint on exit, e.g.
-      #   curl -s http://127.0.0.1:9091/quitquitquit
-      # (the --quitquitquit/--admin-port=9091 flags below already enable it),
-      # or run the proxy with `--exit-zero-on-sigterm` and share a process
-      # namespace. The native-sidecar approach here needs none of that.
-      initContainers:
-        - name: cloud-sql-proxy
-          image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.14.1
-          restartPolicy: Always  # makes this a native sidecar (GKE 1.29+)
-          args:
-            - "--address=127.0.0.1"
-            - "--port=5432"
-            - "--structured-logs"
-            - "--admin-port=9091"
-            - "--quitquitquit"
-            - "$(CLOUD_SQL_INSTANCE)"
-          env:
-            - name: CLOUD_SQL_INSTANCE
-              valueFrom:
-                configMapKeyRef:
-                  name: backend-config
-                  key: CLOUD_SQL_INSTANCE
-          securityContext:
-            runAsNonRoot: true
-            allowPrivilegeEscalation: false
-            # Proxy needs no Linux capabilities (local 127.0.0.1:5432 listener +
-            # outbound only). seccomp inherited from the pod.
-            capabilities:
-              drop:
-                - ALL
-          resources:
-            requests:
-              cpu: "50m"
-              memory: "64Mi"
-            limits:
-              cpu: "200m"
-              memory: "128Mi"
       containers:
         - name: migrate
           image: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend:latest
