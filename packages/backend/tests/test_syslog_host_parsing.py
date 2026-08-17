@@ -144,6 +144,25 @@ def test_zoned_formats_keep_their_own_timestamp(receiver):
     assert cef.hostname == "DK Dream Machine Pro"
 
 
+def test_cef_with_a_priority_prefix_does_not_lose_its_hostname(receiver):
+    """A <PRI> in front of a CEF line must not push it into the RFC 3164 path.
+
+    It matched RFC 3164 shape-wise, which put the ISO timestamp in the
+    hostname position -- storing "2024-01-15T12:34:56.123Z" as the host. A
+    wrong hostname is worse than a missing one: it reads as real in a filter.
+    """
+    parsed = receiver._parse_message(
+        "<134>Jan  5 12:34:56 2024-01-15T12:34:56.123Z DK Dream Machine Pro "
+        "CEF:0|Ubiquiti|UniFi OS|4.0|1001|Threat Detected|",
+        "1.2.3.4",
+        514,
+    )
+
+    assert parsed.hostname == "DK Dream Machine Pro"
+    assert parsed.timestamp == datetime(2024, 1, 15, 12, 34, 56, 123000)
+    assert parsed.message.startswith("CEF:0|Ubiquiti|UniFi OS")
+
+
 @pytest.mark.parametrize("sentinel", ["unknown", "UNKNOWN", "", "   ", None])
 def test_unknown_sentinel_is_stored_as_null(sentinel):
     """ "unknown" must not reach the store, where it reads as a real hostname."""

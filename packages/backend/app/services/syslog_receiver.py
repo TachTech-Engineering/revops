@@ -290,8 +290,16 @@ class SyslogReceiverService:
         )
 
         # UniFi CEF format:
-        # TIMESTAMP TIMESTAMP HOSTNAME CEF:0|Vendor|Product|Version|EventID|Name|...
+        # [<PRI>]TIMESTAMP TIMESTAMP HOSTNAME CEF:0|Vendor|Product|Version|EventID|Name|...
+        #
+        # The priority prefix is optional because some senders include it. It
+        # has to be tolerated *here*, ahead of the RFC 3164 patterns: with a
+        # <PRI> in front, a CEF line otherwise falls through to those, where
+        # the ISO timestamp sits in the hostname position and would be stored
+        # as the hostname. A plainly wrong host is worse than a missing one --
+        # it reads as real in a filter.
         self._unifi_cef_pattern = re.compile(
+            r"(?:<\d+>)?"  # Optional priority
             r"(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+"  # BSD timestamp
             r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z)\s+"  # ISO timestamp
             r"(.+?)\s+"  # Hostname (e.g., "DK Dream Machine Pro")
