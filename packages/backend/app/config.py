@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     default_llm_model: str = "claude-sonnet-5"
     default_llm_provider: str = "anthropic"
 
+    # Raw log retention for directly-ingested sources (UniFi syslog, Falco).
+    # Retention is enforced by dropping whole day partitions; lower this before
+    # raising log_store.MAX_STORED_BYTES if the volume is under pressure.
+    log_retention_days: int = 14
+
     # Attack Simulation (Phase 5)
     atomic_red_team_path: str = ""  # Local path or GitHub URL
     stratus_red_team_path: str = ""

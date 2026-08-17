@@ -371,6 +371,47 @@ class UniFiSyslogConnector(DataSourceConnector):
                 message=f"Syslog receiver error: {str(e)}",
             )
 
+    async def _store_raw_logs(self, messages: list) -> None:
+        """Persist drained syslog lines. Never fails the sync."""
+        if not messages:
+            return
+        try:
+            from app.db.session import AsyncSessionLocal
+            from app.services import log_store
+
+            async with AsyncSessionLocal() as db:
+                org_id = await log_store.organization_for_connector(db, self.connector_id)
+                if org_id is None:
+                    return
+                await log_store.store_events(
+                    db,
+                    [
+                        log_store.LogEvent(
+                            organization_id=org_id,
+                            connector_id=self.connector_id,
+                            source_type="unifi_syslog",
+                            event_time=getattr(m, "timestamp", None) or utcnow(),
+                            message=(
+                                getattr(m, "raw", None) or getattr(m, "message", "")
+                            )[:100_000],
+                            host=(getattr(m, "hostname", "") or None),
+                            source_ip=(getattr(m, "source_ip", "") or None),
+                            severity=str(getattr(m, "severity", "") or "") or None,
+                            attributes={
+                                "facility": getattr(m, "facility", None),
+                                "app_name": getattr(m, "app_name", None),
+                                "process_id": getattr(m, "process_id", None),
+                            },
+                        )
+                        for m in messages
+                    ],
+                )
+                await db.commit()
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception("Failed to retain UniFi syslog lines")
+
     async def fetch_alerts(
         self,
         since: datetime,
@@ -392,6 +433,12 @@ class UniFiSyslogConnector(DataSourceConnector):
             messages = syslog_receiver.get_buffered_messages(self.connector_id, limit)
 
             logger.info(f"UniFi syslog: fetching from buffer, got {len(messages)} messages")
+
+            # Retain every drained line before filtering. Messages older than
+            # `since`, and ones that never become alerts, are dropped from the
+            # buffer here -- this is their only chance to be persisted, and the
+            # device holds no copy.
+            await self._store_raw_logs(messages)
 
             normalized_alerts = []
             for msg in messages:

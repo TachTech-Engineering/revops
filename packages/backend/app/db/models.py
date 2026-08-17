@@ -3,9 +3,9 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Computed, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy import Enum as SQLEnum
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
 
 from app.core.time_utils import utcnow
@@ -355,6 +355,68 @@ class PasswordResetToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     user: Mapped["User"] = relationship("User")
+
+
+class RawLogEvent(Base):
+    """Raw log lines from sources this platform ingests directly.
+
+    Panther retains its own logs in Snowflake, so this covers only the sources
+    where RevOps is the system of record -- UniFi syslog and the Falco webhook.
+    Without it those events exist nowhere once they have been turned into an
+    alert (or dropped by a filter), so there is nothing to search or re-check.
+
+    Partitioned by day on ``event_time`` so retention is a DROP of whole
+    partitions rather than a mass DELETE, which on an append-only table of this
+    shape is the difference between instant and hours of vacuum. Partition
+    creation and dropping live in app/services/log_store.py.
+
+    Logs are far larger than alerts and share a volume with the operational
+    database, so ingestion is capped (see log_store.MAX_STORED_BYTES): the
+    store refuses new rows before it can fill the disk and take the whole
+    application down with it.
+    """
+
+    __tablename__ = "raw_log_events"
+
+    # Composite PK: Postgres requires the partition key in any unique index.
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_time: Mapped[datetime] = mapped_column(DateTime, primary_key=True, nullable=False)
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    connector_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    severity: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # STORED generated column, mirroring the migration: full-text search reads
+    # it instead of re-parsing every message per query. Declared here so a
+    # schema built from the models (the behavioral test harness) matches what
+    # Alembic actually builds in production.
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('english', message)", persisted=True),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        # Every read is org-scoped and time-bounded; this is the access path.
+        Index("ix_raw_log_events_org_time", "organization_id", "event_time"),
+        Index("ix_raw_log_events_org_source_time", "organization_id", "source_type", "event_time"),
+        # BRIN, not btree: the table is written in event_time order, so this
+        # costs kilobytes where a btree would cost gigabytes at log volume.
+        Index("ix_raw_log_events_time_brin", "event_time", postgresql_using="brin"),
+        Index("ix_raw_log_events_search", "search_vector", postgresql_using="gin"),
+        # No FKs to organizations/connectors: a partitioned table's FKs must be
+        # re-created per partition, and retention drops partitions wholesale.
+        # Rows are unreachable without an org match, and deleting a tenant's
+        # logs is an explicit operation rather than a cascade.
+        {"postgresql_partition_by": "RANGE (event_time)"},
+    )
 
 
 class FalcoIngestEvent(Base):

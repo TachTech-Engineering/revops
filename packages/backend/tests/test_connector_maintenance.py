@@ -25,12 +25,25 @@ def test_advisory_lock_ids_are_distinct():
     assert len(set(ids)) == len(ids)
 
 
+class _Scalars:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
 class _Result:
-    def __init__(self, value):
+    def __init__(self, value, rows=()):
         self._value = value
+        self._rows = list(rows)
 
     def scalar(self):
         return self._value
+
+    def scalars(self):
+        """Partition listing in drop_expired_partitions; empty in this stub."""
+        return _Scalars(self._rows)
 
 
 class _StubSession:

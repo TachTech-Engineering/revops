@@ -89,6 +89,11 @@ class ConnectorSyncScheduler:
 
         from app.db.session import AsyncSessionLocal
         from app.services.falco_event_buffer import purge_processed
+        from app.services.log_store import (
+            drop_expired_partitions,
+            ensure_partitions,
+            retention_days,
+        )
 
         async with AsyncSessionLocal() as db:
             # pg_try_advisory_XACT_lock, not the session-scoped variant:
@@ -108,10 +113,22 @@ class ConnectorSyncScheduler:
                 logger.debug("Connector maintenance running on another replica; skipping")
                 return
             purged = await purge_processed(db)
+
+            # Raw log partitions: create the days ingestion will need next, and
+            # drop those past retention. Retention is a partition DROP, so this
+            # is what keeps the log store from growing without bound.
+            created = await ensure_partitions(db)
+            dropped = await drop_expired_partitions(db)
+
             # Commit ends the transaction and releases the lock in one step.
             await db.commit()
             if purged:
                 logger.info(f"Purged {purged} consumed Falco ingest event(s)")
+            if created or dropped:
+                logger.info(
+                    f"Log partitions: created {created}, dropped {len(dropped)} "
+                    f"past {retention_days()}d retention"
+                )
 
     def stop(self):
         """Stop the sync scheduler."""
