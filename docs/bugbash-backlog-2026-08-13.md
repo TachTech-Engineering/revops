@@ -57,12 +57,15 @@ mock-only widgets deleted.
 
 ## Deliberately not changed
 
-1. **UniFi syslog cannot be deduped by the new unique index.**
-   `unifi_syslog.py:430` builds `external_id=f"unifi-syslog-{timestamp}-{uuid4().hex[:8]}"`,
-   so every message is unique by construction. The index protects every
-   connector with a stable upstream id; UniFi syslog needs a content-derived
-   external id (e.g. a hash of the message body) before it benefits. That is a
-   behaviour change to ingestion, not a bug fix, so it was left for a decision.
+1. ~~UniFi syslog cannot be deduped by the new unique index.~~ **Fixed
+   2026-08-17** (`768f69c`): all four UniFi `external_id` schemes are now
+   content-derived via `content_external_id()`. Fixing it also uncovered the
+   opposite bug on another path — `f"unifi-{hostname}-{ts}"` carried no message
+   content, so two different events from one device in the same second
+   collided and the second was silently dropped once the unique index existed.
+   Accepted limit: byte-identical messages from one host with the same
+   timestamp still collapse, which syslog gives no way to distinguish from a
+   re-delivery.
 
 2. **The connector-sync in-flight guard is per-process.** Two replicas can
    still start a sync for the same connector at the same time; the unique index
