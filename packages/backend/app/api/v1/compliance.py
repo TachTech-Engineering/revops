@@ -671,8 +671,7 @@ async def export_compliance_report(
             media_type="text/csv",
             headers={
                 "Content-Disposition": (
-                    "attachment; filename=compliance_report_"
-                    f"{utcnow().strftime('%Y%m%d')}.csv"
+                    f"attachment; filename=compliance_report_{utcnow().strftime('%Y%m%d')}.csv"
                 )
             },
         )

@@ -164,9 +164,7 @@ class RedisSubscriber:
                         try:
                             data = json.loads(message["data"])
                         except (json.JSONDecodeError, TypeError):
-                            logger.error(
-                                f"Invalid JSON on channel {message.get('channel')}"
-                            )
+                            logger.error(f"Invalid JSON on channel {message.get('channel')}")
                             continue
                         if not isinstance(data, dict):
                             logger.warning(
@@ -177,9 +175,7 @@ class RedisSubscriber:
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
-                    logger.error(
-                        f"Redis subscriber error: {e}; reconnecting in {backoff:.1f}s"
-                    )
+                    logger.error(f"Redis subscriber error: {e}; reconnecting in {backoff:.1f}s")
                 finally:
                     with contextlib.suppress(Exception):
                         await pubsub.aclose()
@@ -291,9 +287,7 @@ async def _serve_connection(websocket: WebSocket, channel: str, user: User) -> N
                 last_validated = loop.time()
                 if failure is not None:
                     code, reason = failure
-                    logger.info(
-                        "Closing WebSocket on %s for user %s: %s", channel, user_id, reason
-                    )
+                    logger.info("Closing WebSocket on %s for user %s: %s", channel, user_id, reason)
                     with contextlib.suppress(Exception):
                         await websocket.close(code=code, reason=reason)
                     break

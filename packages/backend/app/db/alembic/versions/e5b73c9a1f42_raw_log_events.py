@@ -74,9 +74,7 @@ def upgrade() -> None:
         "ON raw_log_events (organization_id, source_type, event_time DESC)"
     )
     op.execute("CREATE INDEX ix_raw_log_events_time_brin ON raw_log_events USING BRIN (event_time)")
-    op.execute(
-        "CREATE INDEX ix_raw_log_events_search ON raw_log_events USING GIN (search_vector)"
-    )
+    op.execute("CREATE INDEX ix_raw_log_events_search ON raw_log_events USING GIN (search_vector)")
 
     # Today plus a week, so ingestion works before the maintenance job first runs.
     op.execute(

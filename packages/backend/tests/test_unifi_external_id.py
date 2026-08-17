@@ -120,9 +120,7 @@ def test_syslog_id_is_not_random():
     """Guards against a regression to uuid: two normalizations of one message
     must agree."""
     c = _connector()
-    ids = {
-        c._normalize_syslog_message(_msg("same line")).external_id for _ in range(5)
-    }
+    ids = {c._normalize_syslog_message(_msg("same line")).external_id for _ in range(5)}
     assert len(ids) == 1
 
 

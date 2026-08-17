@@ -146,9 +146,7 @@ class AlertPoller:
                         f"Triggered escalation {escalation.id} for alert {alert_data.get('id')}"
                     )
         except Exception:
-            logger.exception(
-                f"Failed to trigger escalation for alert {alert_data.get('id')}"
-            )
+            logger.exception(f"Failed to trigger escalation for alert {alert_data.get('id')}")
 
 
 # Global alert poller instance

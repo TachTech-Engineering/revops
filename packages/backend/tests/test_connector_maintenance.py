@@ -34,9 +34,10 @@ class _Scalars:
 
 
 class _Result:
-    def __init__(self, value, rows=()):
+    def __init__(self, value, rows=(), rowcount=0):
         self._value = value
         self._rows = list(rows)
+        self.rowcount = rowcount
 
     def scalar(self):
         return self._value
@@ -181,7 +182,6 @@ async def test_maintenance_failure_does_not_stop_the_sync_loop(monkeypatch):
 # real holder sits idle in the pool holding it forever -- silently disabling
 # the sweep. Observed in production: held 108s by an idle connection.
 # ---------------------------------------------------------------------------
-
 
 
 def _sweep_source() -> str:

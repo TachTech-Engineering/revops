@@ -151,8 +151,7 @@ class UniFiAPIConnector(DataSourceConnector):
                         "type": "string",
                         "title": "API Key",
                         "description": (
-                            "UniFi Network API key "
-                            "(create in Settings → Integrations → API Keys)"
+                            "UniFi Network API key (create in Settings → Integrations → API Keys)"
                         ),
                         "format": "password",
                     },

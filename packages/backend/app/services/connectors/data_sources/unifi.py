@@ -179,11 +179,21 @@ class UnifiConnector(DataSourceConnector):
             },
         )
 
+    async def _pending_count(self) -> int:
+        """Staged syslog messages for this connector awaiting a sync."""
+        from app.db.session import AsyncSessionLocal
+        from app.services import syslog_event_buffer
+
+        async with AsyncSessionLocal() as db:
+            return await syslog_event_buffer.count_pending(db, self.connector_id)
+
     async def test_connection(self) -> ConnectionTestResult:
         """Test that syslog receiver is running and ready."""
         try:
-            syslog_receiver = get_syslog_receiver()
-            buffer_size = syslog_receiver.get_buffer_size(self.connector_id)
+            # Staged rows awaiting a sync, not this process's memory: with
+            # several replicas the local buffer is empty on most of them, so
+            # reporting it would show "0 buffered" on a busy connector.
+            buffer_size = await self._pending_count()
 
             # Re-register handler if needed
             self._register_syslog_handler()
@@ -216,10 +226,25 @@ class UnifiConnector(DataSourceConnector):
         limit: int = 100,
         cursor: str | None = None,
     ) -> tuple[list[NormalizedAlert], str | None]:
-        """Fetch alerts from the syslog buffer."""
+        """Fetch alerts from the durable syslog buffer.
+
+        Claimed from ``syslog_ingest_events`` rather than from this process's
+        memory: datagrams are load-balanced across replicas while the sync runs
+        on whichever replica gets there first, so a process-local buffer is
+        drained by nobody. Same reasoning as UniFiSyslogConnector.
+        """
         try:
-            syslog_receiver = get_syslog_receiver()
-            messages = syslog_receiver.get_buffered_messages(self.connector_id, limit)
+            from app.db.session import AsyncSessionLocal
+            from app.services import syslog_event_buffer
+            from app.services.syslog_receiver import SyslogReceiverService
+
+            # Keep this replica listening even when another runs the syncs.
+            self._register_syslog_handler()
+
+            async with AsyncSessionLocal() as db:
+                payloads = await syslog_event_buffer.claim_events(db, self.connector_id, limit)
+                await db.commit()
+            messages = [SyslogReceiverService.from_payload(p) for p in payloads]
 
             normalized_alerts = []
             for msg in messages:

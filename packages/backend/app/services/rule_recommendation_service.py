@@ -119,9 +119,7 @@ class RuleRecommendationService:
             conditions.append(RuleRecommendation.status == status)
 
         # Get total count
-        count_query = (
-            select(func.count()).select_from(RuleRecommendation).where(and_(*conditions))
-        )
+        count_query = select(func.count()).select_from(RuleRecommendation).where(and_(*conditions))
         count_result = await db.execute(count_query)
         total = count_result.scalar() or 0
 

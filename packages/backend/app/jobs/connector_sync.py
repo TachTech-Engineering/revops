@@ -94,6 +94,7 @@ class ConnectorSyncScheduler:
             ensure_partitions,
             retention_days,
         )
+        from app.services.syslog_event_buffer import purge_processed as purge_syslog
 
         async with AsyncSessionLocal() as db:
             # pg_try_advisory_XACT_lock, not the session-scoped variant:
@@ -113,6 +114,9 @@ class ConnectorSyncScheduler:
                 logger.debug("Connector maintenance running on another replica; skipping")
                 return
             purged = await purge_processed(db)
+            # Same reaping for staged syslog: claimed rows are kept for a
+            # debugging window and then dropped, or the table only grows.
+            purged_syslog = await purge_syslog(db)
 
             # Raw log partitions: create the days ingestion will need next, and
             # drop those past retention. Retention is a partition DROP, so this
@@ -124,6 +128,8 @@ class ConnectorSyncScheduler:
             await db.commit()
             if purged:
                 logger.info(f"Purged {purged} consumed Falco ingest event(s)")
+            if purged_syslog:
+                logger.info(f"Purged {purged_syslog} consumed syslog ingest event(s)")
             if created or dropped:
                 logger.info(
                     f"Log partitions: created {created}, dropped {len(dropped)} "

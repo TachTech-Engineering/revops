@@ -1,8 +1,9 @@
 # UniFi syslog messages are buffered on one pod and drained on another
 
-**Status: open.** Found 2026-08-17 while verifying raw log storage. Not
-introduced by that work — this predates it and affects UniFi *alerts* as much
-as it affects logs.
+**Status: fixed 2026-08-17.** Found while verifying raw log storage. Not
+introduced by that work — it predated it and affected UniFi *alerts* as much
+as logs. Received messages are now staged in `syslog_ingest_events` and
+claimed by whichever replica runs the sync; see "The fix" at the bottom.
 
 ## What happens
 
@@ -39,20 +40,33 @@ restarts and drops all of them. Anything that would have become a UniFi alert
 in that window is lost, silently — the sync reports success, having found
 nothing.
 
-## Fix direction
+## The fix
 
-The Falco path had the same shape and was already solved: `FalcoIngestEvent`
-plus `falco_event_buffer` stage accepted events in Postgres with at-least-once
-claim semantics, so any replica can drain what any other replica received. The
-syslog receiver wants the same treatment — write to a staging table on receipt
-instead of a process-local dict.
+The Falco path had the same shape and was already solved, so this reuses it
+rather than inventing a second mechanism. `SyslogIngestEvent` +
+`syslog_event_buffer` stage received messages in Postgres with at-least-once
+claim semantics, so any replica can drain what any other replica received.
 
-Cheaper stopgaps, both with real downsides:
+- **Receipt.** `_process_message` puts the parsed message on a bounded
+  in-process queue and returns. Datagrams are handled on the event loop and
+  must not wait on a database round trip. A flusher task writes batches to
+  `syslog_ingest_events` about once a second; a failed write returns the batch
+  to the queue, and the loop survives its own exceptions because a dead
+  flusher is a silent listener.
+- **Drain.** Both UniFi connectors claim from the table (`SKIP LOCKED`, so
+  concurrent syncs take disjoint rows) instead of reading process memory. A
+  claim older than `CLAIM_STALE_MINUTES` is re-takeable, so a sync that dies
+  mid-drain recovers rather than losing the batch. Re-processing is harmless:
+  `external_id` is a content fingerprint, so a repeat collides with
+  `uq_normalized_alerts_org_connector_external`.
+- **The old buffer is gone.** `get_buffered_messages`/`get_buffer_size` were
+  removed rather than left in place — a process-local message store is exactly
+  what caused this, and leaving one available invites its return.
+  `test_connection` now reports staged rows, which is a number every replica
+  agrees on.
+- **Reaping.** Claimed rows are kept 24h for debugging and then purged by the
+  existing hourly maintenance sweep.
 
-- Scale the backend to one replica (loses availability, and the PDB assumes
-  more than one).
-- Pin syslog to a single pod via a dedicated Deployment/Service (splits the
-  connector's runtime across two workloads).
-
-The staging-table fix is the one that matches how this codebase already
-handles the identical problem elsewhere.
+Rejected stopgaps: scaling the backend to one replica (loses availability, and
+the PDB assumes more than one), and pinning syslog to a dedicated
+Deployment/Service (splits one connector's runtime across two workloads).

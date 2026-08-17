@@ -163,9 +163,7 @@ class EscalationService:
         # Calculate next escalation time based on first step
         if policy.steps:
             first_step = sorted(policy.steps, key=lambda s: s.step_order)[0]
-            escalation.next_escalation_at = utcnow() + timedelta(
-                minutes=first_step.delay_minutes
-            )
+            escalation.next_escalation_at = utcnow() + timedelta(minutes=first_step.delay_minutes)
 
         self.db.add(escalation)
         await self.db.commit()
@@ -296,9 +294,7 @@ class EscalationService:
             # transient provider outage does not silently skip the primary
             # on-call. The sweep picks it up again at next_escalation_at and
             # next_step_index() sends the same step.
-            escalation.next_escalation_at = utcnow() + timedelta(
-                minutes=STEP_RETRY_DELAY_MINUTES
-            )
+            escalation.next_escalation_at = utcnow() + timedelta(minutes=STEP_RETRY_DELAY_MINUTES)
             logger.warning(
                 f"Escalation {escalation.id} step {step_index} attempt {attempt} failed; "
                 f"retrying in {STEP_RETRY_DELAY_MINUTES}m"
@@ -315,9 +311,7 @@ class EscalationService:
         # Calculate next escalation time
         if step_index + 1 < len(sorted_steps):
             next_step = sorted_steps[step_index + 1]
-            escalation.next_escalation_at = utcnow() + timedelta(
-                minutes=next_step.delay_minutes
-            )
+            escalation.next_escalation_at = utcnow() + timedelta(minutes=next_step.delay_minutes)
         else:
             escalation.next_escalation_at = None
 
@@ -494,42 +488,34 @@ class EscalationService:
                             </td>
                         </tr>
                         {
-                            "<tr><td style='padding: 8px 0; font-weight: bold; "
-                            "color: #374151;'>Source:</td>"
-                            "<td style='padding: 8px 0; color: #6b7280;'>"
-                            + log_source
-                            + "</td></tr>"
-                            if log_source
-                            else ""
-                        }
+            "<tr><td style='padding: 8px 0; font-weight: bold; "
+            "color: #374151;'>Source:</td>"
+            "<td style='padding: 8px 0; color: #6b7280;'>" + log_source + "</td></tr>"
+            if log_source
+            else ""
+        }
                         {
-                            "<tr><td style='padding: 8px 0; font-weight: bold; "
-                            "color: #374151;'>Rule:</td>"
-                            "<td style='padding: 8px 0; color: #6b7280;'>"
-                            + rule_name
-                            + "</td></tr>"
-                            if rule_name
-                            else ""
-                        }
+            "<tr><td style='padding: 8px 0; font-weight: bold; "
+            "color: #374151;'>Rule:</td>"
+            "<td style='padding: 8px 0; color: #6b7280;'>" + rule_name + "</td></tr>"
+            if rule_name
+            else ""
+        }
                         {
-                            "<tr><td style='padding: 8px 0; font-weight: bold; "
-                            "color: #374151;'>Time:</td>"
-                            "<td style='padding: 8px 0; color: #6b7280;'>"
-                            + alert_time
-                            + "</td></tr>"
-                            if alert_time
-                            else ""
-                        }
+            "<tr><td style='padding: 8px 0; font-weight: bold; "
+            "color: #374151;'>Time:</td>"
+            "<td style='padding: 8px 0; color: #6b7280;'>" + alert_time + "</td></tr>"
+            if alert_time
+            else ""
+        }
                     </table>
                     {
-                        "<div style='margin-top: 16px; padding: 12px; "
-                        "background-color: #f9fafb; border-radius: 4px;'>"
-                        "<strong>Description:</strong><br/>"
-                        + alert_description
-                        + "</div>"
-                        if alert_description
-                        else ""
-                    }
+            "<div style='margin-top: 16px; padding: 12px; "
+            "background-color: #f9fafb; border-radius: 4px;'>"
+            "<strong>Description:</strong><br/>" + alert_description + "</div>"
+            if alert_description
+            else ""
+        }
                     <div style="margin-top: 20px; padding-top: 20px;
                     border-top: 1px solid #e5e7eb;">
                         <p style="margin: 0; color: #6b7280; font-size: 14px;">

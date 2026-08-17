@@ -54,9 +54,7 @@ class TestSmsRequest(BaseModel):
     message: str | None = "[PANTHER TEST] This is a test SMS from Panther Security."
 
 
-async def _get_org_config(
-    db: AsyncSession, org_id: UUID
-) -> OrganizationTelephonyConfig | None:
+async def _get_org_config(db: AsyncSession, org_id: UUID) -> OrganizationTelephonyConfig | None:
     result = await db.execute(
         select(OrganizationTelephonyConfig).where(
             OrganizationTelephonyConfig.organization_id == org_id

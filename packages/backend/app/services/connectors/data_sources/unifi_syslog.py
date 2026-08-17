@@ -342,13 +342,17 @@ class UniFiSyslogConnector(DataSourceConnector):
     async def test_connection(self) -> ConnectionTestResult:
         """Test that syslog receiver is ready for UniFi logs."""
         try:
-            from app.services.syslog_receiver import get_syslog_receiver
+            from app.db.session import AsyncSessionLocal
+            from app.services import syslog_event_buffer
 
             # Register handler if not already registered
             self._register_syslog_handler()
 
-            syslog_receiver = get_syslog_receiver()
-            buffer_size = syslog_receiver.get_buffer_size(self.connector_id)
+            # Staged rows awaiting a sync, not this process's memory: with
+            # several replicas the local buffer is empty on most of them, so
+            # reporting it would show "0 buffered" on a busy connector.
+            async with AsyncSessionLocal() as db:
+                buffer_size = await syslog_event_buffer.count_pending(db, self.connector_id)
 
             return ConnectionTestResult(
                 success=True,
@@ -378,6 +382,25 @@ class UniFiSyslogConnector(DataSourceConnector):
         if not value or value.lower() == "unknown":
             return None
         return value
+
+    async def _claim_messages(self, limit: int) -> list:
+        """Claim staged syslog messages for this connector.
+
+        The claim is committed before the caller processes them. That is
+        deliberate: holding it open until the alerts are inserted would let a
+        crash mid-sync leave rows locked, and the claim is re-takeable after
+        CLAIM_STALE_MINUTES precisely so a dead sync recovers instead of
+        losing messages.
+        """
+        from app.db.session import AsyncSessionLocal
+        from app.services import syslog_event_buffer
+        from app.services.syslog_receiver import SyslogReceiverService
+
+        async with AsyncSessionLocal() as db:
+            payloads = await syslog_event_buffer.claim_events(db, self.connector_id, limit)
+            await db.commit()
+
+        return [SyslogReceiverService.from_payload(p) for p in payloads]
 
     async def _store_raw_logs(self, messages: list) -> None:
         """Persist drained syslog lines. Never fails the sync."""
@@ -434,21 +457,26 @@ class UniFiSyslogConnector(DataSourceConnector):
         limit: int = 100,
         cursor: str | None = None,
     ) -> tuple[list[NormalizedAlert], str | None]:
-        """Fetch alerts from the syslog buffer."""
+        """Fetch alerts from the durable syslog buffer.
+
+        Messages are claimed from ``syslog_ingest_events``, not from the
+        receiver's memory. Any replica can drain what any other replica
+        received -- which is the point: datagrams are load-balanced across
+        replicas while the sync runs on whichever one gets there first, so a
+        process-local buffer was drained by nobody.
+        """
         try:
             import logging
 
-            from app.services.syslog_receiver import get_syslog_receiver
-
             logger = logging.getLogger(__name__)
 
-            # Register handler if not already registered
+            # Keep this replica's listener registered so it accepts and
+            # persists traffic even when another replica runs the syncs.
             self._register_syslog_handler()
 
-            syslog_receiver = get_syslog_receiver()
-            messages = syslog_receiver.get_buffered_messages(self.connector_id, limit)
+            messages = await self._claim_messages(limit)
 
-            logger.info(f"UniFi syslog: fetching from buffer, got {len(messages)} messages")
+            logger.info(f"UniFi syslog: claimed {len(messages)} message(s) from the buffer")
 
             # Retain every drained line before filtering. Messages older than
             # `since`, and ones that never become alerts, are dropped from the

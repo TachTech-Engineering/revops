@@ -467,6 +467,59 @@ class FalcoIngestEvent(Base):
     )
 
 
+class SyslogIngestEvent(Base):
+    """Syslog messages received on the UDP/TCP listener, awaiting the sync cycle.
+
+    These were held in a process-local dict in ``syslog_receiver``. The backend
+    runs several replicas and the syslog Service load-balances datagrams across
+    all of them, but ``last_sync_at`` is a single row: whichever replica reaches
+    the connector first drained its own buffer and marked the connector synced,
+    so the replica actually holding the messages skipped its turn. Measured in
+    production on 2026-08-17, one replica held 172 buffered messages and ran no
+    drains while another ran four drains finding nothing each time. The messages
+    were never persisted -- they aged out of the in-memory cap or died with the
+    pod, taking the UniFi alerts they would have become with them, while the
+    sync reported success.
+
+    Same shape and same claim semantics as :class:`FalcoIngestEvent`: any
+    replica can drain what any other replica received. Delivery is
+    at-least-once, which is safe because the UniFi connector derives
+    ``external_id`` from a content fingerprint, so a re-processed message
+    collides with ``uq_normalized_alerts_org_connector_external``.
+    """
+
+    __tablename__ = "syslog_ingest_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    connector_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("connectors.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # The parsed SyslogMessage, field for field, so a drain on any replica can
+    # rebuild it without re-parsing (and without depending on the parser
+    # version that happened to be running when it arrived).
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "ix_syslog_ingest_events_connector_claim",
+            "connector_id",
+            "claimed_at",
+            "received_at",
+        ),
+    )
+
+
 class OrganizationTelephonyConfig(Base):
     """Per-organization telephony (Fonoster) configuration.
 

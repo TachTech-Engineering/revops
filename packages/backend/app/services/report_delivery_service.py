@@ -43,8 +43,7 @@ class ReportDeliveryService:
                         {
                             "type": "mrkdwn",
                             "text": (
-                                "*Critical:*\n"
-                                f"{summary.get('by_severity', {}).get('CRITICAL', 0)}"
+                                f"*Critical:*\n{summary.get('by_severity', {}).get('CRITICAL', 0)}"
                             ),
                         },
                         {

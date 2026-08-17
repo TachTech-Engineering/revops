@@ -144,6 +144,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # Session middleware for OAuth state management
 app.add_middleware(SessionMiddleware, secret_key=settings.secret_key)
 
+
 # Global exception handlers
 #
 # FastAPI/Starlette handle HTTPException (and RequestValidationError) before these

@@ -188,8 +188,7 @@ async def get_current_user_with_org(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=(
-                "User is not associated with an organization. "
-                "Please contact your administrator."
+                "User is not associated with an organization. Please contact your administrator."
             ),
         )
     return user
