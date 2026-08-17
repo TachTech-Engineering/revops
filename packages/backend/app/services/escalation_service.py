@@ -952,7 +952,7 @@ class EscalationScheduler:
         Guarded by a Postgres advisory lock: this sweep is a global,
         cross-organization job, and the backend runs multiple replicas. Without
         the lock every replica would advance the same escalations on the same
-        60s tick and page the on-call engineer once per replica. pg_try_advisory_lock
+        60s tick and page the on-call engineer once per replica. pg_try_advisory_xact_lock
         is non-blocking -- a replica that does not get the lock simply skips
         this tick, and the lock is released when the session closes.
         """
@@ -961,24 +961,25 @@ class EscalationScheduler:
         from app.db.session import AsyncSessionLocal
 
         async with AsyncSessionLocal() as db:
+            # Transaction-scoped: Postgres releases it when the transaction
+            # ends, so it cannot be leaked. The session-scoped variant binds to
+            # a *connection*, and any commit before the unlock lets SQLAlchemy
+            # hand the unlock a different pooled connection, stranding the lock
+            # on an idle connection and silently disabling the sweep. This code
+            # happened to avoid that only because it never committed first.
             acquired = (
                 await db.execute(
-                    text("SELECT pg_try_advisory_lock(:lock_id)"),
+                    text("SELECT pg_try_advisory_xact_lock(:lock_id)"),
                     {"lock_id": ESCALATION_SWEEP_LOCK_ID},
                 )
             ).scalar()
             if not acquired:
                 logger.debug("Escalation sweep already running on another replica; skipping tick")
                 return
-            try:
-                processed = await EscalationService(db).process_pending_escalations()
-                if processed:
-                    logger.info(f"Advanced {processed} pending escalation(s)")
-            finally:
-                await db.execute(
-                    text("SELECT pg_advisory_unlock(:lock_id)"),
-                    {"lock_id": ESCALATION_SWEEP_LOCK_ID},
-                )
+            processed = await EscalationService(db).process_pending_escalations()
+            await db.commit()
+            if processed:
+                logger.info(f"Advanced {processed} pending escalation(s)")
 
 
 # Global escalation scheduler instance

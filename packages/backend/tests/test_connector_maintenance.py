@@ -7,6 +7,7 @@ only ever grew. It now runs on the existing sync loop, throttled and guarded by
 an advisory lock because every replica runs that loop.
 """
 
+import inspect
 from datetime import timedelta
 
 import pytest
@@ -14,6 +15,7 @@ import pytest
 from app.core.time_utils import utcnow
 from app.db.run_migrations import SCHEMA_ADVISORY_LOCK_ID
 from app.jobs.connector_sync import MAINTENANCE_LOCK_ID, ConnectorSyncScheduler
+from app.services import escalation_service as escalation_module
 from app.services.escalation_service import ESCALATION_SWEEP_LOCK_ID
 
 
@@ -107,12 +109,17 @@ async def test_replica_without_the_lock_skips(monkeypatch):
 
     assert calls["purge"] == 0
     assert not session.committed
-    assert any("pg_try_advisory_lock" in s for s in session.statements)
+    assert any("pg_try_advisory_xact_lock" in s for s in session.statements)
 
 
 @pytest.mark.asyncio
-async def test_lock_is_released_even_when_purge_raises(monkeypatch):
-    """A leaked advisory lock would block the sweep on every later tick."""
+async def test_lock_is_not_leaked_when_purge_raises(monkeypatch):
+    """A leaked lock would block the sweep on every later tick.
+
+    With a transaction-scoped lock there is nothing to release by hand: the
+    failed transaction ends and Postgres drops the lock. What must hold is that
+    the sweep does not commit a partial result.
+    """
     session = _StubSession()
 
     async def boom(db, older_than_hours=24):
@@ -125,7 +132,7 @@ async def test_lock_is_released_even_when_purge_raises(monkeypatch):
     with pytest.raises(RuntimeError):
         await scheduler._run_maintenance_if_due()
 
-    assert any("pg_advisory_unlock" in s for s in session.statements)
+    assert not session.committed
 
 
 @pytest.mark.asyncio
@@ -149,3 +156,39 @@ async def test_maintenance_failure_does_not_stop_the_sync_loop(monkeypatch):
     await scheduler.start()
 
     assert ticks["sync"] >= 2, "sync kept running despite maintenance raising"
+
+
+# ---------------------------------------------------------------------------
+# Advisory locks must be transaction-scoped.
+#
+# The first version of this sweep used session-scoped pg_try_advisory_lock and
+# committed before unlocking. A session-scoped lock belongs to a *connection*;
+# after a commit SQLAlchemy can hand the unlock a different pooled connection,
+# so the unlock succeeds against a connection that never held the lock and the
+# real holder sits idle in the pool holding it forever -- silently disabling
+# the sweep. Observed in production: held 108s by an idle connection.
+# ---------------------------------------------------------------------------
+
+
+
+def _sweep_source() -> str:
+    from app.jobs import connector_sync
+
+    return inspect.getsource(connector_sync.ConnectorSyncScheduler._run_maintenance_if_due)
+
+
+def test_maintenance_uses_transaction_scoped_lock():
+    src = _sweep_source()
+    assert "pg_try_advisory_xact_lock" in src
+    assert "pg_try_advisory_lock(" not in src, "session-scoped lock leaks across the pool"
+
+
+def test_maintenance_does_not_unlock_manually():
+    """An explicit unlock is the tell that the lock is session-scoped."""
+    assert "pg_advisory_unlock" not in _sweep_source()
+
+
+def test_escalation_sweep_uses_transaction_scoped_lock():
+    src = inspect.getsource(escalation_module.EscalationScheduler._process_due_escalations)
+    assert "pg_try_advisory_xact_lock" in src
+    assert "pg_advisory_unlock" not in src

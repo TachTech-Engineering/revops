@@ -91,25 +91,27 @@ class ConnectorSyncScheduler:
         from app.services.falco_event_buffer import purge_processed
 
         async with AsyncSessionLocal() as db:
+            # pg_try_advisory_XACT_lock, not the session-scoped variant:
+            # Postgres releases it when this transaction ends, so it cannot be
+            # leaked. The session-scoped form is bound to a *connection*, and
+            # committing before the unlock lets SQLAlchemy hand the unlock a
+            # different pooled connection -- one that never held the lock --
+            # leaving the original holder idle in the pool with the lock held
+            # forever, which silently disables the sweep.
             acquired = (
                 await db.execute(
-                    text("SELECT pg_try_advisory_lock(:lock_id)"),
+                    text("SELECT pg_try_advisory_xact_lock(:lock_id)"),
                     {"lock_id": MAINTENANCE_LOCK_ID},
                 )
             ).scalar()
             if not acquired:
                 logger.debug("Connector maintenance running on another replica; skipping")
                 return
-            try:
-                purged = await purge_processed(db)
-                await db.commit()
-                if purged:
-                    logger.info(f"Purged {purged} consumed Falco ingest event(s)")
-            finally:
-                await db.execute(
-                    text("SELECT pg_advisory_unlock(:lock_id)"),
-                    {"lock_id": MAINTENANCE_LOCK_ID},
-                )
+            purged = await purge_processed(db)
+            # Commit ends the transaction and releases the lock in one step.
+            await db.commit()
+            if purged:
+                logger.info(f"Purged {purged} consumed Falco ingest event(s)")
 
     def stop(self):
         """Stop the sync scheduler."""
