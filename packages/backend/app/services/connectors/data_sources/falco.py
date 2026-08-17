@@ -53,7 +53,10 @@ class FalcoConnector(DataSourceConnector):
             connector_type="falco",
             category=ConnectorCategory.DATA_SOURCE,
             display_name="Falco",
-            description="Falco - Runtime security alerts for containers, Kubernetes, and hosts (webhook push)",
+            description=(
+                "Falco - Runtime security alerts for containers, Kubernetes, "
+                "and hosts (webhook push)"
+            ),
             icon="falco",
             config_schema={
                 "type": "object",
@@ -91,7 +94,8 @@ class FalcoConnector(DataSourceConnector):
                         "type": "string",
                         "title": "Ingest Token",
                         "description": "Shared secret Falco must send when posting alerts "
-                        "(Authorization: Bearer header, X-Falco-Token header, or ?token= query param)",
+                        "(Authorization: Bearer header, X-Falco-Token header, "
+                        "or ?token= query param)",
                         "format": "password",
                     },
                 },

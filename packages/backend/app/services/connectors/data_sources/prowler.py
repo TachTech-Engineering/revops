@@ -42,7 +42,10 @@ class ProwlerConnector(DataSourceConnector):
             connector_type="prowler",
             category=ConnectorCategory.DATA_SOURCE,
             display_name="Prowler",
-            description="Prowler - Cloud security posture findings for AWS, Azure, GCP, and Kubernetes",
+            description=(
+                "Prowler - Cloud security posture findings for AWS, Azure, GCP, "
+                "and Kubernetes"
+            ),
             icon="prowler",
             config_schema={
                 "type": "object",
@@ -95,7 +98,9 @@ class ProwlerConnector(DataSourceConnector):
                     "api_token": {
                         "type": "string",
                         "title": "API Token",
-                        "description": "Static bearer token (used instead of email/password if set)",
+                        "description": (
+                            "Static bearer token (used instead of email/password if set)"
+                        ),
                         "format": "password",
                     },
                 },

@@ -11,10 +11,10 @@ import uuid
 
 from app.db.models import NormalizedAlert
 from app.services.connectors.data_sources.aws_security_hub import (
-    AWSSecurityHubConnector,
+    STATUS_PUSH_MAP as AWS_STATUS_MAP,
 )
 from app.services.connectors.data_sources.aws_security_hub import (
-    STATUS_PUSH_MAP as AWS_STATUS_MAP,
+    AWSSecurityHubConnector,
 )
 from app.services.connectors.data_sources.crowdstrike_falcon import (
     STATUS_PUSH_MAP as CS_STATUS_MAP,

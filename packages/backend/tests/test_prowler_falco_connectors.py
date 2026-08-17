@@ -8,6 +8,7 @@ NormalizedAlerts the sync path can persist and dedupe on external_id.
 """
 
 import uuid
+from datetime import UTC
 
 from app.services.connectors.base import get_connector_registry
 from app.services.connectors.data_sources.falco import FalcoConnector
@@ -199,7 +200,7 @@ def test_falco_priority_severity_map():
 
 
 async def test_falco_fetch_drains_buffer_and_filters_priority():
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     connector = _falco_connector(min_priority="warning")
     buffer = get_falco_event_buffer()
@@ -211,7 +212,7 @@ async def test_falco_fetch_drains_buffer_and_filters_priority():
         ],
     )
 
-    since = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    since = datetime(2020, 1, 1, tzinfo=UTC)
     alerts, cursor = await connector.fetch_alerts(since=since, limit=100)
 
     assert [a.rule_name for a in alerts] == ["Crit rule"]
@@ -224,9 +225,9 @@ async def test_falco_fetch_signals_more_when_buffer_not_drained():
     buffer = get_falco_event_buffer()
     buffer.push(connector.connector_id, [_falco_event(rule=f"rule-{i}") for i in range(3)])
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    since = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    since = datetime(2020, 1, 1, tzinfo=UTC)
     alerts, cursor = await connector.fetch_alerts(since=since, limit=2)
     assert len(alerts) == 2
     assert cursor == "more"
