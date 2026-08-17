@@ -101,6 +101,11 @@ class SyslogMessage:
     raw: str
     source_ip: str
     source_port: int
+    # The wall clock the device put in an RFC 3164 line. That format carries no
+    # timezone (RFC 3164 sec 4.1.2), so it cannot be converted to UTC without
+    # knowing the sender's zone -- `timestamp` is receipt time for those
+    # messages and this keeps the device's claim rather than discarding it.
+    device_timestamp: str | None = None
 
     @property
     def facility_name(self) -> str:
@@ -235,11 +240,39 @@ class SyslogReceiverService:
 
         # Syslog parsing patterns
         # RFC 3164 format: <PRI>TIMESTAMP HOSTNAME TAG: MESSAGE
+        #
+        # Two departures from a naive reading of the RFC, both taken from real
+        # UniFi traffic:
+        #
+        # * The hostname is often sent twice ("... DK-Lab DK-Lab earlyoom[801]:").
+        #   A relay that inserts the hostname in front of a line the origin
+        #   already stamped produces this. The repeat is matched by backreference
+        #   so only an exact duplicate is absorbed -- two genuinely different
+        #   tokens are left alone rather than one being silently swallowed.
+        # * The tag can contain '/' ("/usr/bin/unifi-mq-broker[2460]:"). The tag
+        #   is therefore "everything up to the PID bracket or the colon", not
+        #   \S+? -- which could never match at all here, because it cannot span
+        #   the space introduced by the duplicated hostname. That failure is why
+        #   every one of these lines fell through to the unparsed fallback and
+        #   was recorded with hostname "unknown".
         self._rfc3164_pattern = re.compile(
             r"<(\d+)>"  # Priority
             r"(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+"  # Timestamp
             r"(\S+)\s+"  # Hostname
-            r"(\S+?)(?:\[(\d+)\])?:\s*"  # Tag and optional PID
+            r"(?:\3\s+)?"  # Same hostname repeated by a relay
+            r"([^\s:\[]+)"  # Tag
+            r"(?:\[(\d+)\])?:\s*"  # Optional PID
+            r"(.*)"  # Message
+        )
+
+        # Same shape with no "tag:" at all. Without this a tagless line loses
+        # its hostname to the fallback, and the host filter goes blind for the
+        # device -- which is the whole point of parsing this format.
+        self._rfc3164_no_tag_pattern = re.compile(
+            r"<(\d+)>"  # Priority
+            r"(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+"  # Timestamp
+            r"(\S+)\s+"  # Hostname
+            r"(?:\3\s+)?"  # Same hostname repeated by a relay
             r"(.*)"  # Message
         )
 
@@ -446,12 +479,22 @@ class SyslogReceiverService:
                 source_port=source_port,
             )
 
-        # Try RFC 3164
+        # Try RFC 3164.
+        #
+        # `timestamp` is receipt time, NOT the parsed one. RFC 3164 timestamps
+        # carry no timezone, so a device on local time reads as its UTC offset
+        # in the past -- this network's sender is five hours behind. Those
+        # messages would then all sort older than `since` in
+        # UniFiSyslogConnector.fetch_alerts and be filtered out, silently
+        # ending alert generation. Receipt time is what this receiver can
+        # actually know; the device's claim is kept in device_timestamp.
+        # Formats that DO carry a zone (RFC 5424, UniFi CEF) still use their
+        # own timestamp above -- those are unambiguous.
         match = self._rfc3164_pattern.match(raw)
         if match:
             pri = int(match.group(1))
             return SyslogMessage(
-                timestamp=self._parse_timestamp(match.group(2)),
+                timestamp=utcnow(),
                 facility=pri >> 3,
                 severity=pri & 0x07,
                 hostname=match.group(3),
@@ -461,6 +504,24 @@ class SyslogReceiverService:
                 raw=raw,
                 source_ip=source_ip,
                 source_port=source_port,
+                device_timestamp=match.group(2),
+            )
+
+        match = self._rfc3164_no_tag_pattern.match(raw)
+        if match:
+            pri = int(match.group(1))
+            return SyslogMessage(
+                timestamp=utcnow(),
+                facility=pri >> 3,
+                severity=pri & 0x07,
+                hostname=match.group(3),
+                app_name="unknown",
+                process_id=None,
+                message=match.group(4),
+                raw=raw,
+                source_ip=source_ip,
+                source_port=source_port,
+                device_timestamp=match.group(2),
             )
 
         # Fallback: minimal parsing for standard syslog

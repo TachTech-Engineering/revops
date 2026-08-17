@@ -371,6 +371,12 @@ class UniFiSyslogConnector(DataSourceConnector):
                 message=f"Syslog receiver error: {str(e)}",
             )
 
+    @staticmethod
+    def _known(value: str | None) -> str | None:
+        """Drop the parser's "unknown" sentinel so it never reads as real data."""
+        value = (value or "").strip()
+        return value or None if value.lower() != "unknown" else None
+
     async def _store_raw_logs(self, messages: list) -> None:
         """Persist drained syslog lines. Never fails the sync."""
         if not messages:
@@ -391,16 +397,24 @@ class UniFiSyslogConnector(DataSourceConnector):
                             connector_id=self.connector_id,
                             source_type="unifi_syslog",
                             event_time=getattr(m, "timestamp", None) or utcnow(),
-                            message=(
-                                getattr(m, "raw", None) or getattr(m, "message", "")
-                            )[:100_000],
-                            host=(getattr(m, "hostname", "") or None),
+                            message=(getattr(m, "raw", None) or getattr(m, "message", ""))[
+                                :100_000
+                            ],
+                            # "unknown" is the parser's sentinel for a hostname
+                            # it could not find. Storing it as a literal makes
+                            # it look like a real host to the search filter, so
+                            # it is recorded as NULL instead.
+                            host=self._known(getattr(m, "hostname", None)),
                             source_ip=(getattr(m, "source_ip", "") or None),
                             severity=str(getattr(m, "severity", "") or "") or None,
                             attributes={
                                 "facility": getattr(m, "facility", None),
-                                "app_name": getattr(m, "app_name", None),
+                                "app_name": self._known(getattr(m, "app_name", None)),
                                 "process_id": getattr(m, "process_id", None),
+                                # Present only for RFC 3164, whose timestamps
+                                # have no timezone; event_time is receipt time
+                                # for those. See syslog_receiver._parse_message.
+                                "device_timestamp": getattr(m, "device_timestamp", None),
                             },
                         )
                         for m in messages
