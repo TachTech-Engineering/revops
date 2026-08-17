@@ -375,7 +375,9 @@ class UniFiSyslogConnector(DataSourceConnector):
     def _known(value: str | None) -> str | None:
         """Drop the parser's "unknown" sentinel so it never reads as real data."""
         value = (value or "").strip()
-        return value or None if value.lower() != "unknown" else None
+        if not value or value.lower() == "unknown":
+            return None
+        return value
 
     async def _store_raw_logs(self, messages: list) -> None:
         """Persist drained syslog lines. Never fails the sync."""
