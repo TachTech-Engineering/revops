@@ -1,15 +1,23 @@
-# NOTE: This manifest is intentionally NOT included in the base kustomization.
-# It uses emptyDir storage (data is lost on every pod reschedule) and is kept
-# only as a reference.
+# NOTE: This manifest is intentionally NOT included in the *base* kustomization.
 #
 # PRODUCTION (decision 2026-08-13): the revops namespace runs an UNMANAGED
 # in-cluster postgres (Deployment "postgres", PVC "postgres-pvc", 10Gi,
 # user/db "revops"), deployed 2026-02 and holding live data. It is deliberately
-# left out of this kustomization so a deploy can never restart or clobber the
-# database. The backend reaches it via DATABASE_URL in the backend-secrets
+# left out of the base kustomization so a deploy can never restart or clobber
+# the database. The backend reaches it via DATABASE_URL in the backend-secrets
 # Secret (postgresql+asyncpg://...@postgres:5432/revops). If it ever moves to
 # Cloud SQL, see scripts/gke-cloudsql-setup.sh and git history for the Auth
 # Proxy sidecar wiring.
+#
+# This file declared emptyDir until 2026-08-17 while production ran on a PVC.
+# It was described as "reference only", but a reference that does not match
+# reality is a trap: `kubectl apply -f` against the revops namespace would have
+# rolled the live database onto ephemeral storage and destroyed it, orphaning
+# postgres-pvc. It now declares the PVC production actually uses, so applying
+# it is a no-op rather than a data-loss event.
+#
+# The staging overlay DOES include this file, so staging gets its own
+# namePrefixed postgres (staging-postgres / staging-postgres-pvc).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -53,7 +61,21 @@ spec:
               mountPath: /var/lib/postgresql/data
       volumes:
         - name: postgres-data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: postgres-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  # standard-rwo supports volume expansion, so this can be grown in place.
+  storageClassName: standard-rwo
 ---
 apiVersion: v1
 kind: Service

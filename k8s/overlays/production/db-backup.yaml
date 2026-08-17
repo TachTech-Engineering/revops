@@ -2,7 +2,7 @@
 #
 # Production-only: the database this backs up (Deployment "postgres", PVC
 # "postgres-pvc") exists only in the revops namespace and is deliberately not
-# managed by kustomize (see k8s/base/postgres-deployment.yaml).
+# managed by kustomize (see k8s/base/postgres/postgres-deployment.yaml).
 #
 # GCP prerequisites (bucket, GSA, Workload Identity binding) are provisioned
 # by scripts/gke-backup-setup.sh. The bucket has a 30-day lifecycle delete
@@ -51,7 +51,7 @@ spec:
           # a complete, successful dump.
           initContainers:
             - name: dump
-              # Same pinned image as k8s/base/postgres-deployment.yaml.
+              # Same pinned image as k8s/base/postgres/postgres-deployment.yaml.
               image: postgres:15-alpine@sha256:3d0f7584ed7d04e27fa050d6683a74746608faf21f202be78460d679cc56461f
               command: ["sh", "-ec"]
               args:

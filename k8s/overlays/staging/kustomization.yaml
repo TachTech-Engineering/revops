@@ -1,3 +1,7 @@
+# Staging overlay.
+#
+# NOTE: prefer editing this file by hand. `kustomize edit set image` rewrites it
+# and detaches every comment from the thing it describes.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -5,52 +9,111 @@ namespace: revops-staging
 
 resources:
   - ../../base
+  # Staging runs its own database. The base kustomization deliberately excludes
+  # postgres so a production deploy can never restart the live one, but staging
+  # has no data to protect and wants a database it owns -- namePrefix turns it
+  # into staging-postgres / staging-postgres-pvc.
+  - ../../base/postgres
 
 namePrefix: staging-
 
 patches:
   - path: frontend-patch.yaml
   - path: backend-patch.yaml
-  # Staging serves a single host; the managed cert covers only it.
-  - target:
-      kind: ManagedCertificate
-      name: revops-cert
-    patch: |-
-      - op: replace
-        path: /spec/domains
-        value:
-          - staging.ttrevops.com
-  # namePrefix renames the cert/FrontendConfig objects to staging-*, but the
-  # ingress annotation values that reference them are not auto-rewritten, so
-  # point them at the prefixed names explicitly.
+  # Fresh persistent disks arrive with a lost+found, which initdb refuses to
+  # initialise into. See postgres-patch.yaml for why this is not in the base.
+  - path: postgres-patch.yaml
+
+  # --- Everything below is REMOVED from staging, not reconfigured. ---
+  #
+  # The base Ingress claims the *production* global static IP
+  # (panther-dashboard-ip). A second Ingress asking for the same address does
+  # not get its own -- it fights production for it. Staging is therefore
+  # cluster-internal: reach it with
+  #   kubectl port-forward -n revops-staging svc/staging-frontend 8080:80
+  #
+  # Giving staging a real hostname needs three things this project does not
+  # have yet: a staging.ttrevops.com DNS record (ttrevops.com is not in Cloud
+  # DNS, so it is managed outside this project), its own global static IP, and
+  # an IAP OAuth client for the new host. Until then a public Ingress here
+  # would provision a load balancer that can never serve traffic, and a
+  # ManagedCertificate that can never validate.
   - target:
       kind: Ingress
       name: revops-ingress
     patch: |-
-      - op: replace
-        path: /metadata/annotations/networking.gke.io~1managed-certificates
-        value: staging-revops-cert
-      - op: replace
-        path: /metadata/annotations/networking.gke.io~1v1beta1.FrontendConfig
-        value: staging-revops-frontend-config
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: revops-ingress
+  - target:
+      kind: ManagedCertificate
+      name: revops-cert
+    patch: |-
+      $patch: delete
+      apiVersion: networking.gke.io/v1
+      kind: ManagedCertificate
+      metadata:
+        name: revops-cert
+  - target:
+      kind: FrontendConfig
+      name: revops-frontend-config
+    patch: |-
+      $patch: delete
+      apiVersion: networking.gke.io/v1beta1
+      kind: FrontendConfig
+      metadata:
+        name: revops-frontend-config
+  # IAP fronts the load balancer; with no Ingress there is nothing to protect,
+  # and the BackendConfig references an oauth secret that does not exist here.
+  - target:
+      kind: BackendConfig
+      name: iap-config
+    patch: |-
+      $patch: delete
+      apiVersion: cloud.google.com/v1
+      kind: BackendConfig
+      metadata:
+        name: iap-config
+  # type: LoadBalancer -- would allocate a second billed forwarding rule to
+  # receive syslog nothing sends. Staging tests the app, not the listener.
+  - target:
+      kind: Service
+      name: syslog-ingress
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: syslog-ingress
+  # The services carry a production BackendConfig annotation naming iap-config;
+  # namePrefix does not rewrite annotation values, and the object is gone here.
+  - target:
+      kind: Service
+      name: backend
+    patch: |-
+      - op: remove
+        path: /metadata/annotations/cloud.google.com~1backend-config
+  - target:
+      kind: Service
+      name: frontend
+    patch: |-
+      - op: remove
+        path: /metadata/annotations/cloud.google.com~1backend-config
 
-# NOTE: staging is NOT currently stood up. Standing it up requires, in the
-# revops-staging namespace: a database (its own postgres or Cloud SQL -- the
-# base no longer wires the Auth Proxy sidecar), the backend-secrets and
-# backend-encryption-key Secrets, an iap-secret + a patch renaming the
-# services' backend-config annotation to staging-iap-config (namePrefix does
-# not rewrite annotation values), and a staging.ttrevops.com DNS A record.
 configMapGenerator:
   - name: backend-config
     behavior: merge
     literals:
       - LOG_LEVEL=DEBUG
-      - CORS_ORIGINS=https://staging.ttrevops.com
+      # No public origin yet; the port-forward host is what a browser sees.
+      - CORS_ORIGINS=http://localhost:8080
       - ENVIRONMENT=staging
-      - PUBLIC_BASE_URL=https://staging.ttrevops.com
+      - PUBLIC_BASE_URL=http://localhost:8080
 
 images:
-  - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend
-    newTag: staging
   - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-backend
-    newTag: staging
+    newTag: aafbbfb
+  - name: us-docker.pkg.dev/revops-486917/gcr.io/panther-dashboard-frontend
+    newTag: aafbbfb

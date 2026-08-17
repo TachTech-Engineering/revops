@@ -1,0 +1,12 @@
+# In-cluster postgres, in its own directory so overlays can opt in by
+# referencing this directory. Kustomize refuses to pull in a single file from
+# outside an overlay, and the base kustomization deliberately does NOT include
+# this -- a production deploy must never restart the live database.
+#
+# Production's postgres is unmanaged (applied by hand, 2026-02). Staging
+# includes this, so it gets staging-postgres / staging-postgres-pvc.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - postgres-deployment.yaml

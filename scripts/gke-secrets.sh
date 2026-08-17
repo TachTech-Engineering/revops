@@ -28,20 +28,33 @@ source "$SCRIPT_DIR/gke-env.sh"
 echo "=== Setting up secrets (project: $PROJECT_ID) ==="
 echo ""
 
-# Check if .env file exists
-if [ ! -f ".env" ]; then
-    echo "ERROR: .env file not found!"
-    echo "Please create .env file with your Panther credentials first."
-    exit 1
-fi
+# Which namespaces to write. Defaults to both for backwards compatibility, but
+# a rebuild or a staging refresh should name its target: this script overwrites
+# backend-secrets wholesale, so running it unqualified to set up staging would
+# also rewrite production's secrets from whatever is in .env.
+TARGET="${1:-both}"
+case "$TARGET" in
+    production) TARGET_NAMESPACES=("$PROD_NAMESPACE") ;;
+    staging)    TARGET_NAMESPACES=("$STAGING_NAMESPACE") ;;
+    both)       TARGET_NAMESPACES=("$PROD_NAMESPACE" "$STAGING_NAMESPACE") ;;
+    *)
+        echo "Usage: $0 [production|staging|both]   (default: both)" >&2
+        exit 1
+        ;;
+esac
+echo "Target namespace(s): ${TARGET_NAMESPACES[*]}"
+echo ""
 
-# Source the .env file
-source .env
-
-# Validate required variables
-if [ -z "${PANTHER_API_HOST:-}" ] || [ -z "${PANTHER_API_TOKEN:-}" ]; then
-    echo "ERROR: PANTHER_API_HOST and PANTHER_API_TOKEN must be set in .env"
-    exit 1
+# .env is optional. It used to be mandatory, which meant recovery depended on a
+# file that is not in the repository -- exactly the thing you do not have after
+# losing a machine. Everything it supplies is also in Secret Manager (see
+# ./scripts/backup-cluster-secrets.sh), so a rebuild can run from that alone.
+if [ -f ".env" ]; then
+    # shellcheck disable=SC1091
+    source .env
+    echo "Loaded .env"
+else
+    echo "No .env found; falling back to Secret Manager for all values."
 fi
 
 # DATABASE_URL resolution order (per namespace), so staging and production can
@@ -76,6 +89,18 @@ sm_value() {
 # against an existing database is destructive: SECRET_KEY invalidates every
 # issued token, and ENCRYPTION_KEY makes stored connector credentials
 # permanently undecryptable.
+if [ -z "${PANTHER_API_HOST:-}" ]; then
+    PANTHER_API_HOST="$(sm_value panther-api-host)"
+fi
+if [ -z "${PANTHER_API_TOKEN:-}" ]; then
+    PANTHER_API_TOKEN="$(sm_value panther-api-token)"
+fi
+if [ -z "${PANTHER_API_HOST:-}" ] || [ -z "${PANTHER_API_TOKEN:-}" ]; then
+    echo "ERROR: PANTHER_API_HOST and PANTHER_API_TOKEN must be available" >&2
+    echo "  from .env or Secret Manager (panther-api-host / panther-api-token)." >&2
+    exit 1
+fi
+
 if [ -z "${SECRET_KEY:-}" ]; then
     SECRET_KEY="$(sm_value jwt-secret-key)"
 fi
@@ -128,13 +153,14 @@ fi
 
 echo ""
 echo "2. Creating Kubernetes namespaces..."
-kubectl create namespace "$PROD_NAMESPACE" 2>/dev/null || echo "  - Namespace $PROD_NAMESPACE exists"
-kubectl create namespace "$STAGING_NAMESPACE" 2>/dev/null || echo "  - Namespace $STAGING_NAMESPACE exists"
+for ns in "${TARGET_NAMESPACES[@]}"; do
+    kubectl create namespace "$ns" 2>/dev/null || echo "  - Namespace $ns exists"
+done
 
 echo ""
 echo "3. Creating Kubernetes secrets..."
 
-for ns in "$PROD_NAMESPACE" "$STAGING_NAMESPACE"; do
+for ns in "${TARGET_NAMESPACES[@]}"; do
     if [ "$ns" == "$STAGING_NAMESPACE" ]; then
         DB_SECRET_ID="${DATABASE_URL_SECRET}-staging"
     else
@@ -146,12 +172,16 @@ for ns in "$PROD_NAMESPACE" "$STAGING_NAMESPACE"; do
         echo "  Run ./scripts/gke-cloudsql-setup.sh first, or set DATABASE_URL in .env." >&2
         exit 1
     fi
-    # DATABASE_PASSWORD must match the password inside DATABASE_URL: the
-    # in-cluster postgres is initialised from it. Derive it from the URL when
-    # it was not supplied, rather than letting the two drift apart.
-    NS_DB_PASSWORD="${DATABASE_PASSWORD:-}"
+    # DATABASE_PASSWORD must match the password inside this namespace's
+    # DATABASE_URL: the in-cluster postgres is initialised from it, and a
+    # mismatch means the database rejects every connection the backend makes.
+    #
+    # The URL wins over the ambient DATABASE_PASSWORD, which is resolved once
+    # and is therefore production's. Preferring it would hand staging
+    # production's password while staging's URL carried a different one.
+    NS_DB_PASSWORD="$(printf '%s' "$NS_DB_URL" | sed -n 's|^[^:]*://[^:]*:\([^@]*\)@.*|\1|p')"
     if [ -z "$NS_DB_PASSWORD" ]; then
-        NS_DB_PASSWORD="$(printf '%s' "$NS_DB_URL" | sed -n 's|^[^:]*://[^:]*:\([^@]*\)@.*|\1|p')"
+        NS_DB_PASSWORD="${DATABASE_PASSWORD:-}"
     fi
     if [ -z "$NS_DB_PASSWORD" ]; then
         echo "ERROR: could not determine DATABASE_PASSWORD for namespace '$ns'." >&2

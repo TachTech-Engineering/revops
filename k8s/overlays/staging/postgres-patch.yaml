@@ -1,0 +1,24 @@
+# Fresh persistent disks are not empty: GCE PD formats them ext4, which creates
+# a lost+found directory, and initdb refuses to initialise a data directory that
+# already has contents. Pointing PGDATA at a subdirectory of the mount is the
+# standard fix, and it is required for ANY new install.
+#
+# This lives in the staging overlay rather than the base on purpose. Production's
+# volume was initialised in 2026-02 with the cluster directly at the mount point,
+# so its data is at /var/lib/postgresql/data. Setting PGDATA to a subdirectory
+# there would point postgres at an empty directory, initdb a second, blank
+# cluster beside the real one, and serve an apparently-empty database while the
+# actual data sat untouched one level up. The base manifest therefore stays
+# faithful to production, and every fresh install takes this patch.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+spec:
+  template:
+    spec:
+      containers:
+        - name: postgres
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata

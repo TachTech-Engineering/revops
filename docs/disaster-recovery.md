@@ -84,11 +84,22 @@ throwaway Postgres 15 container. `pg_restore` exited 0 with no errors: 75
 tables, 191,673 alerts, users/orgs/connectors intact, schema at
 `c1d4e7f20a83`. The restore path works; it had never been exercised before.
 
-Not yet verified: a full cluster rebuild from scratch. The secret half of that
-was broken until 2026-08-17 — `gke-secrets.sh` created neither
-`DATABASE_PASSWORD` (required by the in-cluster postgres) nor the
-`backend-encryption-key` Secret at all, so it could not have stood a cluster
-back up. Both are fixed, but the end-to-end rebuild has not been rehearsed.
+**2026-08-17** — rehearsed the rebuild by standing up the `revops-staging`
+namespace from nothing: secrets created from Secret Manager alone with no
+`.env` present, its own postgres on a fresh volume, and the schema migrated
+from empty to head (87 tables, matching production exactly). The application
+then served traffic and completed a register → token → authenticated-request
+cycle.
+
+That rehearsal found five defects that would otherwise have surfaced during an
+actual outage — including a `postgres-deployment.yaml` that would have
+destroyed the production database if applied, and a postgres that could not
+initialise a fresh disk at all. All five are fixed; see `docs/staging.md`.
+
+Still not rehearsed: a rebuild into a *different* cluster or project. The
+exercise above reused the existing cluster, so cluster creation, Workload
+Identity bindings, IAP setup, and the ingress/certificate path remain
+untested.
 
 ## Keeping this true
 
