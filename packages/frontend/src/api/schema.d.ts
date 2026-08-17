@@ -2602,6 +2602,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ingest/falco/{connector_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Falco Alerts
+         * @description Accept Falco alerts (single object or list) and buffer them for sync.
+         */
+        post: operations["ingest_falco_alerts_api_v1_ingest_falco__connector_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ioc/search": {
         parameters: {
             query?: never;
@@ -6378,6 +6398,13 @@ export interface components {
             /** Failed */
             failed: {
                 [key: string]: string;
+            }[];
+            /**
+             * Source Sync
+             * @default []
+             */
+            source_sync: {
+                [key: string]: unknown;
             }[];
             /** Success */
             success: string[];
@@ -15727,6 +15754,39 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_falco_alerts_api_v1_ingest_falco__connector_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
                     };
                 };
             };
