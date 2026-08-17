@@ -58,6 +58,11 @@ PUBLIC_ROUTES: set[tuple[str, str]] = {
     ("POST", "/api/v1/twilio/voice/alert"),
     ("POST", "/api/v1/twilio/voice/response"),
     ("POST", "/api/v1/twilio/sms/response"),
+    # Falco ingest webhook (app/api/v1/falco_ingest.py) cannot carry a JWT
+    # (Falco/Falcosidekick call it directly); it is authenticated by a
+    # per-connector shared ingest token (401 on missing/invalid token), so it
+    # is intentionally exempt from the JWT default-deny sweep.
+    ("POST", "/api/v1/ingest/falco/{connector_id}"),
 }
 
 _PARAM_RE = re.compile(r"{([^}:]+)(?::[^}]+)?}")

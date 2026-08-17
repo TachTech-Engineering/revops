@@ -42,7 +42,8 @@ Supported integrations organized by category:
 |----------|------------|
 | **SIEM** | Panther, Google SecOps, Splunk, Microsoft Sentinel, Elastic, Sumo Logic |
 | **EDR/XDR** | CrowdStrike Falcon, SentinelOne, Microsoft Defender XDR, Carbon Black |
-| **Cloud Security** | AWS Security Hub, AWS GuardDuty, GCP Security Command Center, Azure Defender, Wiz |
+| **Cloud Security** | AWS Security Hub, AWS GuardDuty, GCP Security Command Center, Azure Defender, Wiz, Prowler |
+| **Runtime Security** | Falco (webhook push via http_output or Falcosidekick) |
 | **Identity** | Okta, Microsoft Entra ID, CrowdStrike Identity Protection |
 | **Network** | Cloudflare, UniFi Network |
 

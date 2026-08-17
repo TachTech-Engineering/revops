@@ -26,6 +26,7 @@ const dataSourceCategories: Record<string, string> = {
   sentinelone: 'EDR',
   microsoft_defender: 'EDR',
   carbon_black: 'EDR',
+  falco: 'EDR',
   // XDR
   cortex_xdr: 'XDR',
   trend_vision_one: 'XDR',
@@ -36,6 +37,7 @@ const dataSourceCategories: Record<string, string> = {
   azure_defender: 'Cloud Security',
   wiz: 'Cloud Security',
   orca: 'Cloud Security',
+  prowler: 'Cloud Security',
   // Identity
   okta: 'Identity',
   entra_id: 'Identity',

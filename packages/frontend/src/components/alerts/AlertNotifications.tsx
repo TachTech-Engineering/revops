@@ -38,11 +38,44 @@ const severityConfig = {
   },
 }
 
+const toastIcon = (file: string, alt: string) => (
+  <img src={`/icons/${file}`} alt={alt} className="w-full h-full object-contain rounded" />
+)
+
 const sourceIcons: Record<string, React.ReactNode> = {
-  cloudflare: <img src="/icons/cloudflare-v2.png" alt="Cloudflare" className="w-full h-full object-contain" />,
-  crowdstrike_falcon: <img src="/icons/crowdstrike.png" alt="CrowdStrike" className="w-full h-full object-contain" />,
   panther: <PantherLogo size={16} />,
-  okta: <span className="text-xs">🔐</span>,
+  google_secops: toastIcon('google-cloud.png', 'Google SecOps'),
+  splunk: toastIcon('splunk.png', 'Splunk'),
+  sentinel: toastIcon('azure.png', 'Sentinel'),
+  elastic: toastIcon('elastic.png', 'Elastic'),
+  sumo_logic: toastIcon('sumologic.png', 'Sumo Logic'),
+  crowdstrike_falcon: toastIcon('crowdstrike.png', 'CrowdStrike'),
+  sentinelone: toastIcon('sentinelone.png', 'SentinelOne'),
+  microsoft_defender: toastIcon('microsoft.png', 'Microsoft Defender'),
+  carbon_black: toastIcon('carbonblack.png', 'Carbon Black'),
+  falco: toastIcon('falco.png', 'Falco'),
+  cortex_xdr: toastIcon('paloalto.png', 'Cortex XDR'),
+  trend_vision_one: toastIcon('trendmicro.png', 'Trend Vision One'),
+  aws_security_hub: toastIcon('aws.png', 'AWS Security Hub'),
+  aws_guardduty: toastIcon('aws.png', 'AWS GuardDuty'),
+  gcp_scc: toastIcon('google-cloud.png', 'GCP Security Command Center'),
+  azure_defender: toastIcon('azure.png', 'Azure Defender'),
+  wiz: toastIcon('wiz.png', 'Wiz'),
+  orca: toastIcon('orca.png', 'Orca'),
+  prowler: toastIcon('prowler.png', 'Prowler'),
+  okta: toastIcon('okta.png', 'Okta'),
+  entra_id: toastIcon('microsoft.png', 'Microsoft Entra ID'),
+  azure_ad_identity: toastIcon('microsoft.png', 'Azure AD Identity'),
+  crowdstrike_identity: toastIcon('crowdstrike.png', 'CrowdStrike Identity'),
+  proofpoint: toastIcon('proofpoint.png', 'Proofpoint'),
+  mimecast: toastIcon('mimecast.png', 'Mimecast'),
+  microsoft_defender_email: toastIcon('microsoft.png', 'Defender for Office 365'),
+  cloudflare: toastIcon('cloudflare-v2.png', 'Cloudflare'),
+  darktrace: toastIcon('darktrace.png', 'Darktrace'),
+  vectra: toastIcon('vectra.png', 'Vectra'),
+  unifi: toastIcon('ubiquiti.png', 'UniFi Network'),
+  unifi_api: toastIcon('ubiquiti.png', 'UniFi Network'),
+  unifi_syslog: toastIcon('ubiquiti.png', 'UniFi Network'),
 }
 
 interface Toast {

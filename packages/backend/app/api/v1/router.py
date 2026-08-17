@@ -18,6 +18,7 @@ from app.api.v1 import (
     enrichment,
     escalation,
     executive_summary,
+    falco_ingest,
     # Other
     feeds,
     fonoster,
@@ -145,6 +146,7 @@ api_router.include_router(escalation.router, prefix="/escalation-policies", tags
 api_router.include_router(trend_analytics.router, prefix="/analytics", tags=["trend-analytics"])
 api_router.include_router(fonoster.router, prefix="/fonoster", tags=["fonoster"])
 api_router.include_router(twilio_webhook.router, prefix="/twilio", tags=["twilio-webhook"])
+api_router.include_router(falco_ingest.router, prefix="/ingest", tags=["falco-ingest"])
 
 # SOC Collaboration Features
 api_router.include_router(presence.router, prefix="/presence", tags=["presence"])

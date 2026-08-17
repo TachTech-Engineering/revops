@@ -18,7 +18,16 @@ from app.services.connectors.base import (
     ConnectionTestResult,
     ConnectorMetadata,
     DataSourceConnector,
+    StatusPushResult,
 )
+
+# RevOps normalized status -> CrowdStrike Alerts API status
+STATUS_PUSH_MAP = {
+    "open": "new",
+    "acknowledged": "in_progress",
+    "resolved": "closed",
+    "closed": "closed",
+}
 
 
 class CrowdStrikeFalconConnector(DataSourceConnector):
@@ -54,6 +63,13 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
                             "https://api.laggar.gcw.crowdstrike.com",
                         ],
                         "default": "https://api.crowdstrike.com",
+                    },
+                    "two_way_sync": {
+                        "type": "boolean",
+                        "title": "Two-Way Sync",
+                        "description": "Push RevOps status changes back to CrowdStrike "
+                        "(requires 'Alerts: Write' API scope)",
+                        "default": True,
                     },
                 },
                 "required": ["base_url"],
@@ -411,3 +427,65 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
             "closed": "closed",
         }
         return status_map.get(source_status.lower(), "open")
+
+    async def push_status_update(self, alert, new_status: str) -> StatusPushResult:
+        """Push a status change back to CrowdStrike via the Alerts API v3."""
+        cs_status = STATUS_PUSH_MAP.get(new_status)
+        if not cs_status:
+            return StatusPushResult(
+                supported=False,
+                success=False,
+                message=f"No CrowdStrike status equivalent for '{new_status}'",
+            )
+
+        try:
+            token = await self._get_access_token()
+            base_url = self.config.get("base_url", "https://api.crowdstrike.com")
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.patch(
+                    f"{base_url}/alerts/entities/alerts/v3",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "composite_ids": [alert.external_id],
+                        "action_parameters": [
+                            {"name": "update_status", "value": cs_status}
+                        ],
+                    },
+                )
+
+            if response.status_code == 200:
+                return StatusPushResult(
+                    supported=True,
+                    success=True,
+                    message=f"CrowdStrike alert set to '{cs_status}'",
+                )
+            if response.status_code == 403:
+                return StatusPushResult(
+                    supported=True,
+                    success=False,
+                    message="Access denied - API client needs 'Alerts: Write' scope",
+                )
+
+            error_detail = ""
+            try:
+                error_data = response.json()
+                if "errors" in error_data:
+                    error_detail = f": {error_data['errors']}"
+            except Exception:
+                pass
+            return StatusPushResult(
+                supported=True,
+                success=False,
+                message=f"CrowdStrike returned status {response.status_code}{error_detail}",
+            )
+
+        except Exception as e:
+            return StatusPushResult(
+                supported=True,
+                success=False,
+                message=f"Failed to update CrowdStrike alert: {str(e)}",
+            )

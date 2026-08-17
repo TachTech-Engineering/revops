@@ -38,44 +38,51 @@ const statusConfig: Record<string, { color: string; label: string }> = {
   closed: { color: 'bg-gray-500/20 text-gray-400', label: 'Closed' },
 }
 
+const sourceIcon = (file: string, alt: string) => (
+  <img src={`/icons/${file}`} alt={alt} className="w-5 h-5 object-contain rounded" />
+)
+
 const sourceTypeConfig: Record<string, { label: string; icon: string | ReactNode; category: string }> = {
   // SIEM
   panther: { label: 'Panther', icon: <PantherLogo size={20} />, category: 'SIEM' },
-  google_secops: { label: 'Google SecOps', icon: '🔵', category: 'SIEM' },
-  splunk: { label: 'Splunk', icon: '🟢', category: 'SIEM' },
-  sentinel: { label: 'Sentinel', icon: '🔷', category: 'SIEM' },
-  elastic: { label: 'Elastic', icon: '🟡', category: 'SIEM' },
-  sumo_logic: { label: 'Sumo Logic', icon: '🟣', category: 'SIEM' },
+  google_secops: { label: 'Google SecOps', icon: sourceIcon('google-cloud.png', 'Google SecOps'), category: 'SIEM' },
+  splunk: { label: 'Splunk', icon: sourceIcon('splunk.png', 'Splunk'), category: 'SIEM' },
+  sentinel: { label: 'Sentinel', icon: sourceIcon('azure.png', 'Sentinel'), category: 'SIEM' },
+  elastic: { label: 'Elastic', icon: sourceIcon('elastic.png', 'Elastic'), category: 'SIEM' },
+  sumo_logic: { label: 'Sumo Logic', icon: sourceIcon('sumologic.png', 'Sumo Logic'), category: 'SIEM' },
   // EDR
-  crowdstrike_falcon: { label: 'CrowdStrike Falcon', icon: <img src="/icons/crowdstrike.png" alt="CrowdStrike" className="w-5 h-5 object-contain" />, category: 'EDR' },
-  sentinelone: { label: 'SentinelOne', icon: '🟣', category: 'EDR' },
-  microsoft_defender: { label: 'Microsoft Defender', icon: '🛡️', category: 'EDR' },
-  carbon_black: { label: 'Carbon Black', icon: '⬛', category: 'EDR' },
+  crowdstrike_falcon: { label: 'CrowdStrike Falcon', icon: sourceIcon('crowdstrike.png', 'CrowdStrike'), category: 'EDR' },
+  sentinelone: { label: 'SentinelOne', icon: sourceIcon('sentinelone.png', 'SentinelOne'), category: 'EDR' },
+  microsoft_defender: { label: 'Microsoft Defender', icon: sourceIcon('microsoft.png', 'Microsoft Defender'), category: 'EDR' },
+  carbon_black: { label: 'Carbon Black', icon: sourceIcon('carbonblack.png', 'Carbon Black'), category: 'EDR' },
+  falco: { label: 'Falco', icon: sourceIcon('falco.png', 'Falco'), category: 'EDR' },
   // XDR
-  cortex_xdr: { label: 'Cortex XDR', icon: '🔶', category: 'XDR' },
-  trend_vision_one: { label: 'Trend Vision One', icon: '🔺', category: 'XDR' },
+  cortex_xdr: { label: 'Cortex XDR', icon: sourceIcon('paloalto.png', 'Cortex XDR'), category: 'XDR' },
+  trend_vision_one: { label: 'Trend Vision One', icon: sourceIcon('trendmicro.png', 'Trend Vision One'), category: 'XDR' },
   // Cloud Security
-  aws_security_hub: { label: 'AWS Security Hub', icon: '🟠', category: 'Cloud' },
-  aws_guardduty: { label: 'AWS GuardDuty', icon: '🟠', category: 'Cloud' },
-  gcp_scc: { label: 'GCP Security Command Center', icon: '🔵', category: 'Cloud' },
-  azure_defender: { label: 'Azure Defender', icon: '🔷', category: 'Cloud' },
-  wiz: { label: 'Wiz', icon: '💎', category: 'Cloud' },
-  orca: { label: 'Orca', icon: '🐋', category: 'Cloud' },
+  aws_security_hub: { label: 'AWS Security Hub', icon: sourceIcon('aws.png', 'AWS Security Hub'), category: 'Cloud' },
+  aws_guardduty: { label: 'AWS GuardDuty', icon: sourceIcon('aws.png', 'AWS GuardDuty'), category: 'Cloud' },
+  gcp_scc: { label: 'GCP Security Command Center', icon: sourceIcon('google-cloud.png', 'GCP Security Command Center'), category: 'Cloud' },
+  azure_defender: { label: 'Azure Defender', icon: sourceIcon('azure.png', 'Azure Defender'), category: 'Cloud' },
+  wiz: { label: 'Wiz', icon: sourceIcon('wiz.png', 'Wiz'), category: 'Cloud' },
+  orca: { label: 'Orca', icon: sourceIcon('orca.png', 'Orca'), category: 'Cloud' },
+  prowler: { label: 'Prowler', icon: sourceIcon('prowler.png', 'Prowler'), category: 'Cloud' },
   // Identity
-  okta: { label: 'Okta', icon: '🔐', category: 'Identity' },
-  entra_id: { label: 'Microsoft Entra ID', icon: '🔷', category: 'Identity' },
-  azure_ad_identity: { label: 'Azure AD Identity', icon: '🔷', category: 'Identity' },
-  crowdstrike_identity: { label: 'CrowdStrike Identity', icon: '🔴', category: 'Identity' },
+  okta: { label: 'Okta', icon: sourceIcon('okta.png', 'Okta'), category: 'Identity' },
+  entra_id: { label: 'Microsoft Entra ID', icon: sourceIcon('microsoft.png', 'Microsoft Entra ID'), category: 'Identity' },
+  azure_ad_identity: { label: 'Azure AD Identity', icon: sourceIcon('microsoft.png', 'Azure AD Identity'), category: 'Identity' },
+  crowdstrike_identity: { label: 'CrowdStrike Identity', icon: sourceIcon('crowdstrike.png', 'CrowdStrike Identity'), category: 'Identity' },
   // Email Security
-  proofpoint: { label: 'Proofpoint', icon: '📧', category: 'Email' },
-  mimecast: { label: 'Mimecast', icon: '📨', category: 'Email' },
-  microsoft_defender_email: { label: 'Defender for Office 365', icon: '📬', category: 'Email' },
+  proofpoint: { label: 'Proofpoint', icon: sourceIcon('proofpoint.png', 'Proofpoint'), category: 'Email' },
+  mimecast: { label: 'Mimecast', icon: sourceIcon('mimecast.png', 'Mimecast'), category: 'Email' },
+  microsoft_defender_email: { label: 'Defender for Office 365', icon: sourceIcon('microsoft.png', 'Defender for Office 365'), category: 'Email' },
   // Network Security
-  cloudflare: { label: 'Cloudflare', icon: '🟠', category: 'Network' },
-  darktrace: { label: 'Darktrace', icon: '🌐', category: 'Network' },
-  vectra: { label: 'Vectra', icon: '📡', category: 'Network' },
-  unifi_api: { label: 'UniFi Network', icon: '📶', category: 'Network' },
-  unifi_syslog: { label: 'UniFi Network (Syslog)', icon: '📶', category: 'Network' },
+  cloudflare: { label: 'Cloudflare', icon: sourceIcon('cloudflare-v2.png', 'Cloudflare'), category: 'Network' },
+  darktrace: { label: 'Darktrace', icon: sourceIcon('darktrace.png', 'Darktrace'), category: 'Network' },
+  vectra: { label: 'Vectra', icon: sourceIcon('vectra.png', 'Vectra'), category: 'Network' },
+  unifi: { label: 'UniFi Network', icon: sourceIcon('ubiquiti.png', 'UniFi Network'), category: 'Network' },
+  unifi_api: { label: 'UniFi Network', icon: sourceIcon('ubiquiti.png', 'UniFi Network'), category: 'Network' },
+  unifi_syslog: { label: 'UniFi Network (Syslog)', icon: sourceIcon('ubiquiti.png', 'UniFi Network (Syslog)'), category: 'Network' },
 }
 
 type AlertTab = 'active' | 'resolved'

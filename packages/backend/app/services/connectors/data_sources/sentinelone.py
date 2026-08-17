@@ -17,7 +17,15 @@ from app.services.connectors.base import (
     ConnectionTestResult,
     ConnectorMetadata,
     DataSourceConnector,
+    StatusPushResult,
 )
+
+# RevOps normalized status -> SentinelOne threat action endpoint
+STATUS_PUSH_ENDPOINTS = {
+    "open": "/web/api/v2.1/threats/mark-as-unresolved",
+    "resolved": "/web/api/v2.1/threats/mark-as-resolved",
+    "closed": "/web/api/v2.1/threats/mark-as-resolved",
+}
 
 
 class SentinelOneConnector(DataSourceConnector):
@@ -83,6 +91,13 @@ class SentinelOneConnector(DataSourceConnector):
                         "type": "boolean",
                         "title": "Include Alerts",
                         "description": "Also fetch alerts (in addition to threats)",
+                        "default": True,
+                    },
+                    "two_way_sync": {
+                        "type": "boolean",
+                        "title": "Two-Way Sync",
+                        "description": "Push RevOps status changes back to SentinelOne "
+                        "(marks threats resolved/unresolved)",
                         "default": True,
                     },
                 },
@@ -357,3 +372,61 @@ class SentinelOneConnector(DataSourceConnector):
             "resolved": "resolved",
         }
         return status_map.get(mitigation_status.lower(), "open")
+
+    async def push_status_update(self, alert, new_status: str) -> StatusPushResult:
+        """Push a status change back to SentinelOne (threats only)."""
+        # Only threats have resolve/unresolve state; S1 alerts fetched via
+        # include_alerts have no equivalent API and carry no threatInfo.
+        if "threatInfo" not in (alert.raw_data or {}):
+            return StatusPushResult(
+                supported=False,
+                success=False,
+                message="SentinelOne status push-back only applies to threats",
+            )
+
+        endpoint = STATUS_PUSH_ENDPOINTS.get(new_status)
+        if not endpoint:
+            return StatusPushResult(
+                supported=False,
+                success=False,
+                message=f"No SentinelOne status equivalent for '{new_status}'",
+            )
+
+        try:
+            base_url = self._get_base_url()
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{base_url}{endpoint}",
+                    headers=self._get_headers(),
+                    json={"filter": {"ids": [alert.external_id]}},
+                )
+
+            if response.status_code == 200:
+                affected = response.json().get("data", {}).get("affected", 0)
+                action = "unresolved" if new_status == "open" else "resolved"
+                if affected:
+                    return StatusPushResult(
+                        supported=True,
+                        success=True,
+                        message=f"SentinelOne threat marked as {action}",
+                    )
+                return StatusPushResult(
+                    supported=True,
+                    success=False,
+                    message=f"SentinelOne accepted the request but no threat "
+                    f"matched id {alert.external_id} (already {action}?)",
+                )
+
+            return StatusPushResult(
+                supported=True,
+                success=False,
+                message=f"SentinelOne returned status {response.status_code}: "
+                f"{response.text[:200]}",
+            )
+
+        except Exception as e:
+            return StatusPushResult(
+                supported=True,
+                success=False,
+                message=f"Failed to update SentinelOne threat: {str(e)}",
+            )

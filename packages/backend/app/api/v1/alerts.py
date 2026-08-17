@@ -32,6 +32,10 @@ class BulkUpdateRequest(BaseModel):
 class BulkUpdateResult(BaseModel):
     success: list[str]
     failed: list[dict[str, str]]
+    # Per-alert outcome of pushing the status change to the source tool
+    # (only populated for status actions; alerts whose source doesn't support
+    # push-back are omitted)
+    source_sync: list[dict[str, Any]] = []
 
 
 class PaginatedResponse(BaseModel):
@@ -191,8 +195,18 @@ async def update_alert(
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
 
+    source_sync = None
     if update.status:
-        alert.status = update.status.lower()
+        new_status = update.status.lower()
+        status_changed = alert.status != new_status
+        alert.status = new_status
+
+        # Two-way sync: best-effort push to the source tool; the local update
+        # stands regardless, and the outcome is reported in the response.
+        if status_changed:
+            from app.services.alert_status_sync import push_alert_status_to_source
+
+            source_sync = await push_alert_status_to_source(db, alert, new_status)
 
     await db.flush()
     await db.refresh(alert)
@@ -201,6 +215,7 @@ async def update_alert(
         "id": str(alert.id),
         "status": alert.status.upper() if alert.status else "OPEN",
         "updatedAt": alert.updated_at_source.isoformat() if alert.updated_at_source else None,
+        "sourceSync": source_sync,
     }
 
 
@@ -306,6 +321,10 @@ async def bulk_update_alerts(
         "reopen": "open",
     }
 
+    from app.services.alert_status_sync import push_alert_status_to_source
+
+    source_sync: list[dict[str, Any]] = []
+
     for alert_id in request.alert_ids:
         try:
             alert_uuid = UUID(alert_id)
@@ -321,7 +340,15 @@ async def bulk_update_alerts(
             if alert:
                 # Handle different actions
                 if request.action in action_to_status:
-                    alert.status = action_to_status[request.action]
+                    new_status = action_to_status[request.action]
+                    status_changed = alert.status != new_status
+                    alert.status = new_status
+                    # Two-way sync: push the change to the source tool.
+                    # Best-effort - failures are reported, not raised.
+                    if status_changed:
+                        push = await push_alert_status_to_source(db, alert, new_status)
+                        if push.get("supported"):
+                            source_sync.append({"id": alert_id, **push})
                 elif request.action == "set_severity" and request.value:
                     alert.severity = request.value.lower()
                 elif request.action == "assign" and request.value:
@@ -339,4 +366,4 @@ async def bulk_update_alerts(
             failed.append({"id": alert_id, "error": str(e)})
 
     await db.commit()
-    return BulkUpdateResult(success=success, failed=failed)
+    return BulkUpdateResult(success=success, failed=failed, source_sync=source_sync)

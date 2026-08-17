@@ -979,6 +979,9 @@ class DataSourceType(enum.StrEnum):
     AZURE_DEFENDER = "azure_defender"
     WIZ = "wiz"
     ORCA = "orca"
+    PROWLER = "prowler"
+    # Runtime Security
+    FALCO = "falco"
     # Identity
     OKTA = "okta"
     AZURE_AD_IDENTITY = "azure_ad_identity"
@@ -1016,6 +1019,9 @@ DATA_SOURCE_CATEGORIES: dict[DataSourceType, DataSourceCategory] = {
     DataSourceType.AZURE_DEFENDER: DataSourceCategory.CLOUD_SECURITY,
     DataSourceType.WIZ: DataSourceCategory.CLOUD_SECURITY,
     DataSourceType.ORCA: DataSourceCategory.CLOUD_SECURITY,
+    DataSourceType.PROWLER: DataSourceCategory.CLOUD_SECURITY,
+    # Runtime Security (Falco watches host/container behavior, closest to EDR)
+    DataSourceType.FALCO: DataSourceCategory.EDR,
     # Identity
     DataSourceType.OKTA: DataSourceCategory.IDENTITY,
     DataSourceType.AZURE_AD_IDENTITY: DataSourceCategory.IDENTITY,

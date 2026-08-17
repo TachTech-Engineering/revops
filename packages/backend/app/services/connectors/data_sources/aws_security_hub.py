@@ -15,7 +15,16 @@ from app.services.connectors.base import (
     ConnectionTestResult,
     ConnectorMetadata,
     DataSourceConnector,
+    StatusPushResult,
 )
+
+# RevOps normalized status -> Security Hub workflow status
+STATUS_PUSH_MAP = {
+    "open": "NEW",
+    "acknowledged": "NOTIFIED",
+    "resolved": "RESOLVED",
+    "closed": "SUPPRESSED",
+}
 
 
 class AWSSecurityHubConnector(DataSourceConnector):
@@ -71,6 +80,13 @@ class AWSSecurityHubConnector(DataSourceConnector):
                         "description": "Only fetch findings from these products (empty = all)",
                         "items": {"type": "string"},
                         "default": [],
+                    },
+                    "two_way_sync": {
+                        "type": "boolean",
+                        "title": "Two-Way Sync",
+                        "description": "Push RevOps status changes back to Security Hub "
+                        "workflow status (requires securityhub:BatchUpdateFindings)",
+                        "default": True,
                     },
                 },
                 "required": ["region"],
@@ -335,3 +351,58 @@ class AWSSecurityHubConnector(DataSourceConnector):
             "RESOLVED": "resolved",
         }
         return status_map.get(source_status.upper(), "open")
+
+    async def push_status_update(self, alert, new_status: str) -> StatusPushResult:
+        """Push a status change back to Security Hub as a workflow status."""
+        workflow_status = STATUS_PUSH_MAP.get(new_status)
+        if not workflow_status:
+            return StatusPushResult(
+                supported=False,
+                success=False,
+                message=f"No Security Hub workflow status for '{new_status}'",
+            )
+
+        # BatchUpdateFindings identifies findings by Id + ProductArn; the
+        # ProductArn only exists in the original finding payload.
+        product_arn = (alert.raw_data or {}).get("ProductArn")
+        if not product_arn:
+            return StatusPushResult(
+                supported=False,
+                success=False,
+                message="Finding has no ProductArn in raw data; cannot update",
+            )
+
+        try:
+            client = self._get_boto3_client()
+            response = client.batch_update_findings(
+                FindingIdentifiers=[{"Id": alert.external_id, "ProductArn": product_arn}],
+                Workflow={"Status": workflow_status},
+            )
+
+            unprocessed = response.get("UnprocessedFindings", [])
+            if unprocessed:
+                return StatusPushResult(
+                    supported=True,
+                    success=False,
+                    message=f"Security Hub could not update the finding: "
+                    f"{unprocessed[0].get('ErrorMessage', 'unknown error')}",
+                )
+
+            return StatusPushResult(
+                supported=True,
+                success=True,
+                message=f"Security Hub workflow status set to {workflow_status}",
+            )
+
+        except Exception as e:
+            error_msg = str(e)
+            if "AccessDenied" in error_msg:
+                error_msg = (
+                    "Access denied - check IAM permissions "
+                    "(securityhub:BatchUpdateFindings)"
+                )
+            return StatusPushResult(
+                supported=True,
+                success=False,
+                message=f"Failed to update Security Hub finding: {error_msg}",
+            )

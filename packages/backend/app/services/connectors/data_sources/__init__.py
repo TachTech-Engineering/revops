@@ -15,6 +15,9 @@ from app.services.connectors.data_sources.cloudflare import CloudflareConnector
 from app.services.connectors.data_sources.crowdstrike_falcon import CrowdStrikeFalconConnector
 from app.services.connectors.data_sources.elastic import ElasticConnector
 from app.services.connectors.data_sources.entra_id import EntraIDConnector
+
+# Runtime Security
+from app.services.connectors.data_sources.falco import FalcoConnector
 from app.services.connectors.data_sources.gcp_security_command_center import (
     GCPSecurityCommandCenterConnector,
 )
@@ -24,6 +27,9 @@ from app.services.connectors.data_sources.microsoft_defender import MicrosoftDef
 # Identity
 from app.services.connectors.data_sources.okta import OktaConnector
 from app.services.connectors.data_sources.panther import PantherDataSourceConnector
+
+# Cloud Security Posture
+from app.services.connectors.data_sources.prowler import ProwlerConnector
 from app.services.connectors.data_sources.sentinel import SentinelConnector
 from app.services.connectors.data_sources.sentinelone import SentinelOneConnector
 from app.services.connectors.data_sources.splunk import SplunkConnector
@@ -43,6 +49,9 @@ __all__ = [
     # Cloud Security
     "AWSSecurityHubConnector",
     "GCPSecurityCommandCenterConnector",
+    "ProwlerConnector",
+    # Runtime Security
+    "FalcoConnector",
     # Identity
     "OktaConnector",
     "EntraIDConnector",

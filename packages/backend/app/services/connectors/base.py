@@ -48,6 +48,15 @@ class ConnectorMetadata:
     credentials_schema: dict[str, Any]  # JSON Schema for credentials
 
 
+@dataclass
+class StatusPushResult:
+    """Result of pushing a RevOps alert status change back to the source tool."""
+
+    supported: bool  # Whether this connector/alert supports status push-back
+    success: bool
+    message: str
+
+
 class DataSourceConnector(ABC):
     """
     Base class for SIEM data source connectors.
@@ -121,6 +130,32 @@ class DataSourceConnector(ABC):
             NormalizedAlert with standardized fields
         """
         pass
+
+    async def push_status_update(
+        self, alert: NormalizedAlert, new_status: str
+    ) -> StatusPushResult:
+        """
+        Push a RevOps status change back to the source tool (two-way sync).
+
+        Override in connectors whose source has mutable alert state (e.g.
+        close the alert in CrowdStrike when it is closed in RevOps). The
+        default reports the capability as unsupported, which is correct for
+        sources with no alert state to update.
+
+        Args:
+            alert: The normalized alert being updated (external_id/raw_data
+                   identify the record in the source system)
+            new_status: New normalized status (open/acknowledged/resolved/closed)
+
+        Returns:
+            StatusPushResult describing what happened
+        """
+        display_name = type(self).get_metadata().display_name
+        return StatusPushResult(
+            supported=False,
+            success=False,
+            message=f"{display_name} does not support status push-back",
+        )
 
     def normalize_severity(self, source_severity: str) -> str:
         """
@@ -323,6 +358,9 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     from app.services.connectors.data_sources.crowdstrike_falcon import CrowdStrikeFalconConnector
     from app.services.connectors.data_sources.elastic import ElasticConnector
     from app.services.connectors.data_sources.entra_id import EntraIDConnector
+
+    # Runtime Security
+    from app.services.connectors.data_sources.falco import FalcoConnector
     from app.services.connectors.data_sources.gcp_security_command_center import (
         GCPSecurityCommandCenterConnector,
     )
@@ -332,6 +370,9 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     # Identity
     from app.services.connectors.data_sources.okta import OktaConnector
     from app.services.connectors.data_sources.panther import PantherDataSourceConnector
+
+    # Cloud Security Posture
+    from app.services.connectors.data_sources.prowler import ProwlerConnector
     from app.services.connectors.data_sources.sentinel import SentinelConnector
     from app.services.connectors.data_sources.sentinelone import SentinelOneConnector
     from app.services.connectors.data_sources.splunk import SplunkConnector
@@ -353,6 +394,9 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     # Cloud Security
     registry.register_data_source("aws_security_hub", AWSSecurityHubConnector)
     registry.register_data_source("gcp_scc", GCPSecurityCommandCenterConnector)
+    registry.register_data_source("prowler", ProwlerConnector)
+    # Runtime Security
+    registry.register_data_source("falco", FalcoConnector)
     # Identity
     registry.register_data_source("okta", OktaConnector)
     registry.register_data_source("entra_id", EntraIDConnector)
