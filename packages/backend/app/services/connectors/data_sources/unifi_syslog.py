@@ -8,6 +8,7 @@ Integrates with Ubiquiti UniFi devices via:
 Supports UDM, UDM-Pro, UDM-SE, USG, UAP, USW devices.
 """
 
+import hashlib
 import re
 import uuid
 from datetime import datetime
@@ -23,6 +24,40 @@ from app.services.connectors.base import (
     DataSourceConnector,
 )
 from app.services.syslog_receiver import parse_syslog_timestamp
+
+
+def content_external_id(prefix: str, *parts: object) -> str:
+    """Build a stable external_id from the content of an event.
+
+    ``external_id`` is what uq_normalized_alerts_org_connector_external
+    deduplicates on, so it has to be derived from the event itself. Two
+    previous schemes both failed, in opposite directions:
+
+    * ``f"unifi-syslog-{ts}-{uuid4().hex[:8]}"`` was unique every call, so a
+      re-delivered syslog buffer inserted the same alert again.
+    * ``f"unifi-{hostname}-{ts}"`` carried no message content, so two
+      *different* events from one device in the same second collided and the
+      second was silently discarded -- alert loss, which is worse.
+
+    Everything that distinguishes one event from another therefore goes into
+    the digest, and nothing that varies between deliveries of the same event
+    does. Datetimes are rendered with ``isoformat()`` rather than
+    ``timestamp()``: the latter interprets a naive datetime in the *local*
+    zone, so the id would change if the container's TZ changed.
+
+    Byte-identical messages from one host bearing the same timestamp collapse
+    to a single alert. Syslog carries no message id, so those are genuinely
+    indistinguishable from a re-delivery; the timestamp is included at full
+    available resolution to keep that window as small as the source allows.
+    """
+    rendered = []
+    for part in parts:
+        if isinstance(part, datetime):
+            rendered.append(part.isoformat())
+        else:
+            rendered.append("" if part is None else str(part))
+    digest = hashlib.sha256("|".join(rendered).encode("utf-8", "replace")).hexdigest()
+    return f"{prefix}-{digest[:32]}"
 
 
 class UniFiSyslogConnector(DataSourceConnector):
@@ -428,7 +463,17 @@ class UniFiSyslogConnector(DataSourceConnector):
             id=uuid.uuid4(),
             connector_id=self.connector_id,
             source_type="unifi_syslog",
-            external_id=f"unifi-syslog-{timestamp.timestamp()}-{uuid.uuid4().hex[:8]}",
+            external_id=content_external_id(
+                "unifi-syslog",
+                source_ip,
+                getattr(msg, "hostname", ""),
+                getattr(msg, "app_name", ""),
+                getattr(msg, "process_id", ""),
+                timestamp,
+                # The unmodified line is the strongest content signal; `message`
+                # is a parsed view of it.
+                getattr(msg, "raw", message),
+            ),
             title=title[:500],
             description=description[:2000] if description else None,
             severity=norm_severity,
@@ -488,7 +533,14 @@ class UniFiSyslogConnector(DataSourceConnector):
             id=uuid.uuid4(),
             connector_id=self.connector_id,
             source_type="unifi",
-            external_id=event.get("_id", str(uuid.uuid4())),
+            external_id=event.get("_id")
+            or content_external_id(
+                "unifi-event",
+                event_key,
+                timestamp,
+                event.get("msg", ""),
+                str(sorted(event.items())),
+            ),
             title=title,
             description=description,
             severity=severity,
@@ -548,7 +600,8 @@ class UniFiSyslogConnector(DataSourceConnector):
             id=uuid.uuid4(),
             connector_id=self.connector_id,
             source_type="unifi",
-            external_id=alarm.get("_id", str(uuid.uuid4())),
+            external_id=alarm.get("_id")
+            or content_external_id("unifi-alarm", timestamp, str(sorted(alarm.items()))),
             title=title,
             description=description,
             severity=severity,
@@ -701,7 +754,14 @@ class UniFiSyslogConnector(DataSourceConnector):
             id=uuid.uuid4(),
             connector_id=self.connector_id,
             source_type="unifi_syslog",
-            external_id=f"unifi-{syslog_data.get('hostname', 'unknown')}-{timestamp.timestamp()}",
+            external_id=content_external_id(
+                "unifi",
+                syslog_data.get("hostname", "unknown"),
+                timestamp,
+                event_type,
+                syslog_data.get("message", ""),
+                str(sorted(raw_alert.items())),
+            ),
             title=title,
             description=description,
             severity=severity,
