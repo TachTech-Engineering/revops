@@ -16,6 +16,7 @@ const MigrationPage = lazy(() => import('./pages/MigrationPage'))
 const QueryExplorerPage = lazy(() => import('./pages/QueryExplorerPage'))
 const AnalyticsDashboardPage = lazy(() => import('./pages/AnalyticsDashboardPage'))
 const IOCSearchPage = lazy(() => import('./pages/IOCSearchPage'))
+const LogSearchPage = lazy(() => import('./pages/LogSearchPage'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 const WebhooksPage = lazy(() => import('./pages/WebhooksPage'))
 const RoleManagementPage = lazy(() => import('./pages/RoleManagementPage'))
@@ -141,6 +142,7 @@ function App() {
                     {/* Investigation */}
                     <Route path="/queries" element={<QueryExplorerPage />} />
                     <Route path="/ioc-search" element={<IOCSearchPage />} />
+                    <Route path="/log-search" element={<LogSearchPage />} />
                     <Route path="/threat-intel" element={<ThreatIntelPage />} />
                     <Route path="/migration" element={<MigrationPage />} />
                     <Route path="/converter" element={<Navigate to="/migration" replace />} />

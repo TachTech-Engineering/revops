@@ -32,6 +32,7 @@ import {
   Plug,
   GitBranch,
   KeyRound,
+  ScrollText,
 } from 'lucide-react'
 import { RootState } from '../../store'
 import { toggleSidebar } from '../../store/uiSlice'
@@ -90,6 +91,7 @@ const navSections: NavSection[] = [
     items: [
       { path: '/queries', label: 'Query Explorer', icon: Database },
       { path: '/ioc-search', label: 'IOC Search', icon: Search },
+      { path: '/log-search', label: 'Log Search', icon: ScrollText },
       { path: '/threat-intel', label: 'Threat Intel', icon: Shield },
       { path: '/threat-hunting', label: 'Threat Hunting', icon: Crosshair },
     ],

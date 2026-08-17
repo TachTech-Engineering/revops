@@ -280,6 +280,19 @@ export const revopsApi = createApi({
       query: () => '/ioc/types',
     }),
 
+    // Raw log search (directly-ingested sources only; Panther logs live in
+    // Snowflake and are reached through IOC search instead).
+    searchLogs: builder.query<LogSearchResponse, LogSearchParams>({
+      query: (params) => ({
+        url: '/logs/search',
+        params,
+      }),
+    }),
+
+    getLogStoreStats: builder.query<LogStoreStats, void>({
+      query: () => '/logs/stats',
+    }),
+
     // Threat Intel
     lookupThreatIntel: builder.mutation<ThreatIntelResult, ThreatIntelRequest>({
       query: (request) => ({
@@ -1894,6 +1907,47 @@ export interface IOCSearchResult {
   sources: { source: string; count: number; first_seen: string; last_seen: string }[]
   first_seen: string | null
   last_seen: string | null
+}
+
+export interface LogSearchParams {
+  q?: string
+  source_type?: string
+  host?: string
+  connector_id?: string
+  start?: string
+  end?: string
+  limit?: number
+  offset?: number
+}
+
+export interface LogEntry {
+  id: string
+  event_time: string
+  received_at: string
+  source_type: string
+  connector_id: string
+  host: string | null
+  source_ip: string | null
+  severity: string | null
+  message: string
+  attributes: Record<string, unknown> | null
+}
+
+export interface LogSearchResponse {
+  results: LogEntry[]
+  total: number
+  limit: number
+  offset: number
+  start: string
+  end: string
+}
+
+export interface LogStoreStats {
+  stored_bytes: number
+  max_stored_bytes: number
+  retention_days: number
+  partitions: number
+  at_capacity: boolean
 }
 
 export interface IndicatorType {
@@ -3668,6 +3722,8 @@ export const {
   useTestWebhookMutation,
   useSearchIOCMutation,
   useGetIndicatorTypesQuery,
+  useSearchLogsQuery,
+  useGetLogStoreStatsQuery,
   useLookupThreatIntelMutation,
   useGetThreatIntelStatusQuery,
   useListUserRolesQuery,
