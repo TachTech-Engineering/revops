@@ -285,9 +285,7 @@ async def test_long_running_sync_is_not_spawned_twice(monkeypatch):
         started.set()
         await release.wait()
 
-    monkeypatch.setattr(
-        "app.api.v1.connectors.sync_connector_alerts", fake_sync_connector_alerts
-    )
+    monkeypatch.setattr("app.api.v1.connectors.sync_connector_alerts", fake_sync_connector_alerts)
 
     scheduler = cs.ConnectorSyncScheduler()
 

@@ -15,6 +15,7 @@ with no database available, which verifies that property: any accidental DB
 connection attempt would surface as a 500 (raise_server_exceptions=False) and
 fail the assertion on 401/403.
 """
+
 import os
 
 # Must be set before app.config is imported. The config defaults to the

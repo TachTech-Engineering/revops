@@ -357,6 +357,54 @@ class PasswordResetToken(Base):
     user: Mapped["User"] = relationship("User")
 
 
+class FalcoIngestEvent(Base):
+    """Falco alerts received on the ingest webhook, awaiting the sync cycle.
+
+    These were held in a process-global in-memory deque. The ingest endpoint
+    answers 202 Accepted immediately, so with multiple replicas any pod restart
+    between the webhook call and the next sync silently discarded accepted
+    runtime-security alerts.
+
+    Claim semantics are at-least-once: ``claimed_at`` is stamped when a sync
+    picks a row up, and a claim older than FALCO_CLAIM_STALE_MINUTES is
+    re-claimable so a crashed sync recovers instead of losing events. That is
+    safe because the Falco connector derives ``external_id`` from a content
+    fingerprint, so a re-processed event collides with
+    ``uq_normalized_alerts_org_connector_external`` and is dropped rather than
+    duplicated.
+    """
+
+    __tablename__ = "falco_ingest_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    connector_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("connectors.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        # The drain orders by received_at within a connector and filters on
+        # claimed_at, so index the three together.
+        Index(
+            "ix_falco_ingest_events_connector_claim",
+            "connector_id",
+            "claimed_at",
+            "received_at",
+        ),
+    )
+
+
 class OrganizationTelephonyConfig(Base):
     """Per-organization telephony (Fonoster) configuration.
 

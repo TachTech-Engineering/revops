@@ -12,6 +12,7 @@ test fail: default-deny, allowlist-explicit.
 
 Websocket routes are excluded (they authenticate via ?token= after accept).
 """
+
 import re
 import uuid
 

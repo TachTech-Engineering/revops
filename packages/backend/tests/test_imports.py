@@ -6,6 +6,7 @@ the test suite touched. This walks every module under app.jobs and
 app.services (and imports app.main itself) so a broken import in any of them
 fails CI even if the module is not otherwise exercised.
 """
+
 import importlib
 import pkgutil
 

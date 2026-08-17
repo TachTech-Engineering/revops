@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import get_db
 from app.db.models import Connector, ConnectorCategory, ConnectorStatus
 from app.services.encryption import get_encryption_service
-from app.services.falco_event_buffer import get_falco_event_buffer
+from app.services.falco_event_buffer import count_pending, push_events
 
 logger = logging.getLogger(__name__)
 
@@ -77,8 +77,10 @@ async def ingest_falco_alerts(
             logger.exception(f"Failed to decrypt credentials for Falco connector {connector_id}")
 
     provided_token = _extract_token(request)
-    if not expected_token or not provided_token or not hmac.compare_digest(
-        expected_token, provided_token
+    if (
+        not expected_token
+        or not provided_token
+        or not hmac.compare_digest(expected_token, provided_token)
     ):
         raise HTTPException(status_code=401, detail="Invalid ingest token")
 
@@ -104,10 +106,19 @@ async def ingest_falco_alerts(
             detail=f"Too many events in one request (max {MAX_EVENTS_PER_REQUEST})",
         )
 
-    buffer = get_falco_event_buffer()
-    accepted = buffer.push(connector_id, events)
+    # Persisted, not held in process memory: this endpoint answers 202 and the
+    # sync runs minutes later, so an in-memory buffer lost accepted alerts on
+    # every pod restart.
+    accepted = await push_events(
+        db,
+        connector_id=connector_id,
+        organization_id=connector.organization_id,
+        events=events,
+    )
+    pending = await count_pending(db, connector_id)
+    await db.commit()
 
     return {
         "accepted": accepted,
-        "buffered": buffer.size(connector_id),
+        "buffered": pending,
     }

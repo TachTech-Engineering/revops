@@ -71,9 +71,7 @@ async def test_alert_cluster_get_is_tenant_isolated(app_client, make_user, db_se
     org_b = await make_user("clu-b", role=UserRoleType.VIEWER)
     cluster_b = await seed_alert_cluster(db_session, org_b.org.id, name="B secret cluster")
 
-    resp = await app_client.get(
-        f"/api/v1/alert-clusters/{cluster_b.id}", headers=org_a.headers
-    )
+    resp = await app_client.get(f"/api/v1/alert-clusters/{cluster_b.id}", headers=org_a.headers)
     assert resp.status_code == 404
     assert "secret" not in resp.text
 
@@ -92,14 +90,10 @@ async def test_notification_get_is_tenant_isolated(app_client, make_user, db_ses
         db_session, org_b.org.id, user_email=org_b.user.email, title="B private note"
     )
 
-    resp = await app_client.get(
-        f"/api/v1/notifications/{notif_b.id}", headers=org_a.headers
-    )
+    resp = await app_client.get(f"/api/v1/notifications/{notif_b.id}", headers=org_a.headers)
     assert resp.status_code == 404
     assert "private" not in resp.text
 
-    resp_owner = await app_client.get(
-        f"/api/v1/notifications/{notif_b.id}", headers=org_b.headers
-    )
+    resp_owner = await app_client.get(f"/api/v1/notifications/{notif_b.id}", headers=org_b.headers)
     assert resp_owner.status_code == 200
     assert resp_owner.json()["id"] == str(notif_b.id)

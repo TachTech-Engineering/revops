@@ -112,9 +112,7 @@ async def test_sentinelone_rejects_unmapped_status():
     connector = SentinelOneConnector(
         CONNECTOR_ID, {"console_url": "https://example.sentinelone.net"}, {"api_token": "t"}
     )
-    result = await connector.push_status_update(
-        _alert(raw_data={"threatInfo": {}}), "acknowledged"
-    )
+    result = await connector.push_status_update(_alert(raw_data={"threatInfo": {}}), "acknowledged")
     assert result.supported is False
     assert "acknowledged" in result.message
 

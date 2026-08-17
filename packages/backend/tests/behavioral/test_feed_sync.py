@@ -75,11 +75,7 @@ async def test_sync_feed_attributes_org_to_iocs_and_log(db_session, monkeypatch)
     assert result["status"] == "success"
     assert result["iocs_added"] == 2
 
-    iocs = (
-        (await db_session.execute(select(IOC).where(IOC.feed_id == feed.id)))
-        .scalars()
-        .all()
-    )
+    iocs = (await db_session.execute(select(IOC).where(IOC.feed_id == feed.id))).scalars().all()
     assert len(iocs) == 2
     # The fix: imported IOCs carry the feed's org, never NULL.
     assert all(ioc.organization_id == org.id for ioc in iocs)
@@ -125,11 +121,7 @@ async def test_sync_feed_skips_legacy_null_org_feed(db_session, monkeypatch):
 
     # No sync log is written for a skipped legacy feed.
     logs = (
-        (
-            await db_session.execute(
-                select(FeedSyncLog).where(FeedSyncLog.feed_id == legacy_feed.id)
-            )
-        )
+        (await db_session.execute(select(FeedSyncLog).where(FeedSyncLog.feed_id == legacy_feed.id)))
         .scalars()
         .all()
     )

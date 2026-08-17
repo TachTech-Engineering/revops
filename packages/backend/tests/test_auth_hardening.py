@@ -487,9 +487,7 @@ async def test_ws_revalidate_closes_when_the_user_moved_org(monkeypatch):
     user_id = uuid.uuid4()
     token = auth_service.create_access_token({"sub": str(user_id)})
 
-    code, reason = await ws.revalidate_connection(
-        FakeWebSocket(token), user_id, str(original_org)
-    )
+    code, reason = await ws.revalidate_connection(FakeWebSocket(token), user_id, str(original_org))
     assert code == ws.WS_CLOSE_FORBIDDEN
     assert "Organization" in reason
 

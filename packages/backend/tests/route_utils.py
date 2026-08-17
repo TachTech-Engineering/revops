@@ -8,6 +8,7 @@ here rather than imported, so older flat layouts keep working). Walk order
 matches starlette's first-full-match dispatch order, so the first regex+method
 match found by ``resolve`` is the route that would actually handle a request.
 """
+
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
@@ -46,9 +47,7 @@ def _walk(routes) -> Iterator[HttpRoute]:
         for method in sorted(methods):
             if method in ("HEAD", "OPTIONS"):
                 continue
-            yield HttpRoute(
-                path=path, method=method, endpoint=endpoint, path_regex=path_regex
-            )
+            yield HttpRoute(path=path, method=method, endpoint=endpoint, path_regex=path_regex)
 
 
 def resolve(app, path: str, method: str) -> HttpRoute | None:

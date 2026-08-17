@@ -14,6 +14,7 @@ These tests resolve representative literal paths using the same
 first-full-match semantics as starlette's dispatch and assert which module
 owns the endpoint, so a registration-order regression fails loudly.
 """
+
 import pytest
 
 from app.main import app

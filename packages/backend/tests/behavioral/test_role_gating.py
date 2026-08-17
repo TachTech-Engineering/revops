@@ -24,9 +24,7 @@ async def test_sso_config_list_forbidden_for_non_admin(app_client, make_user):
 @pytest.mark.asyncio
 async def test_sso_config_list_allowed_for_admin(app_client, make_user):
     admin = await make_user("sso-admin", role=UserRoleType.ADMIN)
-    resp = await app_client.get(
-        f"/api/v1/organizations/{admin.org.id}/sso", headers=admin.headers
-    )
+    resp = await app_client.get(f"/api/v1/organizations/{admin.org.id}/sso", headers=admin.headers)
     assert resp.status_code == 200
     assert resp.json()["configs"] == []
 

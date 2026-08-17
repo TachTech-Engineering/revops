@@ -8,12 +8,12 @@ NormalizedAlerts the sync path can persist and dedupe on external_id.
 """
 
 import uuid
-from datetime import UTC
+from datetime import UTC, datetime
 
 from app.services.connectors.base import get_connector_registry
 from app.services.connectors.data_sources.falco import FalcoConnector
 from app.services.connectors.data_sources.prowler import ProwlerConnector
-from app.services.falco_event_buffer import FalcoEventBuffer, get_falco_event_buffer
+from app.services.falco_event_buffer import FalcoEvent
 
 CONNECTOR_ID = uuid.uuid4()
 
@@ -63,9 +63,7 @@ def test_prowler_normalize_maps_core_fields():
     alert = _prowler_connector().normalize_alert(_prowler_finding())
 
     assert alert.source_type == "prowler"
-    assert alert.external_id == (
-        "prowler-aws-iam_root_mfa_enabled-123456789012-us-east-1-root"
-    )
+    assert alert.external_id == ("prowler-aws-iam_root_mfa_enabled-123456789012-us-east-1-root")
     assert alert.title == "Ensure MFA is enabled for the root account"
     assert alert.severity == "critical"
     assert alert.status == "open"
@@ -90,9 +88,7 @@ def test_prowler_normalize_survives_sparse_finding():
 
 
 def test_prowler_severity_informational_maps_to_info():
-    alert = _prowler_connector().normalize_alert(
-        _prowler_finding(severity="informational")
-    )
+    alert = _prowler_connector().normalize_alert(_prowler_finding(severity="informational"))
     assert alert.severity == "info"
 
 
@@ -104,29 +100,6 @@ async def test_prowler_requires_some_credential():
 
 
 # ==================== Falco event buffer ====================
-
-
-def test_falco_buffer_push_drain_and_overflow():
-    buffer = FalcoEventBuffer(max_events=3)
-    connector_id = uuid.uuid4()
-
-    buffer.push(connector_id, [{"n": i} for i in range(5)])
-    assert buffer.size(connector_id) == 3  # oldest two dropped
-
-    drained = buffer.drain(connector_id, limit=2)
-    assert [e.payload["n"] for e in drained] == [2, 3]
-    assert buffer.size(connector_id) == 1
-    assert buffer.drain(connector_id)[0].payload["n"] == 4
-    assert buffer.drain(connector_id) == []
-
-
-def test_falco_buffer_is_per_connector():
-    buffer = FalcoEventBuffer()
-    a, b = uuid.uuid4(), uuid.uuid4()
-    buffer.push(a, [{"rule": "x"}])
-    assert buffer.size(a) == 1
-    assert buffer.size(b) == 0
-    assert buffer.drain(b) == []
 
 
 # ==================== Falco connector ====================
@@ -199,13 +172,40 @@ def test_falco_priority_severity_map():
         assert connector.normalize_severity(priority) == expected
 
 
-async def test_falco_fetch_drains_buffer_and_filters_priority():
-    from datetime import datetime
+class _StubSession:
+    """Stand-in for AsyncSessionLocal() in DB-free tests."""
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def commit(self):
+        return None
+
+
+def _patch_buffer(monkeypatch, queued: list[dict], *, remaining_after: int = 0):
+    """Serve `queued` from a fake durable buffer; record what was claimed."""
+    state = {"queued": [FalcoEvent(payload=p, received_at=datetime(2026, 1, 1)) for p in queued]}
+
+    async def fake_claim(db, connector_id, limit=100):
+        taken, state["queued"] = state["queued"][:limit], state["queued"][limit:]
+        return taken
+
+    async def fake_count(db, connector_id):
+        return len(state["queued"]) if remaining_after == 0 else remaining_after
+
+    monkeypatch.setattr("app.db.session.AsyncSessionLocal", lambda: _StubSession())
+    monkeypatch.setattr("app.services.falco_event_buffer.claim_events", fake_claim)
+    monkeypatch.setattr("app.services.falco_event_buffer.count_pending", fake_count)
+    return state
+
+
+async def test_falco_fetch_filters_below_min_priority(monkeypatch):
     connector = _falco_connector(min_priority="warning")
-    buffer = get_falco_event_buffer()
-    buffer.push(
-        connector.connector_id,
+    _patch_buffer(
+        monkeypatch,
         [
             _falco_event(priority="Critical", rule="Crit rule"),
             _falco_event(priority="Notice", rule="Noise rule"),
@@ -217,33 +217,29 @@ async def test_falco_fetch_drains_buffer_and_filters_priority():
 
     assert [a.rule_name for a in alerts] == ["Crit rule"]
     assert cursor is None
-    assert buffer.size(connector.connector_id) == 0
 
 
-async def test_falco_fetch_signals_more_when_buffer_not_drained():
+async def test_falco_fetch_signals_more_when_events_remain(monkeypatch):
     connector = _falco_connector()
-    buffer = get_falco_event_buffer()
-    buffer.push(connector.connector_id, [_falco_event(rule=f"rule-{i}") for i in range(3)])
-
-    from datetime import datetime
+    state = _patch_buffer(monkeypatch, [_falco_event(rule=f"rule-{i}") for i in range(3)])
 
     since = datetime(2020, 1, 1, tzinfo=UTC)
     alerts, cursor = await connector.fetch_alerts(since=since, limit=2)
     assert len(alerts) == 2
-    assert cursor == "more"
+    assert cursor == "more", "sync loop must keep draining while events remain"
 
     alerts, cursor = await connector.fetch_alerts(since=since, limit=2)
     assert len(alerts) == 1
     assert cursor is None
+    assert state["queued"] == []
 
 
-async def test_falco_test_connection_reports_webhook_path():
+async def test_falco_test_connection_reports_webhook_path(monkeypatch):
+    _patch_buffer(monkeypatch, [])
     connector = _falco_connector()
     result = await connector.test_connection()
     assert result.success is True
-    assert result.details["webhook_path"] == (
-        f"/api/v1/ingest/falco/{connector.connector_id}"
-    )
+    assert result.details["webhook_path"] == (f"/api/v1/ingest/falco/{connector.connector_id}")
 
     no_token = FalcoConnector(uuid.uuid4(), {}, {})
     result = await no_token.test_connection()

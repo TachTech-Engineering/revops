@@ -38,14 +38,10 @@ async def test_rule_health_get_is_tenant_isolated(app_client, make_user, db_sess
     org_b = await make_user("rh-b", role=UserRoleType.VIEWER)
     rh_b = await seed_rule_health(db_session, org_b.org.id, rule_id="Rule.OrgB.Only")
 
-    resp = await app_client.get(
-        f"/api/v1/rules/health/{rh_b.rule_id}", headers=org_a.headers
-    )
+    resp = await app_client.get(f"/api/v1/rules/health/{rh_b.rule_id}", headers=org_a.headers)
     assert resp.status_code == 404
 
-    resp_owner = await app_client.get(
-        f"/api/v1/rules/health/{rh_b.rule_id}", headers=org_b.headers
-    )
+    resp_owner = await app_client.get(f"/api/v1/rules/health/{rh_b.rule_id}", headers=org_b.headers)
     assert resp_owner.status_code == 200
     assert resp_owner.json()["rule_id"] == "Rule.OrgB.Only"
 

@@ -164,9 +164,7 @@ async def test_failed_step_is_retried_before_advancing(monkeypatch):
         # The pre-existing record shape is preserved.
         assert {"step", "type", "sent_at", "targets", "success"} <= set(last)
         # And the sweep would re-send the same step.
-        assert (
-            next_step_index(escalation.current_step, escalation.notification_history) == 0
-        )
+        assert next_step_index(escalation.current_step, escalation.notification_history) == 0
 
     # Final attempt: retries exhausted, escalation moves on to step 2.
     await service._send_step_notification(
@@ -264,9 +262,7 @@ async def test_escalation_call_uses_the_supplied_org_config(monkeypatch):
         captured["account_sid"] = self.config.account_sid
         return {"success": True}
 
-    monkeypatch.setattr(
-        "app.services.fonoster.TelephonyService.make_call", fake_make_call
-    )
+    monkeypatch.setattr("app.services.fonoster.TelephonyService.make_call", fake_make_call)
 
     org_b = TelephonyConfig(
         provider="mock",

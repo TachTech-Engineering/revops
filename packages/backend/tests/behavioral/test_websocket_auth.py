@@ -38,9 +38,7 @@ def test_ws_alerts_with_invalid_token_closes_4401():
     app = _minimal_ws_app()
     with TestClient(app) as client:
         try:
-            with client.websocket_connect(
-                "/api/v1/ws/alerts?token=not-a-real-jwt"
-            ) as ws:
+            with client.websocket_connect("/api/v1/ws/alerts?token=not-a-real-jwt") as ws:
                 ws.receive_text()
             raise AssertionError("connection was not closed")
         except WebSocketDisconnect as exc:

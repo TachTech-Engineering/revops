@@ -27,9 +27,7 @@ async def test_created_ioc_is_stamped_with_creating_org(app_client, make_user, d
     ioc_id = resp.json()["id"]
 
     # Persisted with organization_id == A, never NULL, never B.
-    row = (
-        await db_session.execute(select(IOC).where(IOC.value == "198.51.100.7"))
-    ).scalar_one()
+    row = (await db_session.execute(select(IOC).where(IOC.value == "198.51.100.7"))).scalar_one()
     assert row.organization_id == org_a.org.id
     assert row.organization_id is not None
     assert row.organization_id != org_b.org.id

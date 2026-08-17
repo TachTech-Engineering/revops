@@ -109,7 +109,8 @@ class FalcoConnector(DataSourceConnector):
     async def test_connection(self) -> ConnectionTestResult:
         """Confirm the ingest endpoint is ready and report setup instructions."""
         try:
-            from app.services.falco_event_buffer import get_falco_event_buffer
+            from app.db.session import AsyncSessionLocal
+            from app.services.falco_event_buffer import count_pending
 
             if not self.credentials.get("ingest_token"):
                 return ConnectionTestResult(
@@ -118,7 +119,8 @@ class FalcoConnector(DataSourceConnector):
                     "authenticate Falco",
                 )
 
-            buffered = get_falco_event_buffer().size(self.connector_id)
+            async with AsyncSessionLocal() as db:
+                buffered = await count_pending(db, self.connector_id)
 
             return ConnectionTestResult(
                 success=True,
@@ -148,10 +150,16 @@ class FalcoConnector(DataSourceConnector):
         cursor: str | None = None,
     ) -> tuple[list[NormalizedAlert], str | None]:
         """Drain buffered webhook events and normalize them."""
-        from app.services.falco_event_buffer import get_falco_event_buffer
+        from app.db.session import AsyncSessionLocal
+        from app.services.falco_event_buffer import claim_events, count_pending
 
-        buffer = get_falco_event_buffer()
-        events = buffer.drain(self.connector_id, limit)
+        # Events are rows now, so any replica's sync can drain them -- not just
+        # the pod whose memory happened to receive the webhook. fetch_alerts
+        # has no session of its own, so open one (same pattern as the
+        # escalation sweep).
+        async with AsyncSessionLocal() as db:
+            events = await claim_events(db, self.connector_id, limit)
+            await db.commit()
 
         min_priority = self.config.get("min_priority", "notice")
         min_rank = (
@@ -175,8 +183,10 @@ class FalcoConnector(DataSourceConnector):
 
             normalized_alerts.append(self.normalize_alert(payload))
 
-        # Signal the sync loop to keep draining if the buffer still has events
-        next_cursor = "more" if buffer.size(self.connector_id) > 0 else None
+        # Signal the sync loop to keep draining if events remain
+        async with AsyncSessionLocal() as db:
+            remaining = await count_pending(db, self.connector_id)
+        next_cursor = "more" if remaining > 0 else None
         return normalized_alerts, next_cursor
 
     async def push_status_update(self, alert, new_status: str) -> StatusPushResult:
@@ -198,9 +208,7 @@ class FalcoConnector(DataSourceConnector):
         created_at = utcnow()
         if raw_alert.get("time"):
             try:
-                created_at = datetime.fromisoformat(
-                    str(raw_alert["time"]).replace("Z", "+00:00")
-                )
+                created_at = datetime.fromisoformat(str(raw_alert["time"]).replace("Z", "+00:00"))
             except (ValueError, TypeError):
                 pass
 
@@ -224,9 +232,7 @@ class FalcoConnector(DataSourceConnector):
             "k8s.ns.name",
             "k8s.pod.name",
         ]
-        details = [
-            f"{key}: {output_fields[key]}" for key in detail_keys if output_fields.get(key)
-        ]
+        details = [f"{key}: {output_fields[key]}" for key in detail_keys if output_fields.get(key)]
         if details:
             description_parts.append("\n".join(details))
         description = "\n\n".join(description_parts)
