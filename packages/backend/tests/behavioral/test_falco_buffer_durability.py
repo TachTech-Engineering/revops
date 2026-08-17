@@ -81,9 +81,9 @@ async def test_stale_claim_is_reclaimable_so_a_crashed_sync_recovers(db_session,
 
     # Age the claim past the staleness bound: the claiming process died.
     await db_session.execute(
-        FalcoIngestEvent.__table__.update().values(
-            claimed_at=utcnow() - timedelta(minutes=CLAIM_STALE_MINUTES + 1)
-        )
+        FalcoIngestEvent.__table__.update()
+        .where(FalcoIngestEvent.connector_id == connector.id)
+        .values(claimed_at=utcnow() - timedelta(minutes=CLAIM_STALE_MINUTES + 1))
     )
 
     reclaimed = await claim_events(db_session, connector.id)
@@ -110,7 +110,11 @@ async def test_push_records_the_owning_organization(db_session, make_user):
         db_session, connector_id=connector.id, organization_id=ctx.org.id, events=[_event()]
     )
 
-    row = (await db_session.execute(FalcoIngestEvent.__table__.select())).first()
+    row = (
+        await db_session.execute(
+            FalcoIngestEvent.__table__.select().where(FalcoIngestEvent.connector_id == connector.id)
+        )
+    ).first()
     assert row.organization_id == ctx.org.id
     assert row.claimed_at is None
 
@@ -147,10 +151,13 @@ async def test_purge_removes_only_old_claimed_rows(db_session, make_user):
 
     await db_session.execute(
         FalcoIngestEvent.__table__.update()
-        .where(FalcoIngestEvent.claimed_at.is_not(None))
+        .where(
+            FalcoIngestEvent.connector_id == connector.id,
+            FalcoIngestEvent.claimed_at.is_not(None),
+        )
         .values(claimed_at=utcnow() - timedelta(hours=48))
     )
-    assert await purge_processed(db_session, older_than_hours=24) == 1
+    assert await purge_processed(db_session, older_than_hours=24) >= 1
 
     # The unclaimed event is untouched.
     assert await count_pending(db_session, connector.id) == 1

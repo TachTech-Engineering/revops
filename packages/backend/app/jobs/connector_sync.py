@@ -18,12 +18,24 @@ from app.db.session import AsyncSessionLocal
 logger = logging.getLogger(__name__)
 
 
+# Advisory lock for the cross-replica housekeeping sweep. Distinct from the
+# schema lock (0x52564F50 "RVOP", app/db/run_migrations.py) and the escalation
+# sweep lock (0x52455343 "RESC", app/services/escalation_service.py).
+# 0x524D4E54 is ascii "RMNT".
+MAINTENANCE_LOCK_ID = 0x524D4E54
+
+
 class ConnectorSyncScheduler:
     """Schedules and runs automatic syncs for data source connectors."""
 
     def __init__(self):
         self._running = False
         self._check_interval = 60  # Check every 60 seconds for connectors due for sync
+        # Housekeeping runs on the same loop rather than in its own scheduler.
+        # `None` means "run on the first tick", so a pod that restarts often
+        # still performs it.
+        self._maintenance_interval = 3600
+        self._last_maintenance: datetime | None = None
         # Strong references to the in-flight sync tasks. asyncio only keeps a
         # weak reference to a running task, so a task nobody holds can be
         # garbage collected mid-sync.
@@ -48,7 +60,56 @@ class ConnectorSyncScheduler:
             except Exception as e:
                 logger.error(f"Error in connector sync scheduler: {e}")
 
+            try:
+                await self._run_maintenance_if_due()
+            except Exception:
+                # Housekeeping must never take the sync loop down with it.
+                logger.exception("Error in connector sync maintenance")
+
             await asyncio.sleep(self._check_interval)
+
+    async def _run_maintenance_if_due(self):
+        """Reap staged rows that have already been consumed.
+
+        Claimed Falco ingest events are retained for a debugging window and
+        then deleted; without this the table only ever grows for a busy
+        connector. This is a global sweep and every replica runs this loop, so
+        it is guarded by an advisory lock -- a replica that does not get the
+        lock simply skips, and the lock is released with the session.
+        """
+        now = utcnow()
+        if (
+            self._last_maintenance is not None
+            and (now - self._last_maintenance).total_seconds() < self._maintenance_interval
+        ):
+            return
+        self._last_maintenance = now
+
+        from sqlalchemy import text
+
+        from app.db.session import AsyncSessionLocal
+        from app.services.falco_event_buffer import purge_processed
+
+        async with AsyncSessionLocal() as db:
+            acquired = (
+                await db.execute(
+                    text("SELECT pg_try_advisory_lock(:lock_id)"),
+                    {"lock_id": MAINTENANCE_LOCK_ID},
+                )
+            ).scalar()
+            if not acquired:
+                logger.debug("Connector maintenance running on another replica; skipping")
+                return
+            try:
+                purged = await purge_processed(db)
+                await db.commit()
+                if purged:
+                    logger.info(f"Purged {purged} consumed Falco ingest event(s)")
+            finally:
+                await db.execute(
+                    text("SELECT pg_advisory_unlock(:lock_id)"),
+                    {"lock_id": MAINTENANCE_LOCK_ID},
+                )
 
     def stop(self):
         """Stop the sync scheduler."""
