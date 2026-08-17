@@ -78,13 +78,20 @@ mock-only widgets deleted.
    saved dashboard carrying one would 422. Documented at
    `widgets/index.tsx:18-33`.
 
-4. **`app/services/syslog_server.py` is dead code** with a cross-org catch-all
-   connector match. Nothing imports it (`main.py` starts `syslog_receiver`).
-   Worth deleting rather than fixing.
+4. ~~**`app/services/syslog_server.py` is dead code** with a cross-org catch-all
+   connector match.~~ **Deleted 2026-08-17.** Nothing imported it; leaving an
+   unreachable cross-org match around invites someone to revive it later
+   without noticing the tenancy bug.
 
-5. **`correlation_cleanup_job.py` exposes an APScheduler `JOB_CONFIG` that
-   nothing constructs** — the job never runs. The two schedulers that do run
-   use the loop pattern in `connector_sync.py`.
+5. ~~**`correlation_cleanup_job.py` exposes an APScheduler `JOB_CONFIG` that
+   nothing constructs**~~ **Resolved 2026-08-17**, but not by deleting it as
+   suggested here. On inspection the job did something nothing else did —
+   reaping expired correlation windows to prevent unbounded growth — so
+   deleting it would have silently accepted the bloat the day correlation is
+   enabled. The module is gone and its one useful call now runs from the
+   hourly maintenance sweep in `connector_sync.py`, under the advisory lock so
+   exactly one replica performs the delete. The tables are empty today because
+   correlation is unused; the wiring exists so enabling it is safe.
 
 ---
 

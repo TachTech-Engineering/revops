@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 # 0x524D4E54 is ascii "RMNT".
 MAINTENANCE_LOCK_ID = 0x524D4E54
 
+# Correlation windows older than this are reaped. Matches the interval the
+# never-constructed APScheduler job declared before it was deleted.
+CORRELATION_WINDOW_MAX_AGE_HOURS = 24
+
 
 class ConnectorSyncScheduler:
     """Schedules and runs automatic syncs for data source connectors."""
@@ -88,6 +92,7 @@ class ConnectorSyncScheduler:
         from sqlalchemy import text
 
         from app.db.session import AsyncSessionLocal
+        from app.services.correlation_service import CorrelationService
         from app.services.falco_event_buffer import purge_processed
         from app.services.log_store import (
             drop_expired_partitions,
@@ -118,6 +123,14 @@ class ConnectorSyncScheduler:
             # debugging window and then dropped, or the table only grows.
             purged_syslog = await purge_syslog(db)
 
+            # Expired correlation windows. This lived in a correlation_cleanup_job
+            # module exposing an APScheduler config that nothing ever constructed,
+            # so it never ran. Called here instead: this sweep already holds the
+            # advisory lock, so exactly one replica performs the delete.
+            expired_windows = await CorrelationService(db).cleanup_expired_windows(
+                CORRELATION_WINDOW_MAX_AGE_HOURS
+            )
+
             # Raw log partitions: create the days ingestion will need next, and
             # drop those past retention. Retention is a partition DROP, so this
             # is what keeps the log store from growing without bound.
@@ -130,6 +143,8 @@ class ConnectorSyncScheduler:
                 logger.info(f"Purged {purged} consumed Falco ingest event(s)")
             if purged_syslog:
                 logger.info(f"Purged {purged_syslog} consumed syslog ingest event(s)")
+            if expired_windows:
+                logger.info(f"Reaped {expired_windows} expired correlation window(s)")
             if created or dropped:
                 logger.info(
                     f"Log partitions: created {created}, dropped {len(dropped)} "

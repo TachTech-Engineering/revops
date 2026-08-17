@@ -6,6 +6,18 @@
 # Secret named "backend-secrets" in the target namespace; this script
 # creates it in both the production (revops) and staging (revops-staging)
 # namespaces.
+#
+# It also creates DATABASE_PASSWORD (required by the in-cluster
+# postgres-deployment.yaml) and the separate "backend-encryption-key" Secret.
+# Both were missing until 2026-08-17, which meant this script could not
+# actually stand a cluster back up: postgres would fail to start and the
+# backend would come up unable to decrypt any stored connector credential.
+#
+# Existing values are preferred over freshly generated ones. ENCRYPTION_KEY in
+# particular must never be regenerated for an existing database -- it decrypts
+# connector credentials, so a new key silently makes every stored credential
+# unreadable. Resolution order is Secret Manager, then .env, then generate.
+# Keep Secret Manager current with ./scripts/backup-cluster-secrets.sh.
 
 set -euo pipefail
 
@@ -52,10 +64,42 @@ resolve_db_url() {
     fi
 }
 
-# Generate a secret key if not set
+# Read a value already held in Secret Manager, if any.
+sm_value() {
+    local secret_id="$1"
+    if gcloud secrets describe "$secret_id" --project="$PROJECT_ID" >/dev/null 2>&1; then
+        gcloud secrets versions access latest --secret="$secret_id" --project="$PROJECT_ID" 2>/dev/null
+    fi
+}
+
+# Secret Manager first, then .env, then generate. Regenerating either of these
+# against an existing database is destructive: SECRET_KEY invalidates every
+# issued token, and ENCRYPTION_KEY makes stored connector credentials
+# permanently undecryptable.
+if [ -z "${SECRET_KEY:-}" ]; then
+    SECRET_KEY="$(sm_value jwt-secret-key)"
+fi
 if [ -z "${SECRET_KEY:-}" ]; then
     SECRET_KEY=$(openssl rand -hex 32)
-    echo "Generated new SECRET_KEY"
+    echo "Generated new SECRET_KEY (no existing value found)"
+fi
+
+if [ -z "${ENCRYPTION_KEY:-}" ]; then
+    ENCRYPTION_KEY="$(sm_value encryption-key)"
+fi
+if [ -z "${ENCRYPTION_KEY:-}" ]; then
+    # Fernet key: 32 url-safe base64-encoded bytes.
+    ENCRYPTION_KEY=$(python3 -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')
+    echo "Generated new ENCRYPTION_KEY (no existing value found)"
+    echo "  WARNING: if this cluster is being rebuilt against an existing" >&2
+    echo "  database, stop now -- a new key cannot decrypt stored connector" >&2
+    echo "  credentials. Restore the original from Secret Manager instead." >&2
+fi
+
+# The in-cluster postgres reads its password from backend-secrets, so the two
+# must agree or the database will not accept the backend's DATABASE_URL.
+if [ -z "${DATABASE_PASSWORD:-}" ]; then
+    DATABASE_PASSWORD="$(sm_value database-password)"
 fi
 
 echo "1. Creating secrets in Google Secret Manager..."
@@ -71,6 +115,10 @@ create_or_update_secret() {
 create_or_update_secret panther-api-host "$PANTHER_API_HOST"
 create_or_update_secret panther-api-token "$PANTHER_API_TOKEN"
 create_or_update_secret jwt-secret-key "$SECRET_KEY"
+create_or_update_secret encryption-key "$ENCRYPTION_KEY"
+if [ -n "${DATABASE_PASSWORD:-}" ]; then
+    create_or_update_secret database-password "$DATABASE_PASSWORD"
+fi
 # Do NOT clobber a DATABASE_URL already provisioned by gke-cloudsql-setup.sh.
 # Only seed the production secret from .env when it does not already exist.
 if [ -n "${DATABASE_URL:-}" ] \
@@ -98,12 +146,32 @@ for ns in "$PROD_NAMESPACE" "$STAGING_NAMESPACE"; do
         echo "  Run ./scripts/gke-cloudsql-setup.sh first, or set DATABASE_URL in .env." >&2
         exit 1
     fi
+    # DATABASE_PASSWORD must match the password inside DATABASE_URL: the
+    # in-cluster postgres is initialised from it. Derive it from the URL when
+    # it was not supplied, rather than letting the two drift apart.
+    NS_DB_PASSWORD="${DATABASE_PASSWORD:-}"
+    if [ -z "$NS_DB_PASSWORD" ]; then
+        NS_DB_PASSWORD="$(printf '%s' "$NS_DB_URL" | sed -n 's|^[^:]*://[^:]*:\([^@]*\)@.*|\1|p')"
+    fi
+    if [ -z "$NS_DB_PASSWORD" ]; then
+        echo "ERROR: could not determine DATABASE_PASSWORD for namespace '$ns'." >&2
+        echo "  postgres-deployment.yaml reads it from backend-secrets." >&2
+        exit 1
+    fi
+
     kubectl create secret generic backend-secrets \
         --namespace="$ns" \
         --from-literal=PANTHER_API_HOST="$PANTHER_API_HOST" \
         --from-literal=PANTHER_API_TOKEN="$PANTHER_API_TOKEN" \
         --from-literal=SECRET_KEY="$SECRET_KEY" \
         --from-literal=DATABASE_URL="$NS_DB_URL" \
+        --from-literal=DATABASE_PASSWORD="$NS_DB_PASSWORD" \
+        --dry-run=client -o yaml | kubectl apply -f -
+
+    # Separate Secret, referenced by name from backend-deployment.yaml.
+    kubectl create secret generic backend-encryption-key \
+        --namespace="$ns" \
+        --from-literal=ENCRYPTION_KEY="$ENCRYPTION_KEY" \
         --dry-run=client -o yaml | kubectl apply -f -
 done
 
