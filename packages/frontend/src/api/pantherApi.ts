@@ -104,7 +104,7 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
 export const revopsApi = createApi({
   reducerPath: 'revopsApi',
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'Settings', 'Webhook', 'UserRole', 'User', 'AuditLog', 'ScheduledReport', 'Incident', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'TrendAnalytics', 'Anomaly', 'AISettings', 'ComplianceFramework', 'ComplianceControl', 'ComplianceAssessment', 'ExecutiveMetrics', 'ThreatHunt', 'HuntResult'],
+  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'Settings', 'Webhook', 'UserRole', 'User', 'AuditLog', 'ScheduledReport', 'Incident', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'TrendAnalytics', 'Anomaly', 'AISettings', 'ComplianceFramework', 'ComplianceControl', 'ComplianceAssessment', 'ExecutiveMetrics', 'ThreatHunt', 'HuntResult', 'TelephonyConfig'],
   endpoints: (builder) => ({
     // Alerts
     listAlerts: builder.query<PaginatedResponse<AlertSummary>, AlertFilters>({
@@ -1046,6 +1046,45 @@ export const revopsApi = createApi({
 
     getConnectorTypes: builder.query<ConnectorTypeInfo[], void>({
       query: () => '/connectors/types',
+    }),
+
+    // Telephony (Fonoster). The backend has had a full API since the per-org
+    // telephony work; the settings page was a mock and never called it.
+    getFonosterConfig: builder.query<FonosterConfig, void>({
+      query: () => '/fonoster/config',
+      providesTags: ['TelephonyConfig'],
+    }),
+
+    updateFonosterConfig: builder.mutation<unknown, FonosterConfigUpdate>({
+      query: (body) => ({
+        url: '/fonoster/config',
+        method: 'PUT',
+        body,
+      }),
+      invalidatesTags: ['TelephonyConfig'],
+    }),
+
+    testFonosterConnection: builder.mutation<ConnectionTestResult, void>({
+      query: () => ({
+        url: '/fonoster/test-connection',
+        method: 'POST',
+      }),
+    }),
+
+    sendFonosterTestCall: builder.mutation<unknown, { phone_number: string; message?: string }>({
+      query: (body) => ({
+        url: '/fonoster/test-call',
+        method: 'POST',
+        body,
+      }),
+    }),
+
+    sendFonosterTestSms: builder.mutation<unknown, { phone_number: string; message?: string }>({
+      query: (body) => ({
+        url: '/fonoster/test-sms',
+        method: 'POST',
+        body,
+      }),
     }),
 
     createConnector: builder.mutation<ConnectorResponse, ConnectorCreate>({
@@ -2756,6 +2795,23 @@ export interface ConnectorListResponse {
   total: number
 }
 
+export interface FonosterConfig {
+  api_endpoint: string
+  access_key_id: string
+  default_caller_id: string
+  tts_voice: string
+  enabled: boolean
+}
+
+export interface FonosterConfigUpdate {
+  api_endpoint: string
+  access_key_id: string
+  access_key_secret: string
+  default_caller_id: string
+  tts_voice?: string
+  enabled?: boolean
+}
+
 export interface ConnectorTypeInfo {
   type: string
   category: ConnectorCategory
@@ -3835,6 +3891,11 @@ export const {
   useUpdateConnectorMutation,
   useDeleteConnectorMutation,
   useTestConnectorMutation,
+  useGetFonosterConfigQuery,
+  useUpdateFonosterConfigMutation,
+  useTestFonosterConnectionMutation,
+  useSendFonosterTestCallMutation,
+  useSendFonosterTestSmsMutation,
   useSyncConnectorMutation,
   useListUnifiedAlertsQuery,
   // SecOps Platform: Data Pipelines

@@ -10,6 +10,9 @@ import {
   Plus,
 } from 'lucide-react'
 import { cn } from '../lib/utils'
+import { useListConnectorsQuery } from '../api/pantherApi'
+
+type IntegrationStatus = 'connected' | 'disconnected' | 'error'
 
 interface Integration {
   id: string
@@ -17,9 +20,13 @@ interface Integration {
   description: string
   category: 'communication' | 'ticketing' | 'oncall' | 'siem' | 'cloud' | 'telephony'
   icon: string
-  status: 'connected' | 'disconnected' | 'error'
-  lastSync?: string
   configPath: string
+  /**
+   * Backend connector_type this maps to, used to look up real status.
+   * Undefined means the integration has no connector backend (its page says
+   * so). Fonoster is per-org telephony config rather than a connector.
+   */
+  connectorType?: string
 }
 
 const integrations: Integration[] = [
@@ -29,8 +36,8 @@ const integrations: Integration[] = [
     description: 'Send alerts and notifications to Slack channels',
     category: 'communication',
     icon: '💬',
-    status: 'disconnected',
     configPath: '/integrations/slack',
+    connectorType: 'slack',
   },
   {
     id: 'teams',
@@ -38,8 +45,8 @@ const integrations: Integration[] = [
     description: 'Send alerts to Microsoft Teams channels',
     category: 'communication',
     icon: '👥',
-    status: 'disconnected',
     configPath: '/integrations/teams',
+    connectorType: 'teams',
   },
   {
     id: 'jira',
@@ -47,8 +54,8 @@ const integrations: Integration[] = [
     description: 'Create and manage tickets from alerts',
     category: 'ticketing',
     icon: '🎫',
-    status: 'disconnected',
     configPath: '/integrations/jira',
+    connectorType: 'jira',
   },
   {
     id: 'pagerduty',
@@ -56,8 +63,8 @@ const integrations: Integration[] = [
     description: 'Trigger incidents and manage on-call rotations',
     category: 'oncall',
     icon: '🚨',
-    status: 'disconnected',
     configPath: '/integrations/pagerduty',
+    connectorType: 'pagerduty',
   },
   {
     id: 'servicenow',
@@ -65,8 +72,8 @@ const integrations: Integration[] = [
     description: 'Create incidents and manage ITSM workflows',
     category: 'ticketing',
     icon: '🔧',
-    status: 'disconnected',
     configPath: '/integrations/servicenow',
+    connectorType: 'servicenow',
   },
   {
     id: 'opsgenie',
@@ -74,7 +81,6 @@ const integrations: Integration[] = [
     description: 'Alert management and on-call scheduling',
     category: 'oncall',
     icon: '📟',
-    status: 'disconnected',
     configPath: '/integrations/opsgenie',
   },
   {
@@ -83,8 +89,8 @@ const integrations: Integration[] = [
     description: 'Send alerts via email to recipients',
     category: 'communication',
     icon: '📧',
-    status: 'disconnected',
     configPath: '/integrations/email',
+    connectorType: 'email',
   },
   {
     id: 'webhook',
@@ -92,7 +98,6 @@ const integrations: Integration[] = [
     description: 'Send data to custom HTTP endpoints',
     category: 'communication',
     icon: '🔗',
-    status: 'disconnected',
     configPath: '/webhooks',
   },
   {
@@ -101,7 +106,6 @@ const integrations: Integration[] = [
     description: 'Voice calls and SMS for escalation notifications',
     category: 'telephony',
     icon: '📞',
-    status: 'connected',
     configPath: '/integrations/fonoster',
   },
 ]
@@ -124,6 +128,28 @@ export default function IntegrationsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedCategory, setSelectedCategory] = useState('all')
 
+  // Real status, rather than the hardcoded 'disconnected' every entry used to
+  // carry. A catalogue that always claims nothing is connected is only
+  // accidentally right, and it was wrong the moment anything got configured.
+  const { data: connectors } = useListConnectorsQuery({ category: 'action' })
+
+  const statusFor = (integration: Integration): IntegrationStatus => {
+    if (!integration.connectorType) return 'disconnected'
+    const match = connectors?.items?.find(
+      (c) => c.connector_type === integration.connectorType
+    )
+    if (!match) return 'disconnected'
+    return match.status === 'connected' ? 'connected' : 'error'
+  }
+
+  const lastSyncFor = (integration: Integration): string | undefined => {
+    if (!integration.connectorType) return undefined
+    return (
+      connectors?.items?.find((c) => c.connector_type === integration.connectorType)
+        ?.last_sync_at ?? undefined
+    )
+  }
+
   const filteredIntegrations = integrations.filter((integration) => {
     const matchesSearch =
       integration.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -133,8 +159,8 @@ export default function IntegrationsPage() {
     return matchesSearch && matchesCategory
   })
 
-  const connectedCount = integrations.filter((i) => i.status === 'connected').length
-  const errorCount = integrations.filter((i) => i.status === 'error').length
+  const connectedCount = integrations.filter((i) => statusFor(i) === 'connected').length
+  const errorCount = integrations.filter((i) => statusFor(i) === 'error').length
 
   return (
     <div className="space-y-6">
@@ -205,7 +231,8 @@ export default function IntegrationsPage() {
       {/* Integration Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         {filteredIntegrations.map((integration) => {
-          const status = statusConfig[integration.status]
+          const liveStatus = statusFor(integration)
+          const status = statusConfig[liveStatus]
           const StatusIcon = status.icon
           return (
             <Link
@@ -233,9 +260,9 @@ export default function IntegrationsPage() {
               <div className="flex items-center justify-between">
                 <span className={cn('text-xs flex items-center gap-1', status.color)}>
                   {status.label}
-                  {integration.lastSync && integration.status === 'connected' && (
+                  {lastSyncFor(integration) && liveStatus === 'connected' && (
                     <span className="text-muted-foreground">
-                      • Synced {new Date(integration.lastSync).toLocaleTimeString()}
+                      • Synced {new Date(lastSyncFor(integration) as string).toLocaleTimeString()}
                     </span>
                   )}
                 </span>
