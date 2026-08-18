@@ -1048,6 +1048,49 @@ export const revopsApi = createApi({
       query: () => '/connectors/types',
     }),
 
+    // Rule migration / conversion. The backend converter has been real and
+    // well-tested for a while; the Migration Hub page was a mock that
+    // fabricated its validation results.
+    getMigrationFormats: builder.query<MigrationFormat[], void>({
+      query: () => '/migrate/formats',
+    }),
+
+    getMigrationAiStatus: builder.query<MigrationAiStatus, void>({
+      query: () => '/migrate/ai/status',
+    }),
+
+    convertRule: builder.mutation<ConvertRuleResponse, ConvertRuleRequest>({
+      query: (body) => ({
+        url: '/migrate/convert',
+        method: 'POST',
+        body,
+      }),
+    }),
+
+    bulkConvertRules: builder.mutation<BulkConvertResponse, BulkConvertRequest>({
+      query: (body) => ({
+        url: '/migrate/convert/bulk',
+        method: 'POST',
+        body,
+      }),
+    }),
+
+    aiConvertRule: builder.mutation<AiConvertResponse, AiConvertRequest>({
+      query: (body) => ({
+        url: '/migrate/convert/ai',
+        method: 'POST',
+        body,
+      }),
+    }),
+
+    explainRule: builder.mutation<{ explanation?: string }, ConvertRuleRequest>({
+      query: (body) => ({
+        url: '/migrate/explain',
+        method: 'POST',
+        body,
+      }),
+    }),
+
     // Telephony (Fonoster). The backend has had a full API since the per-org
     // telephony work; the settings page was a mock and never called it.
     getFonosterConfig: builder.query<FonosterConfig, void>({
@@ -2795,6 +2838,61 @@ export interface ConnectorListResponse {
   total: number
 }
 
+export interface MigrationFormat {
+  id: string
+  name: string
+  description: string
+}
+
+export interface MigrationAiStatus {
+  available?: boolean
+  providers?: string[]
+  [key: string]: unknown
+}
+
+export interface ConvertRuleRequest {
+  source_format: string
+  target_format: string
+  source_code: string
+}
+
+export interface ConvertRuleResponse {
+  converted_code: string
+  source_format: string
+  target_format: string
+  intermediate_sigma?: string | null
+}
+
+export interface BulkConvertRequest {
+  source_format: string
+  target_format: string
+  rules: string[]
+}
+
+export interface BulkConvertResponse {
+  results: Array<Record<string, unknown>>
+  success_count: number
+  error_count: number
+}
+
+export interface AiConvertRequest {
+  source_format: string
+  target_format: string
+  source_code: string
+  context?: string
+  provider?: string
+}
+
+export interface AiConvertResponse {
+  converted_code: string
+  source_format: string
+  target_format: string
+  provider: string
+  model: string
+  success: boolean
+  error?: string | null
+}
+
 export interface FonosterConfig {
   api_endpoint: string
   access_key_id: string
@@ -3891,6 +3989,12 @@ export const {
   useUpdateConnectorMutation,
   useDeleteConnectorMutation,
   useTestConnectorMutation,
+  useGetMigrationFormatsQuery,
+  useGetMigrationAiStatusQuery,
+  useConvertRuleMutation,
+  useBulkConvertRulesMutation,
+  useAiConvertRuleMutation,
+  useExplainRuleMutation,
   useGetFonosterConfigQuery,
   useUpdateFonosterConfigMutation,
   useTestFonosterConnectionMutation,

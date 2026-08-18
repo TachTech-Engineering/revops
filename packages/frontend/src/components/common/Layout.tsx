@@ -125,7 +125,6 @@ const navSections: NavSection[] = [
       { path: '/sla', label: 'SLA Tracking', icon: Clock },
       { path: '/dashboards', label: 'Dashboards', icon: LayoutGrid },
       { path: '/reports', label: 'Reports', icon: FileBarChart },
-      { path: '/report-builder', label: 'Report Builder', icon: FileBarChart },
     ],
   },
   {

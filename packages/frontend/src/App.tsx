@@ -64,7 +64,6 @@ const OpsGenieIntegrationPage = lazy(() => import('./pages/OpsGenieIntegrationPa
 const FonosterIntegrationPage = lazy(() => import('./pages/FonosterIntegrationPage'))
 // Reporting & Compliance
 const ComplianceDashboardPage = lazy(() => import('./pages/ComplianceDashboardPage'))
-const ReportBuilderPage = lazy(() => import('./pages/ReportBuilderPage'))
 const ExecutiveSummaryPage = lazy(() => import('./pages/ExecutiveSummaryPage'))
 // Catch-all for unknown paths inside the authenticated shell.
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
@@ -180,7 +179,11 @@ function App() {
                     <Route path="/integrations/fonoster" element={<FonosterIntegrationPage />} />
                     {/* Reporting & Compliance */}
                     <Route path="/compliance" element={<ComplianceDashboardPage />} />
-                    <Route path="/report-builder" element={<ReportBuilderPage />} />
+                    {/* The Report Builder page fabricated its templates, schedules and
+                        recipients while /reports does the same job for real against the
+                        scheduled-reports API. Redirected rather than rebuilt: its
+                        "custom sections and chart types" concept has no backend at all. */}
+                    <Route path="/report-builder" element={<Navigate to="/reports" replace />} />
                     <Route path="/executive-summary" element={<ExecutiveSummaryPage />} />
                     {/* Anything else: show a real "not found" page instead of
                         rendering null (a blank body under the shell). */}
