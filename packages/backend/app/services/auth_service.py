@@ -4,6 +4,7 @@ Authentication service for user management and JWT token handling.
 
 import hashlib
 import logging
+import re
 import secrets
 from datetime import timedelta
 from uuid import UUID
@@ -209,6 +210,19 @@ async def create_organization(
     return org
 
 
+def slugify_organization(name: str) -> str:
+    """Derive a URL-safe slug from an organization name.
+
+    Lowercased, runs of anything that is not a letter or digit collapsed to a
+    single hyphen, trimmed to the 100-character slug column. A name made
+    entirely of punctuation (or of characters that do not survive this) yields
+    an empty string, and the caller must ask for an explicit slug rather than
+    inventing one.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    return slug[:100].rstrip("-")
+
+
 async def register_account(
     db: AsyncSession,
     email: str,
@@ -232,8 +246,19 @@ async def register_account(
     role: UserRoleType | None = None
     org: Organization | None = None
 
-    if organization_name and organization_slug:
-        slug = organization_slug.lower()
+    if organization_name:
+        # A slug used to be required for the organization to be created at all,
+        # and asking for one is not obvious. Registering with just a name
+        # therefore produced a user with organization_id NULL who could log in
+        # and then got 403 "not associated with an organization" from every
+        # endpoint -- an account that looks fine and does nothing. The slug is
+        # now derived from the name when it is not supplied.
+        slug = (organization_slug or slugify_organization(organization_name)).lower()
+        if not slug:
+            raise AuthError(
+                "Could not derive an organization slug from that name; "
+                "please supply organization_slug"
+            )
         existing_org = await db.execute(select(Organization.id).where(Organization.slug == slug))
         if existing_org.scalar_one_or_none():
             raise AuthError("Organization slug already exists")
