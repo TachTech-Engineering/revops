@@ -25,6 +25,12 @@ from app.services.connectors.base import (
 )
 from app.services.syslog_receiver import parse_syslog_timestamp
 
+# Messages drained from the staging table per sync. These are local rows, not
+# an upstream API page, so this is sized to outrun arrival (a chatty device
+# sends a few hundred an hour) and still bound the work one sync does. A
+# backlog therefore shrinks every run instead of growing.
+SYSLOG_DRAIN_BATCH = 2000
+
 
 def content_external_id(prefix: str, *parts: object) -> str:
     """Build a stable external_id from the content of an event.
@@ -474,23 +480,35 @@ class UniFiSyslogConnector(DataSourceConnector):
             # persists traffic even when another replica runs the syncs.
             self._register_syslog_handler()
 
-            messages = await self._claim_messages(limit)
+            # `limit` is the caller's page size for paginated upstream APIs.
+            # These are local rows already accepted and acknowledged, so the
+            # bound that matters is how much work one sync should do, not how
+            # big an upstream page is. At the caller's default of 100 against a
+            # device sending ~700/hour the queue drains slower than it fills.
+            messages = await self._claim_messages(max(limit, SYSLOG_DRAIN_BATCH))
 
             logger.info(f"UniFi syslog: claimed {len(messages)} message(s) from the buffer")
 
-            # Retain every drained line before filtering. Messages older than
-            # `since`, and ones that never become alerts, are dropped from the
-            # buffer here -- this is their only chance to be persisted, and the
-            # device holds no copy.
+            # Retain every drained line. Messages that never become alerts are
+            # gone from the buffer after this -- the device holds no copy.
             await self._store_raw_logs(messages)
 
             normalized_alerts = []
             for msg in messages:
-                # Filter by timestamp
-                if msg.timestamp < since:
-                    continue
-
-                # Parse and normalize the syslog message
+                # Deliberately NOT filtered against `since`.
+                #
+                # That filter was correct when the buffer lived in memory and
+                # was drained moments after arrival. Now that messages queue
+                # durably, anything waiting in the queue is by definition older
+                # than the last sync, so `msg.timestamp < since` discarded the
+                # entire backlog: production logged "processed 0 alerts from
+                # 100 messages" on every run while 17,815 messages sat unread,
+                # the oldest 22 hours old.
+                #
+                # Claiming a message is the delivery guarantee, so a claimed
+                # message is always processed. Re-delivery is harmless because
+                # external_id is a content fingerprint and collides on the
+                # unique constraint.
                 alert = self._normalize_syslog_message(msg)
                 if alert:
                     normalized_alerts.append(alert)

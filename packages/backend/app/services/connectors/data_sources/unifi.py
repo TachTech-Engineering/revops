@@ -242,17 +242,20 @@ class UnifiConnector(DataSourceConnector):
             self._register_syslog_handler()
 
             async with AsyncSessionLocal() as db:
-                payloads = await syslog_event_buffer.claim_events(db, self.connector_id, limit)
+                payloads = await syslog_event_buffer.claim_events(
+                    db, self.connector_id, max(limit, SYSLOG_DRAIN_BATCH)
+                )
                 await db.commit()
             messages = [SyslogReceiverService.from_payload(p) for p in payloads]
 
             normalized_alerts = []
             for msg in messages:
-                # Filter by timestamp
-                if msg.timestamp < since:
-                    continue
-
-                # Parse and normalize the message
+                # Deliberately NOT filtered against `since` -- see
+                # UniFiSyslogConnector.fetch_alerts. Anything sitting in a
+                # durable queue is older than the last sync by definition, so
+                # that filter silently discarded the entire backlog. Claiming
+                # a message is the delivery guarantee; a claimed message is
+                # always processed.
                 alert = self._normalize_syslog_message(msg)
                 if alert:
                     normalized_alerts.append(alert)

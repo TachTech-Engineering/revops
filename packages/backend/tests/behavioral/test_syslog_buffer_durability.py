@@ -225,3 +225,50 @@ async def test_unknown_connector_stores_nothing(db_session, connector):
     """A payload list for a connector with no rows yields no writes."""
     assert await buf.push_events(db_session, connector.id, connector.organization_id, []) == 0
     assert await buf.count_pending(db_session, uuid.uuid4()) == 0
+
+
+async def test_a_backlogged_message_still_becomes_an_alert(db_session, connector):
+    """The regression that silently dropped a day of alerts.
+
+    fetch_alerts filtered claimed messages against `since` (the last sync).
+    Anything waiting in a durable queue is older than that by definition, so
+    the whole backlog was discarded: production logged "processed 0 alerts
+    from 100 messages" on every run while 17,815 messages sat unread, the
+    oldest 22 hours old. A claimed message must always be processed.
+    """
+    from app.services.connectors.data_sources.unifi_syslog import UniFiSyslogConnector
+
+    # An IDS line, which normalizes to an alert, received a day ago.
+    raw = (
+        "<30>Aug 17 14:10:33 DK-Lab DK-Lab suricata[1]: [1:2010935:3] "
+        "ET POLICY Suspicious inbound [Classification: Misc Attack] "
+        "[Priority: 2] {TCP} 10.0.0.5:443 -> 10.0.0.9:51234"
+    )
+    payload = _payload(raw)
+    payload["timestamp"] = (utcnow() - timedelta(days=1)).isoformat()
+
+    await buf.push_events(db_session, connector.id, connector.organization_id, [payload])
+    await db_session.commit()
+
+    claimed = await buf.claim_events(db_session, connector.id)
+    assert len(claimed) == 1
+
+    rebuilt = SyslogReceiverService.from_payload(claimed[0])
+    assert rebuilt.timestamp < utcnow() - timedelta(hours=1), "the message is genuinely old"
+
+    conn = UniFiSyslogConnector(connector_id=connector.id, config={}, credentials={})
+    alert = conn._normalize_syslog_message(rebuilt)
+
+    assert alert is not None, "a backlogged message must still produce an alert"
+
+
+async def test_the_drain_batch_outruns_arrival():
+    """A per-sync drain smaller than the arrival rate never catches up.
+
+    The caller's default page size is 100. At a 5-minute interval that is
+    1,200/hour, against a device that can send more -- so the queue grew
+    instead of draining.
+    """
+    from app.services.connectors.data_sources.unifi_syslog import SYSLOG_DRAIN_BATCH
+
+    assert SYSLOG_DRAIN_BATCH >= 1000, "must clear a backlog, not merely keep pace"
