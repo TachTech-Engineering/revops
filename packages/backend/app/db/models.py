@@ -131,6 +131,21 @@ class WidgetType(enum.StrEnum):
     CASE_SUMMARY = "case_summary"
     SLA_STATUS = "sla_status"
     CUSTOM_QUERY = "custom_query"
+    # These four have working renderers in the frontend widget registry
+    # (packages/frontend/src/components/dashboard/widgets/index.tsx), each
+    # backed by a real endpoint -- forecast, anomalies, MITRE coverage and rule
+    # health. They were absent from this enum, so /dashboards/widget-types
+    # never offered them and saving a dashboard containing one was rejected
+    # with a 422: reachable code nobody could reach. Widgets that only rendered
+    # fabricated data were deleted rather than added here.
+    #
+    # Safe to extend without a migration: widgets are stored in the JSON
+    # `widgets` column of custom_dashboards, not as a Postgres enum column, so
+    # this is validated by Pydantic at the API boundary only.
+    ALERT_FORECAST = "alert_forecast"
+    ANOMALY_DETECTION = "anomaly_detection"
+    COVERAGE_GAP = "coverage_gap"
+    STALE_RULES = "stale_rules"
 
 
 class MitreTactic(enum.StrEnum):
@@ -321,8 +336,12 @@ class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # ON DELETE CASCADE, matching password_reset_tokens. Without it, deleting a
+    # user failed outright with a foreign-key violation once they had ever
+    # logged in -- which is every real user. Offboarding and erasure requests
+    # both hit it, and the tokens are worthless without the user anyway.
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     token_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -1536,6 +1555,20 @@ class Connector(Base):
     last_sync_cursor: Mapped[str | None] = mapped_column(
         String(500), nullable=True
     )  # Pagination cursor
+    # Cross-replica sync lease. The scheduler runs on every backend replica and
+    # guarded against double-syncing with a process-local set, which three
+    # replicas do not share -- so all three could see the same connector as due
+    # and sync it simultaneously, tripling the API calls made to Panther and
+    # every other source.
+    #
+    # A replica claims a connector by setting this atomically; only the one
+    # whose UPDATE matches proceeds. It is distinct from last_sync_at because
+    # that value is the *sync window start* (see sync_connector_alerts), so
+    # writing it at claim time would make each sync fetch from "now" and
+    # silently skip everything since the previous run. A claim older than
+    # SYNC_CLAIM_STALE_MINUTES is reclaimable, so a replica that dies mid-sync
+    # does not strand the connector forever.
+    sync_claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

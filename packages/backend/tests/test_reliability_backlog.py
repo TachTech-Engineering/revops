@@ -13,6 +13,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.sql.dml import Update
 
 from app.services.case_service import (
     _sequence_lock_key,
@@ -111,8 +112,9 @@ class _FakeScalars:
 
 
 class _FakeResult:
-    def __init__(self, items):
+    def __init__(self, items, rowcount=0):
         self._items = items
+        self.rowcount = rowcount
 
     def scalars(self):
         return _FakeScalars(self._items)
@@ -251,8 +253,18 @@ def test_a_feed_stays_retryable_until_the_failure_threshold():
 
 
 class _FakeConnectorDB:
+    """Stands in for the session the scheduler opens each tick.
+
+    It has to serve two different statements now: the SELECT of due connectors,
+    and the conditional UPDATE that takes the cross-replica sync claim. The
+    claim grants once per connector, which is what the real UPDATE does -- a
+    double that always granted would let this test pass while production
+    double-synced.
+    """
+
     def __init__(self, connectors):
         self._connectors = connectors
+        self._claimed: set = set()
 
     async def __aenter__(self):
         return self
@@ -260,8 +272,16 @@ class _FakeConnectorDB:
     async def __aexit__(self, *_exc):
         return False
 
-    async def execute(self, *_args, **_kwargs):
+    async def execute(self, statement, *_args, **_kwargs):
+        if isinstance(statement, Update):
+            # Claim: granted the first time, refused while still held.
+            ids = {c.id for c in self._connectors} - self._claimed
+            self._claimed |= ids
+            return _FakeResult([], rowcount=1 if ids else 0)
         return _FakeResult(self._connectors)
+
+    async def commit(self):
+        return None
 
 
 async def test_long_running_sync_is_not_spawned_twice(monkeypatch):

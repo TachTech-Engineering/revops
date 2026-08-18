@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select, update
 
 from app.core.time_utils import utcnow
 from app.db.models import Connector, ConnectorCategory, ConnectorStatus
@@ -27,6 +27,11 @@ MAINTENANCE_LOCK_ID = 0x524D4E54
 # Correlation windows older than this are reaped. Matches the interval the
 # never-constructed APScheduler job declared before it was deleted.
 CORRELATION_WINDOW_MAX_AGE_HOURS = 24
+
+# A sync claim older than this is assumed to belong to a replica that died
+# mid-sync and becomes reclaimable. Matches the staleness window the Falco and
+# syslog staging buffers use.
+SYNC_CLAIM_STALE_MINUTES = 15
 
 
 class ConnectorSyncScheduler:
@@ -179,9 +184,19 @@ class ConnectorSyncScheduler:
                         continue
 
                     if connector.id in self._in_flight:
-                        logger.info(
+                        logger.debug(
                             f"Skipping auto-sync for connector {connector.name}: "
-                            "a sync is still running"
+                            "a sync is still running in this process"
+                        )
+                        continue
+
+                    # Claim across replicas. The set above only covers this
+                    # process, and the scheduler runs on all of them, so
+                    # without this every replica syncs the same connector at
+                    # the same time.
+                    if not await self._claim_connector(db, connector.id):
+                        logger.debug(
+                            f"Connector {connector.name} claimed by another replica; skipping"
                         )
                         continue
 
@@ -199,6 +214,47 @@ class ConnectorSyncScheduler:
                     task.add_done_callback(self._tasks.discard)
                 except Exception as e:
                     logger.error(f"Error checking connector {connector.id}: {e}")
+
+    async def _claim_connector(self, db, connector_id: UUID) -> bool:
+        """Take the cross-replica sync lease for a connector.
+
+        A single conditional UPDATE, so exactly one replica wins however many
+        race. A claim older than SYNC_CLAIM_STALE_MINUTES is reclaimable, which
+        is what stops a replica that was killed mid-sync from stranding the
+        connector until someone notices.
+        """
+        stale_before = utcnow() - timedelta(minutes=SYNC_CLAIM_STALE_MINUTES)
+        result = await db.execute(
+            update(Connector)
+            .where(
+                and_(
+                    Connector.id == connector_id,
+                    or_(
+                        Connector.sync_claimed_at.is_(None),
+                        Connector.sync_claimed_at < stale_before,
+                    ),
+                )
+            )
+            .values(sync_claimed_at=utcnow())
+        )
+        await db.commit()
+        return (result.rowcount or 0) > 0
+
+    async def _release_connector(self, connector_id: UUID) -> None:
+        """Drop the lease so a failed sync can be retried at its next interval.
+
+        Best effort: if this does not happen the claim simply expires.
+        """
+        try:
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    update(Connector)
+                    .where(Connector.id == connector_id)
+                    .values(sync_claimed_at=None)
+                )
+                await db.commit()
+        except Exception:
+            logger.exception("Could not release the sync claim for connector %s", connector_id)
 
     def _is_due_for_sync(self, connector: Connector, now: datetime) -> bool:
         """Check if a connector is due for sync based on its interval."""
@@ -223,6 +279,7 @@ class ConnectorSyncScheduler:
             logger.error(f"Auto-sync failed for connector {connector_id}: {e}")
         finally:
             self._in_flight.discard(connector_id)
+            await self._release_connector(connector_id)
 
 
 # Global scheduler instance

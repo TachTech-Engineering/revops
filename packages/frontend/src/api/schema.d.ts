@@ -10633,7 +10633,7 @@ export interface components {
          * WidgetType
          * @enum {string}
          */
-        WidgetType: "alert_summary" | "alerts_by_severity" | "alerts_by_status" | "alerts_over_time" | "top_rules" | "recent_alerts" | "incident_summary" | "case_summary" | "sla_status" | "custom_query";
+        WidgetType: "alert_summary" | "alerts_by_severity" | "alerts_by_status" | "alerts_over_time" | "top_rules" | "recent_alerts" | "incident_summary" | "case_summary" | "sla_status" | "custom_query" | "alert_forecast" | "anomaly_detection" | "coverage_gap" | "stale_rules";
         /** WorkflowCreate */
         WorkflowCreate: {
             /** Description */

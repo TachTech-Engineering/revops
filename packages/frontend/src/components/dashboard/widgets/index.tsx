@@ -11,17 +11,16 @@ import CoverageGapWidget from './CoverageGapWidget'
 import StaleRulesWidget from './StaleRulesWidget'
 
 /**
- * Widget types the renderer understands beyond the backend's `WidgetType`.
+ * Widget types the renderer understands.
  *
- * BLOCKER: these four are NOT selectable today. The backend `WidgetType` enum
- * (packages/backend/app/api/v1/dashboards.py) contains only alert_summary,
- * alerts_by_severity, alerts_by_status, alerts_over_time, top_rules,
- * recent_alerts, incident_summary, case_summary, sla_status and custom_query -
- * `GET /dashboards/widget-types` never offers these, and saving a dashboard
- * that carries one is rejected with a 422. They are kept because each renders
- * real API data (forecast, anomalies, MITRE coverage, rule health) and only
- * needs the backend enum extended to become reachable. Widgets that merely
- * displayed fabricated data were removed instead.
+ * alert_forecast, anomaly_detection, coverage_gap and stale_rules used to be
+ * unreachable: they render real API data, but the backend `WidgetType` enum
+ * did not list them, so `GET /dashboards/widget-types` never offered them and
+ * saving a dashboard containing one came back 422. The enum was extended
+ * (2026-08-18), so they are now selectable like any other.
+ *
+ * This alias stays until the generated schema is regenerated everywhere it is
+ * consumed; `WidgetType` from the API types already includes the four.
  */
 type ExtendedWidgetType = WidgetType | 'alert_forecast' | 'anomaly_detection' | 'coverage_gap' | 'stale_rules'
 

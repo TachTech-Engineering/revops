@@ -158,6 +158,26 @@ async def get_widget_types(user: OrgUserDep) -> list[dict]:
             "description": "Display results from a custom query",
             "default_size": {"w": 4, "h": 4},
         },
+        WidgetType.ALERT_FORECAST: {
+            "label": "Alert Forecast",
+            "description": "Projected alert volume from recent trend",
+            "default_size": {"w": 4, "h": 3},
+        },
+        WidgetType.ANOMALY_DETECTION: {
+            "label": "Anomaly Detection",
+            "description": "Alert volume anomalies against the recent baseline",
+            "default_size": {"w": 4, "h": 3},
+        },
+        WidgetType.COVERAGE_GAP: {
+            "label": "MITRE Coverage Gaps",
+            "description": "ATT&CK techniques with no detection coverage",
+            "default_size": {"w": 3, "h": 4},
+        },
+        WidgetType.STALE_RULES: {
+            "label": "Stale Rules",
+            "description": "Rules that have not fired recently",
+            "default_size": {"w": 3, "h": 4},
+        },
     }
 
     return [
