@@ -24,7 +24,18 @@ from app.services.connectors.data_sources.unifi_syslog import (
 TS = datetime(2026, 8, 17, 12, 0, 0)
 
 
+# The normalizer only raises alerts for security-relevant lines now, so these
+# tests -- which are about external_id determinism, not classification -- wrap
+# whatever they are given in a firewall-block shape so an alert comes back.
+def _alertable(message: str) -> str:
+    return (
+        f"[WAN_IN-block] IN=eth0 OUT=eth1 SRC=203.0.113.9 DST=10.0.0.5 "
+        f"PROTO=TCP SPT=1 DPT=22 {message}"
+    )
+
+
 def _msg(message: str, *, ts: datetime = TS, source_ip: str = "10.0.0.1", host: str = "udm"):
+    message = _alertable(message)
     return SimpleNamespace(
         message=message,
         raw=message,

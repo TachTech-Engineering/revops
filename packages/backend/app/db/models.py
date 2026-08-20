@@ -473,6 +473,17 @@ class FalcoIngestEvent(Base):
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Set once a drain has successfully turned this row into alerts.
+    #
+    # Without it, "claimed" and "in flight" were the same thing, so a row that
+    # had been processed perfectly well looked like a crashed sync 15 minutes
+    # later and was re-claimed. Because claims are taken oldest-first, the same
+    # rows were re-processed forever while newer ones were never reached, and
+    # the retention purge never fired because each re-claim refreshed
+    # claimed_at. Observed in production 2026-08-20: rows received on 08-17
+    # still being re-claimed three days later while 23,526 newer messages had
+    # never been touched once.
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (
         # The drain orders by received_at within a connector and filters on
@@ -528,6 +539,17 @@ class SyslogIngestEvent(Base):
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Set once a drain has successfully turned this row into alerts.
+    #
+    # Without it, "claimed" and "in flight" were the same thing, so a row that
+    # had been processed perfectly well looked like a crashed sync 15 minutes
+    # later and was re-claimed. Because claims are taken oldest-first, the same
+    # rows were re-processed forever while newer ones were never reached, and
+    # the retention purge never fired because each re-claim refreshed
+    # claimed_at. Observed in production 2026-08-20: rows received on 08-17
+    # still being re-claimed three days later while 23,526 newer messages had
+    # never been touched once.
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (
         Index(

@@ -23,6 +23,7 @@ from app.services.falco_event_buffer import (
     CLAIM_STALE_MINUTES,
     claim_events,
     count_pending,
+    mark_processed,
     purge_processed,
     push_events,
 )
@@ -144,7 +145,8 @@ async def test_purge_removes_only_old_claimed_rows(db_session, make_user):
         organization_id=ctx.org.id,
         events=[_event("a"), _event("b")],
     )
-    await claim_events(db_session, connector.id, limit=1)
+    claimed = await claim_events(db_session, connector.id, limit=1)
+    await mark_processed(db_session, [e.id for e in claimed])
 
     # Nothing is old enough yet.
     assert await purge_processed(db_session, older_than_hours=24) == 0
@@ -153,9 +155,11 @@ async def test_purge_removes_only_old_claimed_rows(db_session, make_user):
         FalcoIngestEvent.__table__.update()
         .where(
             FalcoIngestEvent.connector_id == connector.id,
-            FalcoIngestEvent.claimed_at.is_not(None),
+            FalcoIngestEvent.processed_at.is_not(None),
         )
-        .values(claimed_at=utcnow() - timedelta(hours=48))
+        # Retention keys on processed_at now: a re-claimed row had its
+        # claimed_at refreshed every pass, so it never aged out.
+        .values(processed_at=utcnow() - timedelta(hours=48))
     )
     assert await purge_processed(db_session, older_than_hours=24) >= 1
 

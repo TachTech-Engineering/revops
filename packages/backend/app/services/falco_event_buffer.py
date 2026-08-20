@@ -51,6 +51,9 @@ class FalcoEvent:
 
     payload: dict[str, Any]
     received_at: datetime
+    # Row id, so a drain can mark the event processed. Optional because
+    # callers construct these in tests without a backing row.
+    id: UUID | None = None
 
 
 async def push_events(
@@ -115,11 +118,21 @@ async def count_pending(db, connector_id: UUID) -> int:
 
 
 def _unclaimed_or_stale():
-    """Rows eligible to be claimed: never claimed, or claimed by a dead sync."""
+    """Rows eligible to be claimed.
+
+    Never claimed, or claimed by a sync that died before finishing. A row that
+    has been *processed* is never eligible again, whatever its claim looks
+    like: without that condition a successfully-drained row became re-claimable
+    15 minutes later, and because claims are taken oldest-first the same rows
+    cycled forever while newer ones were never reached.
+    """
     stale_before = utcnow() - timedelta(minutes=CLAIM_STALE_MINUTES)
-    return or_(
-        FalcoIngestEvent.claimed_at.is_(None),
-        FalcoIngestEvent.claimed_at < stale_before,
+    return and_(
+        FalcoIngestEvent.processed_at.is_(None),
+        or_(
+            FalcoIngestEvent.claimed_at.is_(None),
+            FalcoIngestEvent.claimed_at < stale_before,
+        ),
     )
 
 
@@ -147,10 +160,21 @@ async def claim_events(db, connector_id: UUID, limit: int = 100) -> list[FalcoEv
         update(FalcoIngestEvent)
         .where(FalcoIngestEvent.id.in_(candidate_ids))
         .values(claimed_at=utcnow())
-        .returning(FalcoIngestEvent.payload, FalcoIngestEvent.received_at)
+        .returning(FalcoIngestEvent.payload, FalcoIngestEvent.received_at, FalcoIngestEvent.id)
     )
     rows = result.all()
-    return [FalcoEvent(payload=row[0], received_at=row[1]) for row in rows]
+    return [FalcoEvent(payload=row[0], received_at=row[1], id=row[2]) for row in rows]
+
+
+async def mark_processed(db, ids: list[UUID]) -> int:
+    """Close out events a drain has successfully handled. See the syslog twin."""
+    ids = [i for i in ids if i is not None]
+    if not ids:
+        return 0
+    result = await db.execute(
+        update(FalcoIngestEvent).where(FalcoIngestEvent.id.in_(ids)).values(processed_at=utcnow())
+    )
+    return result.rowcount or 0
 
 
 async def purge_processed(db, older_than_hours: int = RETAIN_CLAIMED_HOURS) -> int:
@@ -159,8 +183,11 @@ async def purge_processed(db, older_than_hours: int = RETAIN_CLAIMED_HOURS) -> i
     result = await db.execute(
         delete(FalcoIngestEvent).where(
             and_(
-                FalcoIngestEvent.claimed_at.is_not(None),
-                FalcoIngestEvent.claimed_at < cutoff,
+                # processed_at, not claimed_at: a re-claimed row had its
+                # claimed_at refreshed on every pass, so it never aged out and
+                # the table grew without bound.
+                FalcoIngestEvent.processed_at.is_not(None),
+                FalcoIngestEvent.processed_at < cutoff,
             )
         )
     )

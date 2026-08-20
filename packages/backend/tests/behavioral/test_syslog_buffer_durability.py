@@ -66,7 +66,7 @@ async def test_a_message_received_on_one_replica_is_drained_by_another(db_sessio
     claimed = await buf.claim_events(db_session, connector.id, limit=100)
 
     assert len(claimed) == 1
-    assert claimed[0]["hostname"] == "DK-Lab"
+    assert claimed[0].payload["hostname"] == "DK-Lab"
 
 
 async def test_a_claimed_message_is_not_handed_out_twice(db_session, connector):
@@ -162,7 +162,7 @@ async def test_claims_are_scoped_to_the_connector(db_session, connector, make_us
 
     claimed = await buf.claim_events(db_session, connector.id)
     assert len(claimed) == 1
-    assert claimed[0]["hostname"] == "host-a"
+    assert claimed[0].payload["hostname"] == "host-a"
     assert await buf.count_pending(db_session, other.id) == 1, "the other connector is untouched"
 
 
@@ -171,15 +171,16 @@ async def test_purge_only_removes_old_claimed_rows(db_session, connector):
         db_session, connector.id, connector.organization_id, [_payload(), _payload()]
     )
     await db_session.commit()
-    await buf.claim_events(db_session, connector.id, limit=1)
+    claimed = await buf.claim_events(db_session, connector.id, limit=1)
+    await buf.mark_processed(db_session, [c.id for c in claimed])
 
     # Nothing is old enough yet.
     assert await buf.purge_processed(db_session) == 0
 
     await db_session.execute(
         text(
-            "UPDATE syslog_ingest_events SET claimed_at = :t "
-            "WHERE claimed_at IS NOT NULL AND connector_id = :c"
+            "UPDATE syslog_ingest_events SET processed_at = :t "
+            "WHERE processed_at IS NOT NULL AND connector_id = :c"
         ),
         {"t": utcnow() - timedelta(hours=buf.RETAIN_CLAIMED_HOURS + 1), "c": connector.id},
     )
@@ -198,7 +199,7 @@ async def test_a_round_trip_preserves_what_the_parser_found(db_session, connecto
     await db_session.commit()
 
     claimed = await buf.claim_events(db_session, connector.id)
-    rebuilt = SyslogReceiverService.from_payload(claimed[0])
+    rebuilt = SyslogReceiverService.from_payload(claimed[0].payload)
 
     assert rebuilt.hostname == "DK-Lab"
     assert rebuilt.app_name == "/usr/bin/unifi-mq-broker"
@@ -215,7 +216,7 @@ async def test_a_rebuilt_message_is_new_enough_to_become_an_alert(db_session, co
     await db_session.commit()
 
     claimed = await buf.claim_events(db_session, connector.id)
-    rebuilt = SyslogReceiverService.from_payload(claimed[0])
+    rebuilt = SyslogReceiverService.from_payload(claimed[0].payload)
 
     since = utcnow() - timedelta(minutes=5)
     assert rebuilt.timestamp >= since
@@ -253,7 +254,7 @@ async def test_a_backlogged_message_still_becomes_an_alert(db_session, connector
     claimed = await buf.claim_events(db_session, connector.id)
     assert len(claimed) == 1
 
-    rebuilt = SyslogReceiverService.from_payload(claimed[0])
+    rebuilt = SyslogReceiverService.from_payload(claimed[0].payload)
     assert rebuilt.timestamp < utcnow() - timedelta(hours=1), "the message is genuinely old"
 
     conn = UniFiSyslogConnector(connector_id=connector.id, config={}, credentials={})
@@ -272,3 +273,82 @@ async def test_the_drain_batch_outruns_arrival():
     from app.services.connectors.data_sources.unifi_syslog import SYSLOG_DRAIN_BATCH
 
     assert SYSLOG_DRAIN_BATCH >= 1000, "must clear a backlog, not merely keep pace"
+
+
+async def test_a_processed_message_is_never_claimed_again(db_session, connector):
+    """The livelock that grew the backlog 13,533 -> 38,321 over two days.
+
+    A claim is a lease. Nothing marked a row *done*, so 15 minutes later a
+    perfectly-processed row looked exactly like a sync that had died mid-drain
+    and became eligible again. Claims are taken oldest-first, so the same rows
+    were re-claimed forever while newer messages were never reached -- and the
+    retention purge never fired, because every re-claim refreshed claimed_at.
+    """
+    await buf.push_events(db_session, connector.id, connector.organization_id, [_payload()])
+    await db_session.commit()
+
+    claimed = await buf.claim_events(db_session, connector.id)
+    assert len(claimed) == 1
+    await buf.mark_processed(db_session, [c.id for c in claimed])
+
+    # Age the lease well past the staleness window.
+    await db_session.execute(
+        text("UPDATE syslog_ingest_events SET claimed_at = :t WHERE connector_id = :c"),
+        {"t": utcnow() - timedelta(minutes=buf.CLAIM_STALE_MINUTES + 60), "c": connector.id},
+    )
+
+    assert await buf.claim_events(db_session, connector.id) == [], (
+        "a processed row must never be re-claimed, however stale its lease looks"
+    )
+    assert await buf.count_pending(db_session, connector.id) == 0
+
+
+async def test_an_unprocessed_stale_claim_is_still_recovered(db_session, connector):
+    """Crash recovery must survive the fix: leased but never finished is retried."""
+    await buf.push_events(db_session, connector.id, connector.organization_id, [_payload()])
+    await db_session.commit()
+
+    await buf.claim_events(db_session, connector.id)  # claimed, never marked
+    await db_session.execute(
+        text("UPDATE syslog_ingest_events SET claimed_at = :t WHERE connector_id = :c"),
+        {"t": utcnow() - timedelta(minutes=buf.CLAIM_STALE_MINUTES + 1), "c": connector.id},
+    )
+
+    assert len(await buf.claim_events(db_session, connector.id)) == 1
+
+
+async def test_the_drain_advances_to_newer_messages(db_session, connector):
+    """The symptom, stated directly: a second drain must reach different rows.
+
+    Production ran 11 drains an hour, each claiming 2,000, and every one of
+    them re-chewed the same oldest rows.
+    """
+    payloads = [
+        _payload(f"<30>Aug 17 14:10:33 DK-Lab DK-Lab sshd[{i}]: line {i}") for i in range(6)
+    ]
+    await buf.push_events(db_session, connector.id, connector.organization_id, payloads)
+    await db_session.commit()
+
+    first = await buf.claim_events(db_session, connector.id, limit=3)
+    await buf.mark_processed(db_session, [c.id for c in first])
+    second = await buf.claim_events(db_session, connector.id, limit=3)
+
+    assert len(first) == 3 and len(second) == 3
+    assert {c.id for c in first}.isdisjoint({c.id for c in second}), "the drain must move forward"
+    assert await buf.count_pending(db_session, connector.id) == 0
+
+
+async def test_purge_uses_the_processed_marker(db_session, connector):
+    """Retention keyed on claimed_at never fired for a re-claimed row."""
+    await buf.push_events(db_session, connector.id, connector.organization_id, [_payload()])
+    await db_session.commit()
+    claimed = await buf.claim_events(db_session, connector.id)
+    await buf.mark_processed(db_session, [c.id for c in claimed])
+
+    assert await buf.purge_processed(db_session) == 0, "not old enough yet"
+
+    await db_session.execute(
+        text("UPDATE syslog_ingest_events SET processed_at = :t WHERE connector_id = :c"),
+        {"t": utcnow() - timedelta(hours=buf.RETAIN_CLAIMED_HOURS + 1), "c": connector.id},
+    )
+    assert await buf.purge_processed(db_session) == 1

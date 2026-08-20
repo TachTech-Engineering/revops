@@ -236,17 +236,18 @@ class UnifiConnector(DataSourceConnector):
         try:
             from app.db.session import AsyncSessionLocal
             from app.services import syslog_event_buffer
+            from app.services.connectors.data_sources.unifi_syslog import SYSLOG_DRAIN_BATCH
             from app.services.syslog_receiver import SyslogReceiverService
 
             # Keep this replica listening even when another runs the syncs.
             self._register_syslog_handler()
 
             async with AsyncSessionLocal() as db:
-                payloads = await syslog_event_buffer.claim_events(
+                claimed = await syslog_event_buffer.claim_events(
                     db, self.connector_id, max(limit, SYSLOG_DRAIN_BATCH)
                 )
                 await db.commit()
-            messages = [SyslogReceiverService.from_payload(p) for p in payloads]
+            messages = [SyslogReceiverService.from_payload(c.payload) for c in claimed]
 
             normalized_alerts = []
             for msg in messages:
@@ -259,6 +260,18 @@ class UnifiConnector(DataSourceConnector):
                 alert = self._normalize_syslog_message(msg)
                 if alert:
                     normalized_alerts.append(alert)
+
+            # Close out the lease. An unclosed lease goes stale and the rows
+            # are re-claimed forever; see syslog_event_buffer.mark_processed.
+            try:
+                async with AsyncSessionLocal() as db:
+                    await syslog_event_buffer.mark_processed(db, [c.id for c in claimed])
+                    await db.commit()
+            except Exception:
+                logger.exception(
+                    "Could not mark %s syslog row(s) processed; they will be retried",
+                    len(claimed),
+                )
 
             logger.info(
                 f"UniFi syslog: processed {len(normalized_alerts)} alerts "

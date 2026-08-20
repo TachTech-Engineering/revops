@@ -23,6 +23,7 @@ UniFi connector builds ``external_id`` from a content fingerprint (see
 """
 
 import logging
+from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any
 from uuid import UUID
@@ -127,19 +128,39 @@ async def count_pending(db, connector_id: UUID) -> int:
 
 
 def _unclaimed_or_stale():
-    """Rows eligible to be claimed: never claimed, or claimed by a dead sync."""
+    """Rows eligible to be claimed.
+
+    Never claimed, or claimed by a sync that died before finishing. A row that
+    has been *processed* is never eligible again, whatever its claim looks
+    like: without that condition a successfully-drained row became re-claimable
+    15 minutes later, and because claims are taken oldest-first the same rows
+    cycled forever while newer ones were never reached.
+    """
     stale_before = utcnow() - timedelta(minutes=CLAIM_STALE_MINUTES)
-    return or_(
-        SyslogIngestEvent.claimed_at.is_(None),
-        SyslogIngestEvent.claimed_at < stale_before,
+    return and_(
+        SyslogIngestEvent.processed_at.is_(None),
+        or_(
+            SyslogIngestEvent.claimed_at.is_(None),
+            SyslogIngestEvent.claimed_at < stale_before,
+        ),
     )
 
 
-async def claim_events(db, connector_id: UUID, limit: int = 100) -> list[dict[str, Any]]:
+@dataclass
+class ClaimedEvent:
+    """A staged row handed to a drain, with the id needed to close it out."""
+
+    id: UUID
+    payload: dict[str, Any]
+
+
+async def claim_events(db, connector_id: UUID, limit: int = 100) -> list[ClaimedEvent]:
     """Claim up to ``limit`` pending messages for a connector.
 
     Uses SKIP LOCKED so concurrent syncs on different replicas take disjoint
-    rows instead of blocking or double-processing.
+    rows instead of blocking or double-processing. The caller must call
+    ``mark_processed`` once it has handled them, or they will be re-claimed
+    when the lease goes stale.
     """
     candidate_ids = (
         select(SyslogIngestEvent.id)
@@ -159,9 +180,26 @@ async def claim_events(db, connector_id: UUID, limit: int = 100) -> list[dict[st
         update(SyslogIngestEvent)
         .where(SyslogIngestEvent.id.in_(candidate_ids))
         .values(claimed_at=utcnow())
-        .returning(SyslogIngestEvent.payload)
+        .returning(SyslogIngestEvent.id, SyslogIngestEvent.payload)
     )
-    return [row[0] for row in result.all()]
+    return [ClaimedEvent(id=row[0], payload=row[1]) for row in result.all()]
+
+
+async def mark_processed(db, ids: list[UUID]) -> int:
+    """Close out rows a drain has successfully handled.
+
+    Until this is set the row is only *leased*, and a lease that goes stale is
+    indistinguishable from a sync that died -- which is exactly how the same
+    rows ended up being re-processed indefinitely.
+    """
+    if not ids:
+        return 0
+    result = await db.execute(
+        update(SyslogIngestEvent)
+        .where(SyslogIngestEvent.id.in_(ids))
+        .values(processed_at=utcnow())
+    )
+    return result.rowcount or 0
 
 
 async def purge_processed(db, older_than_hours: int = RETAIN_CLAIMED_HOURS) -> int:
@@ -170,8 +208,11 @@ async def purge_processed(db, older_than_hours: int = RETAIN_CLAIMED_HOURS) -> i
     result = await db.execute(
         delete(SyslogIngestEvent).where(
             and_(
-                SyslogIngestEvent.claimed_at.is_not(None),
-                SyslogIngestEvent.claimed_at < cutoff,
+                # processed_at, not claimed_at: a re-claimed row had its
+                # claimed_at refreshed on every pass, so it never aged out and
+                # the table grew without bound.
+                SyslogIngestEvent.processed_at.is_not(None),
+                SyslogIngestEvent.processed_at < cutoff,
             )
         )
     )

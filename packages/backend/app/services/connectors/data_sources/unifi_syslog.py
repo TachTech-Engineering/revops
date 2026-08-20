@@ -31,6 +31,31 @@ from app.services.syslog_receiver import parse_syslog_timestamp
 # backlog therefore shrinks every run instead of growing.
 SYSLOG_DRAIN_BATCH = 2000
 
+# Which classified syslog categories are worth raising an alert for.
+#
+# Every line used to become an alert. Measured in production on 2026-08-20, one
+# drain produced 1,939 "low" alerts and 1 "critical", all titled "UniFi Syslog
+# Event" -- and the pending queue was topped by 3,803 coredns retries, 1,718
+# WiFi station-tracker dumps and 764 "sysstat-collect.service: Succeeded".
+# Burying the one real detection under two thousand pieces of routine
+# telemetry is how an alert stream stops being read.
+#
+# The rest are not discarded: every line is written to raw_log_events and is
+# searchable from Log Search. That store did not exist when this connector was
+# written, which is why alerting on everything was once the only way to keep
+# anything.
+ALERT_WORTHY_CATEGORIES = frozenset(
+    {
+        "ids_alert",
+        "threat_detection",
+        "honeypot",
+        "admin_login",
+        "config_change",
+        "vpn_event",
+        "firewall_block",
+    }
+)
+
 
 def content_external_id(prefix: str, *parts: object) -> str:
     """Build a stable external_id from the content of an event.
@@ -403,10 +428,35 @@ class UniFiSyslogConnector(DataSourceConnector):
         from app.services.syslog_receiver import SyslogReceiverService
 
         async with AsyncSessionLocal() as db:
-            payloads = await syslog_event_buffer.claim_events(db, self.connector_id, limit)
+            claimed = await syslog_event_buffer.claim_events(db, self.connector_id, limit)
             await db.commit()
 
-        return [SyslogReceiverService.from_payload(p) for p in payloads]
+        return [(c.id, SyslogReceiverService.from_payload(c.payload)) for c in claimed]
+
+    async def _mark_processed(self, ids: list) -> None:
+        """Close out the rows this drain handled.
+
+        A leased row that is never closed out looks like a crashed sync once
+        the lease goes stale, so it is re-claimed -- and because claims are
+        taken oldest-first, the same rows cycle forever while newer ones are
+        never reached. Best effort: if this fails the rows are simply
+        re-processed, which content-fingerprinted external_ids make harmless.
+        """
+        if not ids:
+            return
+        from app.db.session import AsyncSessionLocal
+        from app.services import syslog_event_buffer
+
+        try:
+            async with AsyncSessionLocal() as db:
+                await syslog_event_buffer.mark_processed(db, ids)
+                await db.commit()
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Could not mark %s syslog row(s) processed; they will be retried", len(ids)
+            )
 
     async def _store_raw_logs(self, messages: list) -> None:
         """Persist drained syslog lines. Never fails the sync."""
@@ -485,7 +535,9 @@ class UniFiSyslogConnector(DataSourceConnector):
             # bound that matters is how much work one sync should do, not how
             # big an upstream page is. At the caller's default of 100 against a
             # device sending ~700/hour the queue drains slower than it fills.
-            messages = await self._claim_messages(max(limit, SYSLOG_DRAIN_BATCH))
+            claimed = await self._claim_messages(max(limit, SYSLOG_DRAIN_BATCH))
+            claimed_ids = [row_id for row_id, _ in claimed]
+            messages = [msg for _, msg in claimed]
 
             logger.info(f"UniFi syslog: claimed {len(messages)} message(s) from the buffer")
 
@@ -513,6 +565,10 @@ class UniFiSyslogConnector(DataSourceConnector):
                 if alert:
                     normalized_alerts.append(alert)
 
+            # Closed out only after the lines are stored and normalized, so a
+            # crash mid-drain leaves them re-claimable rather than lost.
+            await self._mark_processed(claimed_ids)
+
             logger.info(
                 f"UniFi syslog: processed {len(normalized_alerts)} alerts "
                 f"from {len(messages)} messages"
@@ -526,8 +582,51 @@ class UniFiSyslogConnector(DataSourceConnector):
             logging.getLogger(__name__).exception(f"Failed to fetch UniFi syslog alerts: {e}")
             raise Exception(f"Failed to fetch UniFi syslog alerts: {str(e)}")
 
+    @staticmethod
+    def _cef_severity(severity: str) -> str:
+        """Map a CEF 0-10 severity onto the platform's scale."""
+        try:
+            sev_num = int(severity)
+        except (TypeError, ValueError):
+            return "info"
+        if sev_num >= 7:
+            return "critical"
+        if sev_num >= 5:
+            return "high"
+        if sev_num >= 3:
+            return "medium"
+        if sev_num >= 1:
+            return "low"
+        return "info"
+
+    def _classify(self, message: str) -> str | None:
+        """Which security category this line belongs to, if any.
+
+        Returns None for operational telemetry, which is the overwhelming
+        majority of syslog: it stays in the raw log store and is searchable,
+        but does not become an alert.
+        """
+        for category, pattern in self.PATTERNS.items():
+            if category not in self._alert_categories:
+                continue
+            if pattern.search(message):
+                return category
+        return None
+
+    @property
+    def _alert_categories(self) -> frozenset:
+        """Categories this connector alerts on. Overridable per connector."""
+        configured = self.config.get("alert_categories")
+        if configured:
+            return frozenset(configured) & frozenset(self.PATTERNS)
+        return ALERT_WORTHY_CATEGORIES & frozenset(self.PATTERNS)
+
     def _normalize_syslog_message(self, msg) -> NormalizedAlert | None:
-        """Normalize a syslog message to the unified alert schema."""
+        """Normalize a syslog message to the unified alert schema.
+
+        Returns None for a line that is not security-relevant. The line is
+        still stored and searchable; it simply is not an alert.
+        """
         # Parse CEF format: CEF:0|Vendor|Product|Version|EventID|Name|Severity|Extensions
         cef_pattern = re.compile(
             r"CEF:(\d+)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)"
@@ -543,30 +642,32 @@ class UniFiSyslogConnector(DataSourceConnector):
             title = f"[{product}] {name}"
             description = f"Event ID: {event_id}\nExtensions: {extensions}"
         else:
-            # Non-CEF message
-            title = f"UniFi Event: {message[:100]}"
+            # Not a structured UniFi CEF event, so classify the plain line.
+            # CEF events are UniFi's own security telemetry and are alerted on
+            # as-is; everything else has to earn it.
+            # Classified against the RAW line, not the parsed message: the
+            # parser strips the program tag, and several patterns anchor on it
+            # (ids_alert needs "suricata"/"snort", admin_login needs
+            # "ubnt-systemmgr"). Classifying the stripped message silently
+            # missed every IDS hit -- the single most important category.
+            category = self._classify(getattr(msg, "raw", None) or message)
+            if category is None:
+                return None
+            title = f"{category.replace('_', ' ').title()}: {message[:80]}"
             description = message
-            severity = "1"
-            event_id = "unknown"
+            severity = None  # taken from SEVERITY_MAP below
+            event_id = category
 
-        # Map CEF severity (0-10) to our severity
-        try:
-            sev_num = int(severity)
-            if sev_num >= 7:
-                norm_severity = "critical"
-            elif sev_num >= 5:
-                norm_severity = "high"
-            elif sev_num >= 3:
-                norm_severity = "medium"
-            elif sev_num >= 1:
-                norm_severity = "low"
-            else:
-                norm_severity = "info"
-        except ValueError:
-            norm_severity = "info"
+        # A classified line takes its severity from the category map; a CEF
+        # event carries its own 0-10 score.
+        if severity is None:
+            norm_severity = self.SEVERITY_MAP.get(event_id, "info")
+        else:
+            norm_severity = self._cef_severity(severity)
 
         source_ip = msg.source_ip if hasattr(msg, "source_ip") else "unknown"
         timestamp = msg.timestamp if hasattr(msg, "timestamp") else utcnow()
+        mitre = self.MITRE_MAPPINGS.get(event_id, {})
 
         return NormalizedAlert(
             id=uuid.uuid4(),
@@ -590,10 +691,10 @@ class UniFiSyslogConnector(DataSourceConnector):
             created_at_source=timestamp,
             updated_at_source=None,
             rule_id=event_id,
-            rule_name="UniFi Syslog Event",
-            tags=[f"source:{source_ip}", "connector:unifi_syslog"],
-            mitre_tactics=[],
-            mitre_techniques=[],
+            rule_name=event_id.replace("_", " ").title() if event_id else "UniFi Syslog Event",
+            tags=[f"source:{source_ip}", "connector:unifi_syslog", f"category:{event_id}"],
+            mitre_tactics=mitre.get("tactics", []),
+            mitre_techniques=mitre.get("techniques", []),
             raw_data={"raw_message": message, "source_ip": source_ip},
             ingested_at=utcnow(),
         )
