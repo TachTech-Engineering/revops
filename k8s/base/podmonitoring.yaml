@@ -1,0 +1,26 @@
+# Google Managed Prometheus scrape configuration.
+#
+# Managed collection is enabled on the cluster, so this is all that is needed
+# for the backend's /metrics endpoint to reach Cloud Monitoring -- no
+# Prometheus server to run or upgrade.
+#
+# The collector runs in-cluster and scrapes the pod directly on its container
+# port, which is why /metrics needs no authentication. It is not reachable from
+# outside: the ingress routes /api/* to this service and everything else to the
+# frontend, so an external request for /metrics gets the SPA, not the exporter.
+apiVersion: monitoring.googleapis.com/v1
+kind: PodMonitoring
+metadata:
+  name: backend
+  labels:
+    app: backend
+spec:
+  selector:
+    matchLabels:
+      app: backend
+  endpoints:
+    - port: http
+      path: /metrics
+      # The exporter caches for 10s, so anything faster returns repeats.
+      interval: 30s
+      timeout: 20s

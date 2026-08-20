@@ -25,6 +25,18 @@ from tests.route_utils import iter_http_routes
 PUBLIC_ROUTES: set[tuple[str, str]] = {
     # Health probes
     ("GET", "/health"),
+    # Prometheus exposition. Google Managed Prometheus scrapes the pod
+    # directly and cannot present a JWT, so this cannot be authenticated the
+    # way the API is. Three things keep that safe, and all three must hold if
+    # anyone changes it:
+    #   1. It is not routed here from outside. The ingress sends /api/* to this
+    #      service and everything else to the frontend, so an external request
+    #      for /metrics gets the SPA, never the exporter.
+    #   2. The ingress is fronted by IAP regardless.
+    #   3. It carries only aggregate operational gauges -- queue depths, store
+    #      sizes, sync ages. No organization ids, no connector names, no
+    #      message content. See app/core/metrics.py.
+    ("GET", "/metrics"),
     ("GET", "/api/v1/health"),
     ("GET", "/api/v1/health/ready"),
     # Auth: credential establishment / recovery (public by nature)

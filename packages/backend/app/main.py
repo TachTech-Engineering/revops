@@ -3,16 +3,17 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.v1.router import api_router
 from app.config import settings
-from app.db import init_db
+from app.db import get_db, init_db
 from app.jobs.connector_sync import start_connector_sync_scheduler, stop_connector_sync_scheduler
 from app.services.encryption_service import validate_encryption_config
 from app.services.escalation_service import (
@@ -190,3 +191,28 @@ app.include_router(api_router, prefix="/api/v1")
 async def health_check() -> dict[str, str]:
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics(db: AsyncSession = Depends(get_db)) -> Response:
+    """Operational metrics for Google Managed Prometheus.
+
+    Unauthenticated by design -- the collector scrapes the pod directly and
+    cannot present a token -- so it carries only aggregate operational gauges:
+    no organization ids, no connector names, no message content. It is not
+    reachable from outside the cluster either, because the ingress routes
+    /api/* here and everything else to the frontend.
+
+    Never fails the scrape: a blind exporter is bad, but one that 500s takes
+    every metric down with it, including the ones that would explain why.
+    """
+    from app.core import metrics as metrics_module
+
+    try:
+        body = await metrics_module.render(db)
+    except Exception:
+        logger.exception("Metrics scrape failed")
+        body = "# HELP revops_up 1 when the exporter completed a scrape.\n"
+        body += "# TYPE revops_up gauge\nrevops_up 0\n"
+
+    return Response(content=body, media_type="text/plain; version=0.0.4; charset=utf-8")

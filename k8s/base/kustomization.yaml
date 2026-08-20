@@ -17,3 +17,4 @@ resources:
   - managed-certificate.yaml
   - frontend-config.yaml
   - iap-backendconfig.yaml
+  - podmonitoring.yaml
