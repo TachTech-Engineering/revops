@@ -108,3 +108,55 @@ def test_the_defaults_are_security_categories():
     # Routine telemetry must not be in the default set.
     assert "system_event" not in ALERT_WORTHY_CATEGORIES
     assert "dhcp_event" not in ALERT_WORTHY_CATEGORIES
+
+
+def _cef(name: str, event_id: str, severity: str = "3") -> str:
+    return (
+        f"Jan  5 12:34:56 2026-08-20T14:10:33.123Z DK-Lab "
+        f"CEF:0|Ubiquiti|UniFi Network|4.0|{event_id}|{name}|{severity}|src=10.0.0.5"
+    )
+
+
+# Volumes measured in production on 2026-08-20.
+ROUTINE_CEF = [
+    ("WiFi Client Roamed", "402"),  # 1,434
+    ("WiFi Client Connected", "400"),  # 726
+    ("WiFi Client Disconnected", "401"),  # 684
+    ("Wired Client Connected", "403"),  # 65
+    ("Wired Client Disconnected", "404"),  # 63
+]
+
+
+@pytest.mark.parametrize(("name", "event_id"), ROUTINE_CEF)
+def test_routine_cef_telemetry_does_not_alert(connector, name, event_id):
+    """UniFi's CEF stream is 96% client association churn.
+
+    The first version of this filter exempted CEF entirely, on the assumption
+    that a structured vendor event was inherently security-relevant. Production
+    said otherwise: 2,972 connect/disconnect/roam events against 109 threat
+    detections.
+    """
+    assert connector._normalize_syslog_message(_parse(_cef(name, event_id))) is None
+
+
+@pytest.mark.parametrize(
+    ("name", "event_id"), [("Threat Detected", "200"), ("Network Accessed", "544")]
+)
+def test_meaningful_cef_events_still_alert(connector, name, event_id):
+    alert = connector._normalize_syslog_message(_parse(_cef(name, event_id)))
+
+    assert alert is not None
+    # Named for what happened. These used to be called "200" and "544".
+    assert alert.rule_name == name
+
+
+def test_an_unrecognised_cef_event_still_alerts(connector):
+    """The filter is a denylist on purpose.
+
+    Silently dropping a detection nobody anticipated is far worse than one
+    extra low-value alert, so anything unrecognised comes through.
+    """
+    alert = connector._normalize_syslog_message(_parse(_cef("Rogue AP Detected", "999")))
+
+    assert alert is not None
+    assert alert.rule_name == "Rogue AP Detected"

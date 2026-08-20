@@ -44,6 +44,21 @@ SYSLOG_DRAIN_BATCH = 2000
 # searchable from Log Search. That store did not exist when this connector was
 # written, which is why alerting on everything was once the only way to keep
 # anything.
+# UniFi's own CEF stream carries routine client telemetry alongside real
+# detections. Measured in production: 1,434 "WiFi Client Roamed", 726
+# "WiFi Client Connected", 684 "WiFi Client Disconnected" and 128 wired
+# equivalents, against 109 "Threat Detected". Matched on the human-readable
+# CEF name rather than the numeric event id, because those ids vary by
+# firmware.
+#
+# A denylist rather than an allowlist, deliberately: an unrecognised CEF event
+# still alerts. Silently dropping a detection nobody anticipated is a far worse
+# failure than one extra low-value alert.
+CEF_ROUTINE_EVENT_RE = re.compile(
+    r"\b(?:wi-?fi|wired|guest)?\s*client\s+(?:connected|disconnected|roamed|associated)\b",
+    re.IGNORECASE,
+)
+
 ALERT_WORTHY_CATEGORIES = frozenset(
     {
         "ids_alert",
@@ -639,8 +654,15 @@ class UniFiSyslogConnector(DataSourceConnector):
             cef_version, vendor, product, version, event_id, name, severity, extensions = (
                 match.groups()
             )
+            if CEF_ROUTINE_EVENT_RE.search(name or ""):
+                # Routine client association telemetry. Still stored and
+                # searchable in the raw log store; simply not an alert.
+                return None
             title = f"[{product}] {name}"
             description = f"Event ID: {event_id}\nExtensions: {extensions}"
+            # The CEF name says what happened; the numeric id does not. Naming
+            # alerts "401" was no better than naming them all the same thing.
+            cef_name = name or event_id
         else:
             # Not a structured UniFi CEF event, so classify the plain line.
             # CEF events are UniFi's own security telemetry and are alerted on
@@ -657,6 +679,7 @@ class UniFiSyslogConnector(DataSourceConnector):
             description = message
             severity = None  # taken from SEVERITY_MAP below
             event_id = category
+            cef_name = None
 
         # A classified line takes its severity from the category map; a CEF
         # event carries its own 0-10 score.
@@ -691,7 +714,10 @@ class UniFiSyslogConnector(DataSourceConnector):
             created_at_source=timestamp,
             updated_at_source=None,
             rule_id=event_id,
-            rule_name=event_id.replace("_", " ").title() if event_id else "UniFi Syslog Event",
+            rule_name=(
+                cef_name
+                or (event_id.replace("_", " ").title() if event_id else "UniFi Syslog Event")
+            ),
             tags=[f"source:{source_ip}", "connector:unifi_syslog", f"category:{event_id}"],
             mitre_tactics=mitre.get("tactics", []),
             mitre_techniques=mitre.get("techniques", []),
