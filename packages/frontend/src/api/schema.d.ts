@@ -755,6 +755,250 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Assets
+         * @description List assets with open alert / attack path counts.
+         */
+        get: operations["list_assets_api_v1_assets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assets/ciem/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ciem Summary
+         * @description CIEM-lite rollup: identity assets and their risk findings.
+         */
+        get: operations["ciem_summary_api_v1_assets_ciem_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assets/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Asset Graph
+         * @description Nodes/edges payload of the asset inventory for the graph view.
+         */
+        get: operations["asset_graph_api_v1_assets_graph_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assets/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Inventory
+         * @description Bulk upsert assets and relationships from an external inventory tool.
+         *
+         *     Imports are authoritative for exposure: an explicit internet_exposed=False
+         *     clears a flag finding-extraction set, because the inventory tool can see
+         *     the actual network path.
+         */
+        post: operations["import_inventory_api_v1_assets_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assets/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Asset Summary
+         * @description Inventory rollup for the dashboard.
+         */
+        get: operations["asset_summary_api_v1_assets_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assets/{asset_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Asset
+         * @description Asset detail with its relationships and open attack paths.
+         */
+        get: operations["get_asset_api_v1_assets__asset_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assets/{asset_id}/findings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Asset Findings
+         * @description Every alert linked to this asset, newest first.
+         */
+        get: operations["get_asset_findings_api_v1_assets__asset_id__findings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/attack-paths": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Attack Paths
+         * @description List attack path findings, riskiest first.
+         */
+        get: operations["list_attack_paths_api_v1_attack_paths_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/attack-paths/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Attack Path Summary
+         * @description Counts by status/severity/rule for the dashboard.
+         */
+        get: operations["attack_path_summary_api_v1_attack_paths_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/attack-paths/{finding_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Attack Path
+         * @description Full finding: description, path graph payload, and evidence alerts.
+         */
+        get: operations["get_attack_path_api_v1_attack_paths__finding_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/attack-paths/{finding_id}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss Attack Path
+         * @description Dismiss a finding (accepted risk). Stays dismissed across re-evaluation.
+         */
+        post: operations["dismiss_attack_path_api_v1_attack_paths__finding_id__dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/attack-paths/{finding_id}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reopen Attack Path
+         * @description Reopen a dismissed/resolved finding for triage.
+         */
+        post: operations["reopen_attack_path_api_v1_attack_paths__finding_id__reopen_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/audit": {
         parameters: {
             query?: never;
@@ -2616,6 +2860,26 @@ export interface paths {
          * @description Accept Falco alerts (single object or list) and buffer them for sync.
          */
         post: operations["ingest_falco_alerts_api_v1_ingest_falco__connector_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ingest/trivy/{connector_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Trivy Reports
+         * @description Accept Trivy reports (single object or list) and buffer them for sync.
+         */
+        post: operations["ingest_trivy_reports_api_v1_ingest_trivy__connector_id__post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6269,6 +6533,35 @@ export interface components {
             /** Name */
             name?: string | null;
         };
+        /** AssetImport */
+        AssetImport: {
+            /** Account Id */
+            account_id?: string | null;
+            /** Asset Type */
+            asset_type: string;
+            /** Attrs */
+            attrs?: {
+                [key: string]: unknown;
+            };
+            /** Criticality */
+            criticality?: number | null;
+            /** Data Classification */
+            data_classification?: string | null;
+            /** External Id */
+            external_id: string;
+            /** Internet Exposed */
+            internet_exposed?: boolean | null;
+            /** Labels */
+            labels?: {
+                [key: string]: unknown;
+            };
+            /** Name */
+            name: string;
+            /** Provider */
+            provider?: string | null;
+            /** Region */
+            region?: string | null;
+        };
         /** AuditLogListResponse */
         AuditLogListResponse: {
             /** Items */
@@ -8054,6 +8347,18 @@ export interface components {
             /** Title */
             title?: string | null;
         };
+        /** InventoryImport */
+        InventoryImport: {
+            /** Assets */
+            assets?: components["schemas"]["AssetImport"][];
+            /** Relationships */
+            relationships?: components["schemas"]["RelationshipImport"][];
+            /**
+             * Source
+             * @default import
+             */
+            source: string;
+        };
         /** LayoutItem */
         LayoutItem: {
             /** H */
@@ -8844,6 +9149,19 @@ export interface components {
             organization_slug?: string | null;
             /** Password */
             password: string;
+        };
+        /** RelationshipImport */
+        RelationshipImport: {
+            /** Attrs */
+            attrs?: {
+                [key: string]: unknown;
+            };
+            /** Relationship Type */
+            relationship_type: string;
+            /** Source External Id */
+            source_external_id: string;
+            /** Target External Id */
+            target_external_id: string;
         };
         /**
          * ReportFrequency
@@ -12236,6 +12554,381 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TrendResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_assets_api_v1_assets_get: {
+        parameters: {
+            query?: {
+                asset_type?: string | null;
+                provider?: string | null;
+                exposed_only?: boolean;
+                search?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ciem_summary_api_v1_assets_ciem_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    asset_graph_api_v1_assets_graph_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_inventory_api_v1_assets_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InventoryImport"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    asset_summary_api_v1_assets_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_asset_api_v1_assets__asset_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_asset_findings_api_v1_assets__asset_id__findings_get: {
+        parameters: {
+            query?: {
+                include_closed?: boolean;
+            };
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_attack_paths_api_v1_attack_paths_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                severity?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    attack_path_summary_api_v1_attack_paths_summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    get_attack_path_api_v1_attack_paths__finding_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                finding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_attack_path_api_v1_attack_paths__finding_id__dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                finding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reopen_attack_path_api_v1_attack_paths__finding_id__reopen_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                finding_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
             /** @description Validation Error */
@@ -15769,6 +16462,39 @@ export interface operations {
         };
     };
     ingest_falco_alerts_api_v1_ingest_falco__connector_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connector_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_trivy_reports_api_v1_ingest_trivy__connector_id__post: {
         parameters: {
             query?: never;
             header?: never;
