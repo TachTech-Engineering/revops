@@ -25,6 +25,52 @@ from app.services.connectors.base import (
 )
 from app.services.syslog_receiver import parse_syslog_timestamp
 
+# Messages drained from the staging table per sync. These are local rows, not
+# an upstream API page, so this is sized to outrun arrival (a chatty device
+# sends a few hundred an hour) and still bound the work one sync does. A
+# backlog therefore shrinks every run instead of growing.
+SYSLOG_DRAIN_BATCH = 2000
+
+# Which classified syslog categories are worth raising an alert for.
+#
+# Every line used to become an alert. Measured in production on 2026-08-20, one
+# drain produced 1,939 "low" alerts and 1 "critical", all titled "UniFi Syslog
+# Event" -- and the pending queue was topped by 3,803 coredns retries, 1,718
+# WiFi station-tracker dumps and 764 "sysstat-collect.service: Succeeded".
+# Burying the one real detection under two thousand pieces of routine
+# telemetry is how an alert stream stops being read.
+#
+# The rest are not discarded: every line is written to raw_log_events and is
+# searchable from Log Search. That store did not exist when this connector was
+# written, which is why alerting on everything was once the only way to keep
+# anything.
+# UniFi's own CEF stream carries routine client telemetry alongside real
+# detections. Measured in production: 1,434 "WiFi Client Roamed", 726
+# "WiFi Client Connected", 684 "WiFi Client Disconnected" and 128 wired
+# equivalents, against 109 "Threat Detected". Matched on the human-readable
+# CEF name rather than the numeric event id, because those ids vary by
+# firmware.
+#
+# A denylist rather than an allowlist, deliberately: an unrecognised CEF event
+# still alerts. Silently dropping a detection nobody anticipated is a far worse
+# failure than one extra low-value alert.
+CEF_ROUTINE_EVENT_RE = re.compile(
+    r"\b(?:wi-?fi|wired|guest)?\s*client\s+(?:connected|disconnected|roamed|associated)\b",
+    re.IGNORECASE,
+)
+
+ALERT_WORTHY_CATEGORIES = frozenset(
+    {
+        "ids_alert",
+        "threat_detection",
+        "honeypot",
+        "admin_login",
+        "config_change",
+        "vpn_event",
+        "firewall_block",
+    }
+)
+
 
 def content_external_id(prefix: str, *parts: object) -> str:
     """Build a stable external_id from the content of an event.
@@ -342,13 +388,17 @@ class UniFiSyslogConnector(DataSourceConnector):
     async def test_connection(self) -> ConnectionTestResult:
         """Test that syslog receiver is ready for UniFi logs."""
         try:
-            from app.services.syslog_receiver import get_syslog_receiver
+            from app.db.session import AsyncSessionLocal
+            from app.services import syslog_event_buffer
 
             # Register handler if not already registered
             self._register_syslog_handler()
 
-            syslog_receiver = get_syslog_receiver()
-            buffer_size = syslog_receiver.get_buffer_size(self.connector_id)
+            # Staged rows awaiting a sync, not this process's memory: with
+            # several replicas the local buffer is empty on most of them, so
+            # reporting it would show "0 buffered" on a busy connector.
+            async with AsyncSessionLocal() as db:
+                buffer_size = await syslog_event_buffer.count_pending(db, self.connector_id)
 
             return ConnectionTestResult(
                 success=True,
@@ -371,38 +421,168 @@ class UniFiSyslogConnector(DataSourceConnector):
                 message=f"Syslog receiver error: {str(e)}",
             )
 
+    @staticmethod
+    def _known(value: str | None) -> str | None:
+        """Drop the parser's "unknown" sentinel so it never reads as real data."""
+        value = (value or "").strip()
+        if not value or value.lower() == "unknown":
+            return None
+        return value
+
+    async def _claim_messages(self, limit: int) -> list:
+        """Claim staged syslog messages for this connector.
+
+        The claim is committed before the caller processes them. That is
+        deliberate: holding it open until the alerts are inserted would let a
+        crash mid-sync leave rows locked, and the claim is re-takeable after
+        CLAIM_STALE_MINUTES precisely so a dead sync recovers instead of
+        losing messages.
+        """
+        from app.db.session import AsyncSessionLocal
+        from app.services import syslog_event_buffer
+        from app.services.syslog_receiver import SyslogReceiverService
+
+        async with AsyncSessionLocal() as db:
+            claimed = await syslog_event_buffer.claim_events(db, self.connector_id, limit)
+            await db.commit()
+
+        return [(c.id, SyslogReceiverService.from_payload(c.payload)) for c in claimed]
+
+    async def _mark_processed(self, ids: list) -> None:
+        """Close out the rows this drain handled.
+
+        A leased row that is never closed out looks like a crashed sync once
+        the lease goes stale, so it is re-claimed -- and because claims are
+        taken oldest-first, the same rows cycle forever while newer ones are
+        never reached. Best effort: if this fails the rows are simply
+        re-processed, which content-fingerprinted external_ids make harmless.
+        """
+        if not ids:
+            return
+        from app.db.session import AsyncSessionLocal
+        from app.services import syslog_event_buffer
+
+        try:
+            async with AsyncSessionLocal() as db:
+                await syslog_event_buffer.mark_processed(db, ids)
+                await db.commit()
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "Could not mark %s syslog row(s) processed; they will be retried", len(ids)
+            )
+
+    async def _store_raw_logs(self, messages: list) -> None:
+        """Persist drained syslog lines. Never fails the sync."""
+        if not messages:
+            return
+        try:
+            from app.db.session import AsyncSessionLocal
+            from app.services import log_store
+
+            async with AsyncSessionLocal() as db:
+                org_id = await log_store.organization_for_connector(db, self.connector_id)
+                if org_id is None:
+                    return
+                await log_store.store_events(
+                    db,
+                    [
+                        log_store.LogEvent(
+                            organization_id=org_id,
+                            connector_id=self.connector_id,
+                            source_type="unifi_syslog",
+                            event_time=getattr(m, "timestamp", None) or utcnow(),
+                            message=(getattr(m, "raw", None) or getattr(m, "message", ""))[
+                                :100_000
+                            ],
+                            # "unknown" is the parser's sentinel for a hostname
+                            # it could not find. Storing it as a literal makes
+                            # it look like a real host to the search filter, so
+                            # it is recorded as NULL instead.
+                            host=self._known(getattr(m, "hostname", None)),
+                            source_ip=(getattr(m, "source_ip", "") or None),
+                            severity=str(getattr(m, "severity", "") or "") or None,
+                            attributes={
+                                "facility": getattr(m, "facility", None),
+                                "app_name": self._known(getattr(m, "app_name", None)),
+                                "process_id": getattr(m, "process_id", None),
+                                # Present only for RFC 3164, whose timestamps
+                                # have no timezone; event_time is receipt time
+                                # for those. See syslog_receiver._parse_message.
+                                "device_timestamp": getattr(m, "device_timestamp", None),
+                            },
+                        )
+                        for m in messages
+                    ],
+                )
+                await db.commit()
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception("Failed to retain UniFi syslog lines")
+
     async def fetch_alerts(
         self,
         since: datetime,
         limit: int = 100,
         cursor: str | None = None,
     ) -> tuple[list[NormalizedAlert], str | None]:
-        """Fetch alerts from the syslog buffer."""
+        """Fetch alerts from the durable syslog buffer.
+
+        Messages are claimed from ``syslog_ingest_events``, not from the
+        receiver's memory. Any replica can drain what any other replica
+        received -- which is the point: datagrams are load-balanced across
+        replicas while the sync runs on whichever one gets there first, so a
+        process-local buffer was drained by nobody.
+        """
         try:
             import logging
 
-            from app.services.syslog_receiver import get_syslog_receiver
-
             logger = logging.getLogger(__name__)
 
-            # Register handler if not already registered
+            # Keep this replica's listener registered so it accepts and
+            # persists traffic even when another replica runs the syncs.
             self._register_syslog_handler()
 
-            syslog_receiver = get_syslog_receiver()
-            messages = syslog_receiver.get_buffered_messages(self.connector_id, limit)
+            # `limit` is the caller's page size for paginated upstream APIs.
+            # These are local rows already accepted and acknowledged, so the
+            # bound that matters is how much work one sync should do, not how
+            # big an upstream page is. At the caller's default of 100 against a
+            # device sending ~700/hour the queue drains slower than it fills.
+            claimed = await self._claim_messages(max(limit, SYSLOG_DRAIN_BATCH))
+            claimed_ids = [row_id for row_id, _ in claimed]
+            messages = [msg for _, msg in claimed]
 
-            logger.info(f"UniFi syslog: fetching from buffer, got {len(messages)} messages")
+            logger.info(f"UniFi syslog: claimed {len(messages)} message(s) from the buffer")
+
+            # Retain every drained line. Messages that never become alerts are
+            # gone from the buffer after this -- the device holds no copy.
+            await self._store_raw_logs(messages)
 
             normalized_alerts = []
             for msg in messages:
-                # Filter by timestamp
-                if msg.timestamp < since:
-                    continue
-
-                # Parse and normalize the syslog message
+                # Deliberately NOT filtered against `since`.
+                #
+                # That filter was correct when the buffer lived in memory and
+                # was drained moments after arrival. Now that messages queue
+                # durably, anything waiting in the queue is by definition older
+                # than the last sync, so `msg.timestamp < since` discarded the
+                # entire backlog: production logged "processed 0 alerts from
+                # 100 messages" on every run while 17,815 messages sat unread,
+                # the oldest 22 hours old.
+                #
+                # Claiming a message is the delivery guarantee, so a claimed
+                # message is always processed. Re-delivery is harmless because
+                # external_id is a content fingerprint and collides on the
+                # unique constraint.
                 alert = self._normalize_syslog_message(msg)
                 if alert:
                     normalized_alerts.append(alert)
+
+            # Closed out only after the lines are stored and normalized, so a
+            # crash mid-drain leaves them re-claimable rather than lost.
+            await self._mark_processed(claimed_ids)
 
             logger.info(
                 f"UniFi syslog: processed {len(normalized_alerts)} alerts "
@@ -417,8 +597,51 @@ class UniFiSyslogConnector(DataSourceConnector):
             logging.getLogger(__name__).exception(f"Failed to fetch UniFi syslog alerts: {e}")
             raise Exception(f"Failed to fetch UniFi syslog alerts: {str(e)}")
 
+    @staticmethod
+    def _cef_severity(severity: str) -> str:
+        """Map a CEF 0-10 severity onto the platform's scale."""
+        try:
+            sev_num = int(severity)
+        except (TypeError, ValueError):
+            return "info"
+        if sev_num >= 7:
+            return "critical"
+        if sev_num >= 5:
+            return "high"
+        if sev_num >= 3:
+            return "medium"
+        if sev_num >= 1:
+            return "low"
+        return "info"
+
+    def _classify(self, message: str) -> str | None:
+        """Which security category this line belongs to, if any.
+
+        Returns None for operational telemetry, which is the overwhelming
+        majority of syslog: it stays in the raw log store and is searchable,
+        but does not become an alert.
+        """
+        for category, pattern in self.PATTERNS.items():
+            if category not in self._alert_categories:
+                continue
+            if pattern.search(message):
+                return category
+        return None
+
+    @property
+    def _alert_categories(self) -> frozenset:
+        """Categories this connector alerts on. Overridable per connector."""
+        configured = self.config.get("alert_categories")
+        if configured:
+            return frozenset(configured) & frozenset(self.PATTERNS)
+        return ALERT_WORTHY_CATEGORIES & frozenset(self.PATTERNS)
+
     def _normalize_syslog_message(self, msg) -> NormalizedAlert | None:
-        """Normalize a syslog message to the unified alert schema."""
+        """Normalize a syslog message to the unified alert schema.
+
+        Returns None for a line that is not security-relevant. The line is
+        still stored and searchable; it simply is not an alert.
+        """
         # Parse CEF format: CEF:0|Vendor|Product|Version|EventID|Name|Severity|Extensions
         cef_pattern = re.compile(
             r"CEF:(\d+)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|([^|]*)\|(.*)"
@@ -431,33 +654,43 @@ class UniFiSyslogConnector(DataSourceConnector):
             cef_version, vendor, product, version, event_id, name, severity, extensions = (
                 match.groups()
             )
+            if CEF_ROUTINE_EVENT_RE.search(name or ""):
+                # Routine client association telemetry. Still stored and
+                # searchable in the raw log store; simply not an alert.
+                return None
             title = f"[{product}] {name}"
             description = f"Event ID: {event_id}\nExtensions: {extensions}"
+            # The CEF name says what happened; the numeric id does not. Naming
+            # alerts "401" was no better than naming them all the same thing.
+            cef_name = name or event_id
         else:
-            # Non-CEF message
-            title = f"UniFi Event: {message[:100]}"
+            # Not a structured UniFi CEF event, so classify the plain line.
+            # CEF events are UniFi's own security telemetry and are alerted on
+            # as-is; everything else has to earn it.
+            # Classified against the RAW line, not the parsed message: the
+            # parser strips the program tag, and several patterns anchor on it
+            # (ids_alert needs "suricata"/"snort", admin_login needs
+            # "ubnt-systemmgr"). Classifying the stripped message silently
+            # missed every IDS hit -- the single most important category.
+            category = self._classify(getattr(msg, "raw", None) or message)
+            if category is None:
+                return None
+            title = f"{category.replace('_', ' ').title()}: {message[:80]}"
             description = message
-            severity = "1"
-            event_id = "unknown"
+            severity = None  # taken from SEVERITY_MAP below
+            event_id = category
+            cef_name = None
 
-        # Map CEF severity (0-10) to our severity
-        try:
-            sev_num = int(severity)
-            if sev_num >= 7:
-                norm_severity = "critical"
-            elif sev_num >= 5:
-                norm_severity = "high"
-            elif sev_num >= 3:
-                norm_severity = "medium"
-            elif sev_num >= 1:
-                norm_severity = "low"
-            else:
-                norm_severity = "info"
-        except ValueError:
-            norm_severity = "info"
+        # A classified line takes its severity from the category map; a CEF
+        # event carries its own 0-10 score.
+        if severity is None:
+            norm_severity = self.SEVERITY_MAP.get(event_id, "info")
+        else:
+            norm_severity = self._cef_severity(severity)
 
         source_ip = msg.source_ip if hasattr(msg, "source_ip") else "unknown"
         timestamp = msg.timestamp if hasattr(msg, "timestamp") else utcnow()
+        mitre = self.MITRE_MAPPINGS.get(event_id, {})
 
         return NormalizedAlert(
             id=uuid.uuid4(),
@@ -481,10 +714,13 @@ class UniFiSyslogConnector(DataSourceConnector):
             created_at_source=timestamp,
             updated_at_source=None,
             rule_id=event_id,
-            rule_name="UniFi Syslog Event",
-            tags=[f"source:{source_ip}", "connector:unifi_syslog"],
-            mitre_tactics=[],
-            mitre_techniques=[],
+            rule_name=(
+                cef_name
+                or (event_id.replace("_", " ").title() if event_id else "UniFi Syslog Event")
+            ),
+            tags=[f"source:{source_ip}", "connector:unifi_syslog", f"category:{event_id}"],
+            mitre_tactics=mitre.get("tactics", []),
+            mitre_techniques=mitre.get("techniques", []),
             raw_data={"raw_message": message, "source_ip": source_ip},
             ingested_at=utcnow(),
         )

@@ -43,8 +43,7 @@ class ProwlerConnector(DataSourceConnector):
             category=ConnectorCategory.DATA_SOURCE,
             display_name="Prowler",
             description=(
-                "Prowler - Cloud security posture findings for AWS, Azure, GCP, "
-                "and Kubernetes"
+                "Prowler - Cloud security posture findings for AWS, Azure, GCP, and Kubernetes"
             ),
             icon="prowler",
             config_schema={
@@ -172,9 +171,7 @@ class ProwlerConnector(DataSourceConnector):
                     )
                 response.raise_for_status()
 
-                total = (
-                    response.json().get("meta", {}).get("pagination", {}).get("count")
-                )
+                total = response.json().get("meta", {}).get("pagination", {}).get("count")
                 latency_ms = int((time.time() - start_time) * 1000)
 
                 return ConnectionTestResult(
@@ -269,9 +266,7 @@ class ProwlerConnector(DataSourceConnector):
         updated_at = None
         if attributes.get("updated_at"):
             try:
-                updated_at = datetime.fromisoformat(
-                    attributes["updated_at"].replace("Z", "+00:00")
-                )
+                updated_at = datetime.fromisoformat(attributes["updated_at"].replace("Z", "+00:00"))
             except (ValueError, TypeError):
                 pass
 

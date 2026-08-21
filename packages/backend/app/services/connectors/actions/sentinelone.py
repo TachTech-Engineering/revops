@@ -229,8 +229,7 @@ class SentinelOneActionConnector(ActionConnector):
             return ActionResult(
                 success=True,
                 message=(
-                    f"Disconnected {data.get('data', {}).get('affected', 0)} "
-                    "agent(s) from network"
+                    f"Disconnected {data.get('data', {}).get('affected', 0)} agent(s) from network"
                 ),
                 output={"agent_ids": agent_ids, "affected": data.get("data", {}).get("affected")},
             )
@@ -257,8 +256,7 @@ class SentinelOneActionConnector(ActionConnector):
             return ActionResult(
                 success=True,
                 message=(
-                    f"Reconnected {data.get('data', {}).get('affected', 0)} "
-                    "agent(s) to network"
+                    f"Reconnected {data.get('data', {}).get('affected', 0)} agent(s) to network"
                 ),
                 output={"agent_ids": agent_ids, "affected": data.get("data", {}).get("affected")},
             )

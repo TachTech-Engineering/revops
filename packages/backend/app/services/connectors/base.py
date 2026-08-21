@@ -131,9 +131,7 @@ class DataSourceConnector(ABC):
         """
         pass
 
-    async def push_status_update(
-        self, alert: NormalizedAlert, new_status: str
-    ) -> StatusPushResult:
+    async def push_status_update(self, alert: NormalizedAlert, new_status: str) -> StatusPushResult:
         """
         Push a RevOps status change back to the source tool (two-way sync).
 

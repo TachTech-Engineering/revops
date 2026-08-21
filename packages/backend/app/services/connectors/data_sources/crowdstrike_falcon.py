@@ -451,9 +451,7 @@ class CrowdStrikeFalconConnector(DataSourceConnector):
                     },
                     json={
                         "composite_ids": [alert.external_id],
-                        "action_parameters": [
-                            {"name": "update_status", "value": cs_status}
-                        ],
+                        "action_parameters": [{"name": "update_status", "value": cs_status}],
                     },
                 )
 

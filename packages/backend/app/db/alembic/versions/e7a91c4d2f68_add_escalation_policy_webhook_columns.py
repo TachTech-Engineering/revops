@@ -30,8 +30,7 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.execute(
-        "ALTER TABLE escalation_policies "
-        "ADD COLUMN IF NOT EXISTS webhook_secret VARCHAR(255)"
+        "ALTER TABLE escalation_policies ADD COLUMN IF NOT EXISTS webhook_secret VARCHAR(255)"
     )
     op.execute(
         "ALTER TABLE escalation_policies "

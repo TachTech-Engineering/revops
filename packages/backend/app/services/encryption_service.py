@@ -58,7 +58,7 @@ def _build_fernet(encryption_key: str) -> Fernet:
                 "ENCRYPTION_KEY is set but is not a valid Fernet key "
                 "(expected 32 url-safe base64-encoded bytes, i.e. a 44-character "
                 "string ending in '='). Generate one with "
-                "`python -c \"from cryptography.fernet import Fernet; "
+                '`python -c "from cryptography.fernet import Fernet; '
                 'print(Fernet.generate_key().decode())"`. Refusing to fall back to a '
                 "key derived from SECRET_KEY, which would silently encrypt "
                 "credentials under the wrong key."

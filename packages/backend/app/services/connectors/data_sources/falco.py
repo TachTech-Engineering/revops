@@ -151,7 +151,7 @@ class FalcoConnector(DataSourceConnector):
     ) -> tuple[list[NormalizedAlert], str | None]:
         """Drain buffered webhook events and normalize them."""
         from app.db.session import AsyncSessionLocal
-        from app.services.falco_event_buffer import claim_events, count_pending
+        from app.services.falco_event_buffer import claim_events, count_pending, mark_processed
 
         # Events are rows now, so any replica's sync can drain them -- not just
         # the pod whose memory happened to receive the webhook. fetch_alerts
@@ -182,6 +182,13 @@ class FalcoConnector(DataSourceConnector):
                 continue
 
             normalized_alerts.append(self.normalize_alert(payload))
+
+        # Close out the lease. Filtered-out events count as handled: they were
+        # examined and deliberately dropped, so re-claiming them would just
+        # re-drop them forever once the lease went stale.
+        async with AsyncSessionLocal() as db:
+            await mark_processed(db, [e.id for e in events])
+            await db.commit()
 
         # Signal the sync loop to keep draining if events remain
         async with AsyncSessionLocal() as db:

@@ -26,6 +26,7 @@ from app.api.v1 import (
     incidents,
     ioc_search,
     iocs,
+    logs,
     migrate,
     mitre,
     nl_queries,
@@ -100,6 +101,7 @@ api_router.include_router(suppression.router, prefix="/suppression-rules", tags=
 api_router.include_router(settings.router, prefix="/settings", tags=["settings"])
 api_router.include_router(webhooks.router, prefix="/webhooks", tags=["webhooks"])
 api_router.include_router(ioc_search.router, prefix="/ioc", tags=["ioc-search"])
+api_router.include_router(logs.router, prefix="/logs", tags=["logs"])
 api_router.include_router(threat_intel.router, prefix="/threat-intel", tags=["threat-intel"])
 api_router.include_router(roles.router, prefix="/roles", tags=["roles"])
 api_router.include_router(audit.router, prefix="/audit", tags=["audit"])
