@@ -6,6 +6,8 @@ from app.api.v1 import (
     alert_clusters,
     alerts,
     analytics,
+    assets,
+    attack_paths,
     audit,
     auth,
     cases,
@@ -55,6 +57,7 @@ from app.api.v1 import (
     threat_intel,
     trend_analytics,
     triage,
+    trivy_ingest,
     twilio_webhook,
     users,
     webhooks,
@@ -147,6 +150,11 @@ api_router.include_router(trend_analytics.router, prefix="/analytics", tags=["tr
 api_router.include_router(fonoster.router, prefix="/fonoster", tags=["fonoster"])
 api_router.include_router(twilio_webhook.router, prefix="/twilio", tags=["twilio-webhook"])
 api_router.include_router(falco_ingest.router, prefix="/ingest", tags=["falco-ingest"])
+api_router.include_router(trivy_ingest.router, prefix="/ingest", tags=["trivy-ingest"])
+
+# CNAPP: asset inventory & attack paths
+api_router.include_router(assets.router, prefix="/assets", tags=["assets"])
+api_router.include_router(attack_paths.router, prefix="/attack-paths", tags=["attack-paths"])
 
 # SOC Collaboration Features
 api_router.include_router(presence.router, prefix="/presence", tags=["presence"])

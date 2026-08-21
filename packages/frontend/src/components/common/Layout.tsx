@@ -32,6 +32,9 @@ import {
   Plug,
   GitBranch,
   KeyRound,
+  Cloud,
+  Boxes,
+  Route,
 } from 'lucide-react'
 import { RootState } from '../../store'
 import { toggleSidebar } from '../../store/uiSlice'
@@ -71,6 +74,15 @@ const navSections: NavSection[] = [
       { path: '/alerts/clusters', label: 'Alert Clusters', icon: LayoutGrid },
       { path: '/incidents', label: 'Incidents', icon: AlertTriangle },
       { path: '/escalation-policies', label: 'Escalation', icon: Bell },
+    ],
+  },
+  {
+    id: 'cloud-security',
+    label: 'Cloud Security',
+    icon: Cloud,
+    items: [
+      { path: '/assets', label: 'Assets', icon: Boxes },
+      { path: '/attack-paths', label: 'Attack Paths', icon: Route },
     ],
   },
   {

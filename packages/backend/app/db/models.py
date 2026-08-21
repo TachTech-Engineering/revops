@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
@@ -992,6 +992,7 @@ class DataSourceCategory(enum.StrEnum):
     EDR = "edr"  # Endpoint Detection & Response
     XDR = "xdr"  # Extended Detection & Response
     CLOUD_SECURITY = "cloud_security"  # Cloud Security Posture Management
+    VULNERABILITY = "vulnerability"  # Vulnerability / workload scanning
     IDENTITY = "identity"  # Identity & Access Management
     EMAIL_SECURITY = "email_security"  # Email Security Gateways
     NETWORK = "network"  # Network Detection & Response
@@ -1030,6 +1031,8 @@ class DataSourceType(enum.StrEnum):
     PROWLER = "prowler"
     # Runtime Security
     FALCO = "falco"
+    # Vulnerability Management
+    TRIVY = "trivy"
     # Identity
     OKTA = "okta"
     AZURE_AD_IDENTITY = "azure_ad_identity"
@@ -1070,6 +1073,8 @@ DATA_SOURCE_CATEGORIES: dict[DataSourceType, DataSourceCategory] = {
     DataSourceType.PROWLER: DataSourceCategory.CLOUD_SECURITY,
     # Runtime Security (Falco watches host/container behavior, closest to EDR)
     DataSourceType.FALCO: DataSourceCategory.EDR,
+    # Vulnerability Management
+    DataSourceType.TRIVY: DataSourceCategory.VULNERABILITY,
     # Identity
     DataSourceType.OKTA: DataSourceCategory.IDENTITY,
     DataSourceType.AZURE_AD_IDENTITY: DataSourceCategory.IDENTITY,
@@ -2800,3 +2805,282 @@ class HuntResult(Base):
 
     # Relationship
     hunt: Mapped["ThreatHunt"] = relationship("ThreatHunt", back_populates="results")
+
+
+# ==================== CLOUD SECURITY (CNAPP) MODELS ====================
+# Asset inventory, vulnerability enrichment, and toxic-combination findings.
+# Falco (runtime) + Prowler (posture) + Trivy (vulnerabilities) alerts are
+# linked to CloudAssets, and the attack path engine correlates across sources
+# per asset -- the graph-and-context layer, not another scanner.
+
+
+class IngestEvent(Base):
+    """Webhook-pushed events awaiting a connector's sync cycle.
+
+    Generic sibling of FalcoIngestEvent for push-based connectors added after
+    it (Trivy today). Same at-least-once claim semantics: connectors derive
+    ``external_id`` from a content fingerprint, so a re-processed event
+    collides with ``uq_normalized_alerts_org_connector_external`` and is
+    dropped rather than duplicated.
+    """
+
+    __tablename__ = "ingest_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    connector_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("connectors.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    connector_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "ix_ingest_events_connector_claim",
+            "connector_id",
+            "claimed_at",
+            "received_at",
+        ),
+    )
+
+
+class CveEnrichment(Base):
+    """Exploitability context for a CVE: EPSS score and CISA KEV membership.
+
+    Global (not org-scoped): a CVE's exploitability is a fact about the CVE,
+    not about a tenant. Synced daily from the public FIRST EPSS and CISA KEV
+    feeds and used to prioritize vulnerability alerts the way Wiz does --
+    "exploited in the wild" beats raw CVSS.
+    """
+
+    __tablename__ = "cve_enrichment"
+
+    cve_id: Mapped[str] = mapped_column(String(30), primary_key=True)  # e.g. CVE-2024-3094
+    epss_score: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0..1
+    epss_percentile: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0..1
+    in_kev: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    kev_date_added: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    kev_ransomware: Mapped[bool] = mapped_column(Boolean, default=False)
+    kev_vulnerability_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AssetType(enum.StrEnum):
+    HOST = "host"
+    VM_INSTANCE = "vm_instance"
+    CONTAINER = "container"
+    CONTAINER_IMAGE = "container_image"
+    K8S_POD = "k8s_pod"
+    K8S_NAMESPACE = "k8s_namespace"
+    K8S_CLUSTER = "k8s_cluster"
+    CLOUD_ACCOUNT = "cloud_account"
+    STORAGE_BUCKET = "storage_bucket"
+    DATABASE = "database"
+    IAM_IDENTITY = "iam_identity"
+    IAM_ROLE = "iam_role"
+    NETWORK = "network"
+    SERVERLESS_FUNCTION = "serverless_function"
+    LOAD_BALANCER = "load_balancer"
+    SERVICE = "service"
+    OTHER = "other"
+
+
+class CloudAsset(Base):
+    """A cloud/workload asset observed by any connected security tool.
+
+    Rows are upserted from two directions: cheaply, by extracting resource
+    identity from Prowler/Trivy/Falco findings as they are ingested; and in
+    bulk, from an external inventory sync (Cartography/CloudQuery) via
+    POST /api/v1/assets/import. ``external_id`` is the provider-native ID
+    (ARN, GCP resource name) when known, else a derived stable key like
+    ``host:web-01`` or ``image:nginx:1.25``.
+    """
+
+    __tablename__ = "cloud_assets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    external_id: Mapped[str] = mapped_column(String(1000), nullable=False)
+    asset_type: Mapped[AssetType] = mapped_column(SQLEnum(AssetType), nullable=False)
+    name: Mapped[str] = mapped_column(String(500), nullable=False)
+    provider: Mapped[str | None] = mapped_column(String(50), nullable=True)  # aws, gcp, azure, k8s
+    account_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    region: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    # Exposure and business context feeding attack-path evaluation
+    internet_exposed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    criticality: Mapped[int] = mapped_column(Integer, default=5)  # 1-10, matches AssetCriticality
+    data_classification: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    labels: Mapped[dict] = mapped_column(JSONB, default=dict)  # provider tags/labels
+    attrs: Mapped[dict] = mapped_column(JSONB, default=dict)  # type-specific attributes
+    sources: Mapped[list] = mapped_column(JSONB, default=list)  # source_types that observed it
+
+    first_seen: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_seen: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        # Upserts race across concurrent connector syncs exactly like alert
+        # inserts do; the unique index is what settles them.
+        Index(
+            "uq_cloud_assets_org_external",
+            "organization_id",
+            "external_id",
+            unique=True,
+        ),
+        Index("ix_cloud_assets_org_type", "organization_id", "asset_type"),
+    )
+
+    @validates("external_id", "name", "provider", "account_id", "region", "data_classification")
+    def _clamp_to_column_width(self, key: str, value: str | None) -> str | None:
+        # Asset identity comes from external scanner output (image names with
+        # digests, ARNs embedded in finding UIDs) and can exceed the column.
+        if isinstance(value, str):
+            limit = getattr(type(self).__table__.columns[key].type, "length", None)
+            if limit is not None and len(value) > limit:
+                return value[:limit]
+        return value
+
+
+class AssetRelationship(Base):
+    """A directed edge between two assets (runs_on, contains, can_access...)."""
+
+    __tablename__ = "asset_relationships"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    source_asset_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cloud_assets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    target_asset_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cloud_assets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # runs_on, contains, member_of, assumes_role, can_access, exposes
+    relationship_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    attrs: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index(
+            "uq_asset_relationships_edge",
+            "organization_id",
+            "source_asset_id",
+            "target_asset_id",
+            "relationship_type",
+            unique=True,
+        ),
+    )
+
+
+class AssetAlertLink(Base):
+    """Links a normalized alert to the asset(s) it concerns."""
+
+    __tablename__ = "asset_alert_links"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cloud_assets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    alert_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("normalized_alerts.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("uq_asset_alert_links_pair", "asset_id", "alert_id", unique=True),
+    )
+
+
+class AttackPathStatus(enum.StrEnum):
+    OPEN = "open"
+    RESOLVED = "resolved"
+    DISMISSED = "dismissed"
+
+
+class AttackPathFinding(Base):
+    """A toxic combination detected on an asset.
+
+    Synthesized by the attack path engine when independent findings from
+    different tools compound on one asset (e.g. internet exposure from
+    Prowler + an actively-exploited CVE from Trivy). ``path`` holds the
+    nodes/edges rendered by the frontend graph view. One row per
+    (rule, asset): re-evaluation updates the row rather than duplicating it,
+    and resolves it when a contributing condition clears.
+    """
+
+    __tablename__ = "attack_path_findings"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    asset_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cloud_assets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    rule_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    title: Mapped[str] = mapped_column(String(1000), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[AttackPathStatus] = mapped_column(
+        SQLEnum(AttackPathStatus), default=AttackPathStatus.OPEN, index=True
+    )
+    risk_score: Mapped[float] = mapped_column(Float, default=0.0)  # 0-100
+
+    # Graph payload for visualization: {"nodes": [...], "edges": [...]}
+    path: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Contributing NormalizedAlert IDs (evidence)
+    alert_ids: Mapped[list] = mapped_column(JSONB, default=list)
+
+    incident_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("incidents.id", ondelete="SET NULL"), nullable=True
+    )
+
+    first_detected: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_evaluated: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (
+        Index(
+            "uq_attack_path_findings_rule_asset",
+            "organization_id",
+            "rule_key",
+            "asset_id",
+            unique=True,
+        ),
+    )

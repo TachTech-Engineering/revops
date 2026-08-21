@@ -42,6 +42,11 @@ const WorkflowsPage = lazy(() => import('./pages/WorkflowsPage'))
 const WorkflowEditorPage = lazy(() => import('./pages/WorkflowEditorPage'))
 const AlertsPage = lazy(() => import('./pages/UnifiedAlertsPage'))
 const AlertDetailPage = lazy(() => import('./pages/AlertDetailPage'))
+// CNAPP: Cloud Security (asset inventory + attack paths)
+const AssetsPage = lazy(() => import('./pages/AssetsPage'))
+const AssetDetailPage = lazy(() => import('./pages/AssetDetailPage'))
+const AttackPathsPage = lazy(() => import('./pages/AttackPathsPage'))
+const AttackPathDetailPage = lazy(() => import('./pages/AttackPathDetailPage'))
 // New Feature Pages
 const ClusteredAlertsPage = lazy(() => import('./pages/ClusteredAlertsPage'))
 const ClusteredAlertDetailPage = lazy(() => import('./pages/ClusteredAlertDetailPage'))
@@ -124,6 +129,11 @@ function App() {
                     <Route path="/alerts/:alertId" element={<AlertDetailPage />} />
                     <Route path="/incidents" element={<IncidentsPage />} />
                     <Route path="/incidents/:id" element={<IncidentDetailPage />} />
+                    {/* Cloud Security (CNAPP) */}
+                    <Route path="/assets" element={<AssetsPage />} />
+                    <Route path="/assets/:assetId" element={<AssetDetailPage />} />
+                    <Route path="/attack-paths" element={<AttackPathsPage />} />
+                    <Route path="/attack-paths/:findingId" element={<AttackPathDetailPage />} />
                     {/* On-Call & Escalation */}
                     <Route path="/escalation-policies" element={<EscalationPoliciesPage />} />
                     {/* Automation */}

@@ -15,13 +15,19 @@ import pytest
 from app.core.time_utils import utcnow
 from app.db.run_migrations import SCHEMA_ADVISORY_LOCK_ID
 from app.jobs.connector_sync import MAINTENANCE_LOCK_ID, ConnectorSyncScheduler
+from app.jobs.cve_feed_sync import CVE_SYNC_LOCK_ID
 from app.services import escalation_service as escalation_module
 from app.services.escalation_service import ESCALATION_SWEEP_LOCK_ID
 
 
 def test_advisory_lock_ids_are_distinct():
     """Two sweeps sharing a lock id would silently block each other."""
-    ids = [MAINTENANCE_LOCK_ID, ESCALATION_SWEEP_LOCK_ID, SCHEMA_ADVISORY_LOCK_ID]
+    ids = [
+        MAINTENANCE_LOCK_ID,
+        ESCALATION_SWEEP_LOCK_ID,
+        SCHEMA_ADVISORY_LOCK_ID,
+        CVE_SYNC_LOCK_ID,
+    ]
     assert len(set(ids)) == len(ids)
 
 
@@ -56,14 +62,19 @@ class _StubSession:
 
 
 def _wire(monkeypatch, session, purged=0):
-    calls = {"purge": 0}
+    calls = {"purge": 0, "purge_generic": 0}
 
     async def fake_purge(db, older_than_hours=24):
         calls["purge"] += 1
         return purged
 
+    async def fake_purge_generic(db, older_than_hours=24):
+        calls["purge_generic"] += 1
+        return purged
+
     monkeypatch.setattr("app.db.session.AsyncSessionLocal", lambda: session)
     monkeypatch.setattr("app.services.falco_event_buffer.purge_processed", fake_purge)
+    monkeypatch.setattr("app.services.ingest_buffer.purge_processed", fake_purge_generic)
     return calls
 
 

@@ -64,6 +64,10 @@ PUBLIC_ROUTES: set[tuple[str, str]] = {
     # per-connector shared ingest token (401 on missing/invalid token), so it
     # is intentionally exempt from the JWT default-deny sweep.
     ("POST", "/api/v1/ingest/falco/{connector_id}"),
+    # Trivy ingest webhook (app/api/v1/trivy_ingest.py): same model as Falco -
+    # CI scan jobs POST reports directly with a per-connector ingest token
+    # (401 on missing/invalid token), so it is exempt from the JWT sweep.
+    ("POST", "/api/v1/ingest/trivy/{connector_id}"),
 }
 
 _PARAM_RE = re.compile(r"{([^}:]+)(?::[^}]+)?}")

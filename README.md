@@ -44,8 +44,28 @@ Supported integrations organized by category:
 | **EDR/XDR** | CrowdStrike Falcon, SentinelOne, Microsoft Defender XDR, Carbon Black |
 | **Cloud Security** | AWS Security Hub, AWS GuardDuty, GCP Security Command Center, Azure Defender, Wiz, Prowler |
 | **Runtime Security** | Falco (webhook push via http_output or Falcosidekick) |
+| **Vulnerability Management** | Trivy (webhook push from CI jobs, cron scans, or trivy-operator) |
 | **Identity** | Okta, Microsoft Entra ID, CrowdStrike Identity Protection |
 | **Network** | Cloudflare, UniFi Network |
+
+### Cloud Security (CNAPP)
+The correlation layer that turns Prowler (posture) + Falco (runtime) + Trivy
+(vulnerabilities) into a Wiz-style CNAPP:
+
+- **Asset Inventory** - Cloud assets auto-extracted from every ingested finding
+  (hosts, containers, images, buckets, databases, identities, accounts), plus
+  bulk import from Cartography/CloudQuery via `POST /api/v1/assets/import`
+  (`scripts/cartography-sync.py`)
+- **Attack Paths (Toxic Combinations)** - Built-in rules correlate findings
+  from different tools on the same asset: internet exposure + exploitable CVE,
+  runtime threat on a vulnerable workload, public data stores, exposed
+  workloads leaking secrets, over-privileged identities. Critical paths
+  auto-create incidents and render as a visual path graph
+- **Exploitability Prioritization** - Daily EPSS + CISA KEV sync tags
+  vulnerability alerts (`kev`, `epss_high`) and promotes actively-exploited
+  CVEs to critical, so patching queues sort by real-world risk instead of CVSS
+- **CIEM-lite** - Identity risk rollup: over-privileged or unprotected
+  identities surfaced per account with risk scores
 
 ### Analytics & Reporting
 - **Executive Summary** - High-level security posture overview for leadership

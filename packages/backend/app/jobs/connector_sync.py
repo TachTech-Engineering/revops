@@ -89,6 +89,7 @@ class ConnectorSyncScheduler:
 
         from app.db.session import AsyncSessionLocal
         from app.services.falco_event_buffer import purge_processed
+        from app.services.ingest_buffer import purge_processed as purge_ingest_events
 
         async with AsyncSessionLocal() as db:
             # pg_try_advisory_XACT_lock, not the session-scoped variant:
@@ -108,10 +109,13 @@ class ConnectorSyncScheduler:
                 logger.debug("Connector maintenance running on another replica; skipping")
                 return
             purged = await purge_processed(db)
+            purged_generic = await purge_ingest_events(db)
             # Commit ends the transaction and releases the lock in one step.
             await db.commit()
             if purged:
                 logger.info(f"Purged {purged} consumed Falco ingest event(s)")
+            if purged_generic:
+                logger.info(f"Purged {purged_generic} consumed webhook ingest event(s)")
 
     def stop(self):
         """Stop the sync scheduler."""

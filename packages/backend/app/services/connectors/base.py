@@ -377,6 +377,9 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     from app.services.connectors.data_sources.sentinelone import SentinelOneConnector
     from app.services.connectors.data_sources.splunk import SplunkConnector
 
+    # Vulnerability Management
+    from app.services.connectors.data_sources.trivy import TrivyConnector
+
     # UniFi Network
     from app.services.connectors.data_sources.unifi_api import UniFiAPIConnector
     from app.services.connectors.data_sources.unifi_syslog import UniFiSyslogConnector
@@ -397,6 +400,8 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     registry.register_data_source("prowler", ProwlerConnector)
     # Runtime Security
     registry.register_data_source("falco", FalcoConnector)
+    # Vulnerability Management
+    registry.register_data_source("trivy", TrivyConnector)
     # Identity
     registry.register_data_source("okta", OktaConnector)
     registry.register_data_source("entra_id", EntraIDConnector)
