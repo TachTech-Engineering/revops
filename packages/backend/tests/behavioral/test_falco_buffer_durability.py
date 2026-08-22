@@ -23,6 +23,7 @@ from app.services.falco_event_buffer import (
     CLAIM_STALE_MINUTES,
     claim_events,
     count_pending,
+    mark_processed,
     purge_processed,
     push_events,
 )
@@ -135,7 +136,10 @@ async def test_buffer_is_capped_per_connector(db_session, make_user, monkeypatch
     assert await count_pending(db_session, connector.id) == 3
 
 
-async def test_purge_removes_only_old_claimed_rows(db_session, make_user):
+async def test_purge_removes_only_old_processed_rows(db_session, make_user):
+    """Retention reaps rows a drain has *finished with* (processed_at), not
+    merely claimed ones: a claimed-but-unprocessed row is recoverable work and
+    must survive the purge (the processed-marker fix, d16f8b3a92c4)."""
     ctx = await make_user("falco-f")
     connector = await _falco_connector(db_session, ctx.org.id)
     await push_events(
@@ -144,22 +148,48 @@ async def test_purge_removes_only_old_claimed_rows(db_session, make_user):
         organization_id=ctx.org.id,
         events=[_event("a"), _event("b")],
     )
-    await claim_events(db_session, connector.id, limit=1)
+    claimed = await claim_events(db_session, connector.id, limit=1)
+    await mark_processed(db_session, [e.id for e in claimed])
 
     # Nothing is old enough yet.
     assert await purge_processed(db_session, older_than_hours=24) == 0
 
+    # Age the processed row past retention; an old claim alone must NOT purge.
     await db_session.execute(
         FalcoIngestEvent.__table__.update()
         .where(
             FalcoIngestEvent.connector_id == connector.id,
-            FalcoIngestEvent.claimed_at.is_not(None),
+            FalcoIngestEvent.processed_at.is_not(None),
         )
-        .values(claimed_at=utcnow() - timedelta(hours=48))
+        .values(
+            claimed_at=utcnow() - timedelta(hours=48),
+            processed_at=utcnow() - timedelta(hours=48),
+        )
     )
     assert await purge_processed(db_session, older_than_hours=24) >= 1
 
     # The unclaimed event is untouched.
+    assert await count_pending(db_session, connector.id) == 1
+
+
+async def test_old_claim_without_processed_marker_survives_purge(db_session, make_user):
+    ctx = await make_user("falco-g")
+    connector = await _falco_connector(db_session, ctx.org.id)
+    await push_events(
+        db_session,
+        connector_id=connector.id,
+        organization_id=ctx.org.id,
+        events=[_event("a")],
+    )
+    await claim_events(db_session, connector.id, limit=1)
+    await db_session.execute(
+        FalcoIngestEvent.__table__.update()
+        .where(FalcoIngestEvent.connector_id == connector.id)
+        .values(claimed_at=utcnow() - timedelta(hours=48))
+    )
+
+    # Claimed long ago but never marked processed: still recoverable work.
+    assert await purge_processed(db_session, older_than_hours=24) == 0
     assert await count_pending(db_session, connector.id) == 1
 
 
