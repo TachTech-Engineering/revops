@@ -104,7 +104,7 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
 export const revopsApi = createApi({
   reducerPath: 'revopsApi',
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'Settings', 'Webhook', 'UserRole', 'User', 'AuditLog', 'ScheduledReport', 'Incident', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'TrendAnalytics', 'Anomaly', 'AISettings', 'ComplianceFramework', 'ComplianceControl', 'ComplianceAssessment', 'ExecutiveMetrics', 'ThreatHunt', 'HuntResult', 'CloudAsset', 'AttackPath'],
+  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'Settings', 'Webhook', 'UserRole', 'User', 'AuditLog', 'ScheduledReport', 'Incident', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'TrendAnalytics', 'Anomaly', 'AISettings', 'ComplianceFramework', 'ComplianceControl', 'ComplianceAssessment', 'ExecutiveMetrics', 'ThreatHunt', 'HuntResult', 'CloudAsset', 'AttackPath', 'RawLogs'],
   endpoints: (builder) => ({
     // Alerts
     listAlerts: builder.query<PaginatedResponse<AlertSummary>, AlertFilters>({
@@ -1842,6 +1842,29 @@ export const revopsApi = createApi({
         method: 'POST',
       }),
       invalidatesTags: (_result, _error, id) => [{ type: 'AttackPath', id }, 'AttackPath', 'CloudAsset'],
+    }),
+
+    // ==================== Raw Logs (UniFi syslog / Falco) ====================
+    searchLogs: builder.query<LogSearchResponse, LogSearchFilters>({
+      query: (params) => ({
+        url: '/logs/search',
+        params: {
+          ...(params.q && { q: params.q }),
+          ...(params.sourceType && { source_type: params.sourceType }),
+          ...(params.host && { host: params.host }),
+          ...(params.connectorId && { connector_id: params.connectorId }),
+          ...(params.start && { start: params.start }),
+          ...(params.end && { end: params.end }),
+          limit: params.limit,
+          offset: params.offset,
+        },
+      }),
+      providesTags: ['RawLogs'],
+    }),
+
+    getLogStats: builder.query<LogStoreStats, void>({
+      query: () => '/logs/stats',
+      providesTags: ['RawLogs'],
     }),
   }),
 })
@@ -3914,6 +3937,52 @@ export interface AttackPathDetail extends AttackPathFindingSummary {
   resolved_at: string | null
 }
 
+// ==================== Raw Logs (UniFi syslog / Falco) ====================
+
+export interface LogEntry {
+  id: string
+  event_time: string
+  received_at: string
+  source_type: string
+  connector_id: string
+  host: string | null
+  source_ip: string | null
+  severity: string | null
+  message: string
+  attributes: Record<string, unknown> | null
+}
+
+export interface LogSearchFilters {
+  q?: string
+  sourceType?: string
+  host?: string
+  connectorId?: string
+  // ISO datetime strings. Backend defaults: start = 24h ago, end = now;
+  // the window may not exceed 90 days.
+  start?: string
+  end?: string
+  // 1..1000 (log_store.MAX_SEARCH_LIMIT); backend default 100.
+  limit?: number
+  offset?: number
+}
+
+export interface LogSearchResponse {
+  results: LogEntry[]
+  total: number
+  limit: number
+  offset: number
+  start: string
+  end: string
+}
+
+export interface LogStoreStats {
+  stored_bytes: number
+  max_stored_bytes: number
+  retention_days: number
+  partitions: number
+  at_capacity: boolean
+}
+
 export const {
   useListAlertsQuery,
   useGetAlertQuery,
@@ -4159,6 +4228,9 @@ export const {
   useGetAttackPathQuery,
   useDismissAttackPathMutation,
   useReopenAttackPathMutation,
+  // Raw Logs
+  useSearchLogsQuery,
+  useGetLogStatsQuery,
 } = revopsApi
 
 // Legacy alias for backwards compatibility
