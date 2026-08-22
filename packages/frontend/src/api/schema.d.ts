@@ -3098,6 +3098,50 @@ export interface paths {
         patch: operations["update_ioc_api_v1_iocs__ioc_id__patch"];
         trace?: never;
     };
+    "/api/v1/logs/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Logs
+         * @description Search raw logs for the caller's organization. Requires analyst role.
+         */
+        get: operations["search_logs_api_v1_logs_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/logs/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Log Store Stats
+         * @description Storage headroom and retention.
+         *
+         *     Deliberately reports the whole store rather than one tenant's share: it is
+         *     an operational health signal (is ingestion about to start dropping lines?),
+         *     and it exposes no tenant's data.
+         */
+        get: operations["log_store_stats_api_v1_logs_stats_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/migrate/ai/status": {
         parameters: {
             query?: never;
@@ -8381,6 +8425,77 @@ export interface components {
             /** Incident Id */
             incident_id: string;
         };
+        /** LogEntry */
+        LogEntry: {
+            /** Attributes */
+            attributes: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Connector Id
+             * Format: uuid
+             */
+            connector_id: string;
+            /**
+             * Event Time
+             * Format: date-time
+             */
+            event_time: string;
+            /** Host */
+            host: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Message */
+            message: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Severity */
+            severity: string | null;
+            /** Source Ip */
+            source_ip: string | null;
+            /** Source Type */
+            source_type: string;
+        };
+        /** LogSearchResponse */
+        LogSearchResponse: {
+            /**
+             * End
+             * Format: date-time
+             */
+            end: string;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+            /** Results */
+            results: components["schemas"]["LogEntry"][];
+            /**
+             * Start
+             * Format: date-time
+             */
+            start: string;
+            /** Total */
+            total: number;
+        };
+        /** LogStoreStats */
+        LogStoreStats: {
+            /** At Capacity */
+            at_capacity: boolean;
+            /** Max Stored Bytes */
+            max_stored_bytes: number;
+            /** Partitions */
+            partitions: number;
+            /** Retention Days */
+            retention_days: number;
+            /** Stored Bytes */
+            stored_bytes: number;
+        };
         /** LoginRequest */
         LoginRequest: {
             /**
@@ -10836,7 +10951,7 @@ export interface components {
          * WidgetType
          * @enum {string}
          */
-        WidgetType: "alert_summary" | "alerts_by_severity" | "alerts_by_status" | "alerts_over_time" | "top_rules" | "recent_alerts" | "incident_summary" | "case_summary" | "sla_status" | "custom_query";
+        WidgetType: "alert_summary" | "alerts_by_severity" | "alerts_by_status" | "alerts_over_time" | "top_rules" | "recent_alerts" | "incident_summary" | "case_summary" | "sla_status" | "custom_query" | "alert_forecast" | "anomaly_detection" | "coverage_gap" | "stale_rules";
         /** WorkflowCreate */
         WorkflowCreate: {
             /** Description */
@@ -16927,6 +17042,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_logs_api_v1_logs_search_get: {
+        parameters: {
+            query?: {
+                /** @description Full-text search over the message */
+                q?: string | null;
+                /** @description e.g. unifi_syslog, falco */
+                source_type?: string | null;
+                host?: string | null;
+                connector_id?: string | null;
+                /** @description Inclusive; defaults to 24h ago */
+                start?: string | null;
+                /** @description Exclusive; defaults to now */
+                end?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogSearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    log_store_stats_api_v1_logs_stats_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogStoreStats"];
                 };
             };
         };
