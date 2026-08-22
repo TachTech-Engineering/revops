@@ -1,7 +1,7 @@
 """cnapp assets, attack paths, cve enrichment, generic ingest buffer
 
 Revision ID: a3c9e81f5d27
-Revises: d92f5b1c47ae
+Revises: d16f8b3a92c4
 Create Date: 2026-08-21 10:00:00.000000
 
 Adds the CNAPP layer: a cloud asset inventory (cloud_assets,
@@ -20,7 +20,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers, used by Alembic.
 revision: str = "a3c9e81f5d27"
-down_revision: str | None = "d92f5b1c47ae"
+down_revision: str | None = "d16f8b3a92c4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -57,6 +57,9 @@ def upgrade() -> None:
         sa.Column("payload", sa.JSON(), nullable=False),
         sa.Column("received_at", sa.DateTime(), nullable=False),
         sa.Column("claimed_at", sa.DateTime(), nullable=True),
+        # Born with the processed marker d16f8b3a92c4 retrofitted onto the
+        # sibling buffers, so this table never has the re-claim loop defect.
+        sa.Column("processed_at", sa.DateTime(), nullable=True),
         sa.ForeignKeyConstraint(["organization_id"], ["organizations.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["connector_id"], ["connectors.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
@@ -69,6 +72,11 @@ def upgrade() -> None:
         "ix_ingest_events_connector_claim",
         "ingest_events",
         ["connector_id", "claimed_at", "received_at"],
+    )
+    op.create_index(
+        "ix_ingest_events_processed",
+        "ingest_events",
+        ["connector_id", "processed_at", "received_at"],
     )
 
     op.create_table(

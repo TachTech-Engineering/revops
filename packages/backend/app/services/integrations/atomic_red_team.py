@@ -23,8 +23,7 @@ class AtomicRedTeamConnector:
             "technique_name": "OS Credential Dumping",
             "tactic": "credential-access",
             "description": (
-                "Adversaries may attempt to dump credentials "
-                "to obtain account login information."
+                "Adversaries may attempt to dump credentials to obtain account login information."
             ),
             "platforms": ["windows", "linux", "macos"],
             "tests": [

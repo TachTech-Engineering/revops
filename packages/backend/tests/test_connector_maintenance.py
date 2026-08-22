@@ -62,7 +62,7 @@ class _StubSession:
 
 
 def _wire(monkeypatch, session, purged=0):
-    calls = {"purge": 0, "purge_generic": 0}
+    calls = {"purge": 0, "purge_generic": 0, "purge_syslog": 0}
 
     async def fake_purge(db, older_than_hours=24):
         calls["purge"] += 1
@@ -72,9 +72,29 @@ def _wire(monkeypatch, session, purged=0):
         calls["purge_generic"] += 1
         return purged
 
+    async def fake_purge_syslog(db, older_than_hours=24):
+        calls["purge_syslog"] += 1
+        return purged
+
+    async def fake_cleanup_windows(self, max_age_hours=24):
+        return 0
+
+    async def fake_ensure_partitions(db, days_ahead=2):
+        return 0
+
+    async def fake_drop_expired(db):
+        return []
+
     monkeypatch.setattr("app.db.session.AsyncSessionLocal", lambda: session)
     monkeypatch.setattr("app.services.falco_event_buffer.purge_processed", fake_purge)
     monkeypatch.setattr("app.services.ingest_buffer.purge_processed", fake_purge_generic)
+    monkeypatch.setattr("app.services.syslog_event_buffer.purge_processed", fake_purge_syslog)
+    monkeypatch.setattr(
+        "app.services.correlation_service.CorrelationService.cleanup_expired_windows",
+        fake_cleanup_windows,
+    )
+    monkeypatch.setattr("app.services.log_store.ensure_partitions", fake_ensure_partitions)
+    monkeypatch.setattr("app.services.log_store.drop_expired_partitions", fake_drop_expired)
     return calls
 
 

@@ -293,9 +293,7 @@ async def create_notification_internal(
     )
     target_user = recipient.scalar_one_or_none()
     if not target_user:
-        raise HTTPException(
-            status_code=404, detail="No such user in this organization"
-        )
+        raise HTTPException(status_code=404, detail="No such user in this organization")
 
     notification = Notification(
         user_email=target_user.email,

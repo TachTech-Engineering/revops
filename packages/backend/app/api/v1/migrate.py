@@ -336,8 +336,7 @@ tags:
 | where CommandLine contains "-enc"
 | project TimeGenerated, Computer, Account, NewProcessName, CommandLine""",
         "eql": (
-            'process where process.name == "powershell.exe"'
-            ' and process.command_line : "*-enc*"'
+            'process where process.name == "powershell.exe" and process.command_line : "*-enc*"'
         ),
         "esql": """FROM logs-windows.*
 | WHERE process.name == "powershell.exe" AND process.command_line LIKE "%-enc%"

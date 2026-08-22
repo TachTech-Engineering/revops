@@ -157,7 +157,7 @@ class TrivyConnector(DataSourceConnector):
         per cycle and let the cursor keep the sync loop draining.
         """
         from app.db.session import AsyncSessionLocal
-        from app.services.ingest_buffer import claim_events, count_pending
+        from app.services.ingest_buffer import claim_events, count_pending, mark_processed
 
         reports_per_cycle = max(1, min(limit // 10, 10))
         async with AsyncSessionLocal() as db:
@@ -168,8 +168,13 @@ class TrivyConnector(DataSourceConnector):
         for event in events:
             normalized_alerts.extend(self._expand_report(event.payload))
 
+        # Close out the lease. Filtered-out findings count as handled: they
+        # were examined and deliberately dropped, so re-claiming the report
+        # would just re-drop them forever once the lease went stale.
         async with AsyncSessionLocal() as db:
+            await mark_processed(db, [e.id for e in events])
             remaining = await count_pending(db, self.connector_id)
+            await db.commit()
         next_cursor = "more" if remaining > 0 else None
         return normalized_alerts, next_cursor
 

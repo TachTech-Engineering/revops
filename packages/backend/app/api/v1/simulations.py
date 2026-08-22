@@ -334,8 +334,7 @@ async def list_runs(
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Invalid status: {status}. "
-                    "Use 'pending', 'running', 'completed', or 'failed'."
+                    f"Invalid status: {status}. Use 'pending', 'running', 'completed', or 'failed'."
                 ),
             )
 

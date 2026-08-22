@@ -398,8 +398,7 @@ class AWSSecurityHubConnector(DataSourceConnector):
             error_msg = str(e)
             if "AccessDenied" in error_msg:
                 error_msg = (
-                    "Access denied - check IAM permissions "
-                    "(securityhub:BatchUpdateFindings)"
+                    "Access denied - check IAM permissions (securityhub:BatchUpdateFindings)"
                 )
             return StatusPushResult(
                 supported=True,

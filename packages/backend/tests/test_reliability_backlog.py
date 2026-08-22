@@ -261,7 +261,15 @@ class _FakeConnectorDB:
         return False
 
     async def execute(self, *_args, **_kwargs):
-        return _FakeResult(self._connectors)
+        # Serves both the SELECT of due connectors (scalars) and the
+        # conditional claim UPDATE (rowcount): rowcount 1 means the claim
+        # is always won, which is what a single-replica test wants.
+        result = _FakeResult(self._connectors)
+        result.rowcount = 1
+        return result
+
+    async def commit(self):
+        pass
 
 
 async def test_long_running_sync_is_not_spawned_twice(monkeypatch):

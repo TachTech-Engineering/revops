@@ -3,9 +3,20 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Computed,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy import Enum as SQLEnum
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, validates
 
 from app.core.time_utils import utcnow
@@ -131,6 +142,21 @@ class WidgetType(enum.StrEnum):
     CASE_SUMMARY = "case_summary"
     SLA_STATUS = "sla_status"
     CUSTOM_QUERY = "custom_query"
+    # These four have working renderers in the frontend widget registry
+    # (packages/frontend/src/components/dashboard/widgets/index.tsx), each
+    # backed by a real endpoint -- forecast, anomalies, MITRE coverage and rule
+    # health. They were absent from this enum, so /dashboards/widget-types
+    # never offered them and saving a dashboard containing one was rejected
+    # with a 422: reachable code nobody could reach. Widgets that only rendered
+    # fabricated data were deleted rather than added here.
+    #
+    # Safe to extend without a migration: widgets are stored in the JSON
+    # `widgets` column of custom_dashboards, not as a Postgres enum column, so
+    # this is validated by Pydantic at the API boundary only.
+    ALERT_FORECAST = "alert_forecast"
+    ANOMALY_DETECTION = "anomaly_detection"
+    COVERAGE_GAP = "coverage_gap"
+    STALE_RULES = "stale_rules"
 
 
 class MitreTactic(enum.StrEnum):
@@ -321,8 +347,12 @@ class RefreshToken(Base):
     __tablename__ = "refresh_tokens"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    # ON DELETE CASCADE, matching password_reset_tokens. Without it, deleting a
+    # user failed outright with a foreign-key violation once they had ever
+    # logged in -- which is every real user. Offboarding and erasure requests
+    # both hit it, and the tokens are worthless without the user anyway.
     user_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     token_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -355,6 +385,68 @@ class PasswordResetToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     user: Mapped["User"] = relationship("User")
+
+
+class RawLogEvent(Base):
+    """Raw log lines from sources this platform ingests directly.
+
+    Panther retains its own logs in Snowflake, so this covers only the sources
+    where RevOps is the system of record -- UniFi syslog and the Falco webhook.
+    Without it those events exist nowhere once they have been turned into an
+    alert (or dropped by a filter), so there is nothing to search or re-check.
+
+    Partitioned by day on ``event_time`` so retention is a DROP of whole
+    partitions rather than a mass DELETE, which on an append-only table of this
+    shape is the difference between instant and hours of vacuum. Partition
+    creation and dropping live in app/services/log_store.py.
+
+    Logs are far larger than alerts and share a volume with the operational
+    database, so ingestion is capped (see log_store.MAX_STORED_BYTES): the
+    store refuses new rows before it can fill the disk and take the whole
+    application down with it.
+    """
+
+    __tablename__ = "raw_log_events"
+
+    # Composite PK: Postgres requires the partition key in any unique index.
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_time: Mapped[datetime] = mapped_column(DateTime, primary_key=True, nullable=False)
+
+    organization_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    connector_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False)
+
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    host: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    severity: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+    # STORED generated column, mirroring the migration: full-text search reads
+    # it instead of re-parsing every message per query. Declared here so a
+    # schema built from the models (the behavioral test harness) matches what
+    # Alembic actually builds in production.
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed("to_tsvector('english', message)", persisted=True),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        # Every read is org-scoped and time-bounded; this is the access path.
+        Index("ix_raw_log_events_org_time", "organization_id", "event_time"),
+        Index("ix_raw_log_events_org_source_time", "organization_id", "source_type", "event_time"),
+        # BRIN, not btree: the table is written in event_time order, so this
+        # costs kilobytes where a btree would cost gigabytes at log volume.
+        Index("ix_raw_log_events_time_brin", "event_time", postgresql_using="brin"),
+        Index("ix_raw_log_events_search", "search_vector", postgresql_using="gin"),
+        # No FKs to organizations/connectors: a partitioned table's FKs must be
+        # re-created per partition, and retention drops partitions wholesale.
+        # Rows are unreachable without an org match, and deleting a tenant's
+        # logs is an explicit operation rather than a cascade.
+        {"postgresql_partition_by": "RANGE (event_time)"},
+    )
 
 
 class FalcoIngestEvent(Base):
@@ -392,12 +484,87 @@ class FalcoIngestEvent(Base):
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Set once a drain has successfully turned this row into alerts.
+    #
+    # Without it, "claimed" and "in flight" were the same thing, so a row that
+    # had been processed perfectly well looked like a crashed sync 15 minutes
+    # later and was re-claimed. Because claims are taken oldest-first, the same
+    # rows were re-processed forever while newer ones were never reached, and
+    # the retention purge never fired because each re-claim refreshed
+    # claimed_at. Observed in production 2026-08-20: rows received on 08-17
+    # still being re-claimed three days later while 23,526 newer messages had
+    # never been touched once.
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (
         # The drain orders by received_at within a connector and filters on
         # claimed_at, so index the three together.
         Index(
             "ix_falco_ingest_events_connector_claim",
+            "connector_id",
+            "claimed_at",
+            "received_at",
+        ),
+    )
+
+
+class SyslogIngestEvent(Base):
+    """Syslog messages received on the UDP/TCP listener, awaiting the sync cycle.
+
+    These were held in a process-local dict in ``syslog_receiver``. The backend
+    runs several replicas and the syslog Service load-balances datagrams across
+    all of them, but ``last_sync_at`` is a single row: whichever replica reaches
+    the connector first drained its own buffer and marked the connector synced,
+    so the replica actually holding the messages skipped its turn. Measured in
+    production on 2026-08-17, one replica held 172 buffered messages and ran no
+    drains while another ran four drains finding nothing each time. The messages
+    were never persisted -- they aged out of the in-memory cap or died with the
+    pod, taking the UniFi alerts they would have become with them, while the
+    sync reported success.
+
+    Same shape and same claim semantics as :class:`FalcoIngestEvent`: any
+    replica can drain what any other replica received. Delivery is
+    at-least-once, which is safe because the UniFi connector derives
+    ``external_id`` from a content fingerprint, so a re-processed message
+    collides with ``uq_normalized_alerts_org_connector_external``.
+    """
+
+    __tablename__ = "syslog_ingest_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    connector_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("connectors.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # The parsed SyslogMessage, field for field, so a drain on any replica can
+    # rebuild it without re-parsing (and without depending on the parser
+    # version that happened to be running when it arrived).
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Set once a drain has successfully turned this row into alerts.
+    #
+    # Without it, "claimed" and "in flight" were the same thing, so a row that
+    # had been processed perfectly well looked like a crashed sync 15 minutes
+    # later and was re-claimed. Because claims are taken oldest-first, the same
+    # rows were re-processed forever while newer ones were never reached, and
+    # the retention purge never fired because each re-claim refreshed
+    # claimed_at. Observed in production 2026-08-20: rows received on 08-17
+    # still being re-claimed three days later while 23,526 newer messages had
+    # never been touched once.
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "ix_syslog_ingest_events_connector_claim",
             "connector_id",
             "claimed_at",
             "received_at",
@@ -1426,6 +1593,20 @@ class Connector(Base):
     last_sync_cursor: Mapped[str | None] = mapped_column(
         String(500), nullable=True
     )  # Pagination cursor
+    # Cross-replica sync lease. The scheduler runs on every backend replica and
+    # guarded against double-syncing with a process-local set, which three
+    # replicas do not share -- so all three could see the same connector as due
+    # and sync it simultaneously, tripling the API calls made to Panther and
+    # every other source.
+    #
+    # A replica claims a connector by setting this atomically; only the one
+    # whose UPDATE matches proceeds. It is distinct from last_sync_at because
+    # that value is the *sync window start* (see sync_connector_alerts), so
+    # writing it at claim time would make each sync fetch from "now" and
+    # silently skip everything since the previous run. A claim older than
+    # SYNC_CLAIM_STALE_MINUTES is reclaimable, so a replica that dies mid-sync
+    # does not strand the connector forever.
+    sync_claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     created_by: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -2843,12 +3024,22 @@ class IngestEvent(Base):
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Set when a drain has fully handled the row; a processed row is never
+    # re-claimable (see d16f8b3a92c4_processed_marker for the incident the
+    # sibling buffers hit without this).
+    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     __table_args__ = (
         Index(
             "ix_ingest_events_connector_claim",
             "connector_id",
             "claimed_at",
+            "received_at",
+        ),
+        Index(
+            "ix_ingest_events_processed",
+            "connector_id",
+            "processed_at",
             "received_at",
         ),
     )

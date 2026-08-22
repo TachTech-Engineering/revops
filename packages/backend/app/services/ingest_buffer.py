@@ -46,6 +46,9 @@ class BufferedEvent:
 
     payload: dict[str, Any]
     received_at: datetime
+    # Row id, so a drain can mark the event processed. Optional because
+    # callers construct these in tests without a backing row.
+    id: UUID | None = None
 
 
 async def push_events(
@@ -97,11 +100,22 @@ async def push_events(
 
 
 def _unclaimed_or_stale():
-    """Rows eligible to be claimed: never claimed, or claimed by a dead sync."""
+    """Rows eligible to be claimed.
+
+    Never claimed, or claimed by a sync that died before finishing. A row that
+    has been *processed* is never eligible again, whatever its claim looks
+    like: without that condition a successfully-drained row became re-claimable
+    15 minutes later, and because claims are taken oldest-first the same rows
+    cycled forever while newer ones were never reached (the incident
+    d16f8b3a92c4_processed_marker fixed on the sibling buffers).
+    """
     stale_before = utcnow() - timedelta(minutes=CLAIM_STALE_MINUTES)
-    return or_(
-        IngestEvent.claimed_at.is_(None),
-        IngestEvent.claimed_at < stale_before,
+    return and_(
+        IngestEvent.processed_at.is_(None),
+        or_(
+            IngestEvent.claimed_at.is_(None),
+            IngestEvent.claimed_at < stale_before,
+        ),
     )
 
 
@@ -144,20 +158,34 @@ async def claim_events(db, connector_id: UUID, limit: int = 100) -> list[Buffere
         update(IngestEvent)
         .where(IngestEvent.id.in_(candidate_ids))
         .values(claimed_at=utcnow())
-        .returning(IngestEvent.payload, IngestEvent.received_at)
+        .returning(IngestEvent.payload, IngestEvent.received_at, IngestEvent.id)
     )
     rows = result.all()
-    return [BufferedEvent(payload=row[0], received_at=row[1]) for row in rows]
+    return [BufferedEvent(payload=row[0], received_at=row[1], id=row[2]) for row in rows]
+
+
+async def mark_processed(db, ids: list[UUID]) -> int:
+    """Close out events a drain has successfully handled."""
+    ids = [i for i in ids if i is not None]
+    if not ids:
+        return 0
+    result = await db.execute(
+        update(IngestEvent).where(IngestEvent.id.in_(ids)).values(processed_at=utcnow())
+    )
+    return result.rowcount or 0
 
 
 async def purge_processed(db, older_than_hours: int = RETAIN_CLAIMED_HOURS) -> int:
-    """Delete claimed rows past the retention window."""
+    """Delete processed rows past the retention window."""
     cutoff = utcnow() - timedelta(hours=older_than_hours)
     result = await db.execute(
         delete(IngestEvent).where(
             and_(
-                IngestEvent.claimed_at.is_not(None),
-                IngestEvent.claimed_at < cutoff,
+                # processed_at, not claimed_at: a re-claimed row had its
+                # claimed_at refreshed on every pass, so it never aged out and
+                # the table grew without bound.
+                IngestEvent.processed_at.is_not(None),
+                IngestEvent.processed_at < cutoff,
             )
         )
     )

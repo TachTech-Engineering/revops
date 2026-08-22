@@ -9,7 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, or_, select, update
 
 from app.core.time_utils import utcnow
 from app.db.models import Connector, ConnectorCategory, ConnectorStatus
@@ -23,6 +23,15 @@ logger = logging.getLogger(__name__)
 # sweep lock (0x52455343 "RESC", app/services/escalation_service.py).
 # 0x524D4E54 is ascii "RMNT".
 MAINTENANCE_LOCK_ID = 0x524D4E54
+
+# Correlation windows older than this are reaped. Matches the interval the
+# never-constructed APScheduler job declared before it was deleted.
+CORRELATION_WINDOW_MAX_AGE_HOURS = 24
+
+# A sync claim older than this is assumed to belong to a replica that died
+# mid-sync and becomes reclaimable. Matches the staleness window the Falco and
+# syslog staging buffers use.
+SYNC_CLAIM_STALE_MINUTES = 15
 
 
 class ConnectorSyncScheduler:
@@ -88,8 +97,15 @@ class ConnectorSyncScheduler:
         from sqlalchemy import text
 
         from app.db.session import AsyncSessionLocal
+        from app.services.correlation_service import CorrelationService
         from app.services.falco_event_buffer import purge_processed
         from app.services.ingest_buffer import purge_processed as purge_ingest_events
+        from app.services.log_store import (
+            drop_expired_partitions,
+            ensure_partitions,
+            retention_days,
+        )
+        from app.services.syslog_event_buffer import purge_processed as purge_syslog
 
         async with AsyncSessionLocal() as db:
             # pg_try_advisory_XACT_lock, not the session-scoped variant:
@@ -110,12 +126,39 @@ class ConnectorSyncScheduler:
                 return
             purged = await purge_processed(db)
             purged_generic = await purge_ingest_events(db)
+            # Same reaping for staged syslog: claimed rows are kept for a
+            # debugging window and then dropped, or the table only grows.
+            purged_syslog = await purge_syslog(db)
+
+            # Expired correlation windows. This lived in a correlation_cleanup_job
+            # module exposing an APScheduler config that nothing ever constructed,
+            # so it never ran. Called here instead: this sweep already holds the
+            # advisory lock, so exactly one replica performs the delete.
+            expired_windows = await CorrelationService(db).cleanup_expired_windows(
+                CORRELATION_WINDOW_MAX_AGE_HOURS
+            )
+
+            # Raw log partitions: create the days ingestion will need next, and
+            # drop those past retention. Retention is a partition DROP, so this
+            # is what keeps the log store from growing without bound.
+            created = await ensure_partitions(db)
+            dropped = await drop_expired_partitions(db)
+
             # Commit ends the transaction and releases the lock in one step.
             await db.commit()
             if purged:
                 logger.info(f"Purged {purged} consumed Falco ingest event(s)")
             if purged_generic:
                 logger.info(f"Purged {purged_generic} consumed webhook ingest event(s)")
+            if purged_syslog:
+                logger.info(f"Purged {purged_syslog} consumed syslog ingest event(s)")
+            if expired_windows:
+                logger.info(f"Reaped {expired_windows} expired correlation window(s)")
+            if created or dropped:
+                logger.info(
+                    f"Log partitions: created {created}, dropped {len(dropped)} "
+                    f"past {retention_days()}d retention"
+                )
 
     def stop(self):
         """Stop the sync scheduler."""
@@ -145,9 +188,19 @@ class ConnectorSyncScheduler:
                         continue
 
                     if connector.id in self._in_flight:
-                        logger.info(
+                        logger.debug(
                             f"Skipping auto-sync for connector {connector.name}: "
-                            "a sync is still running"
+                            "a sync is still running in this process"
+                        )
+                        continue
+
+                    # Claim across replicas. The set above only covers this
+                    # process, and the scheduler runs on all of them, so
+                    # without this every replica syncs the same connector at
+                    # the same time.
+                    if not await self._claim_connector(db, connector.id):
+                        logger.debug(
+                            f"Connector {connector.name} claimed by another replica; skipping"
                         )
                         continue
 
@@ -165,6 +218,47 @@ class ConnectorSyncScheduler:
                     task.add_done_callback(self._tasks.discard)
                 except Exception as e:
                     logger.error(f"Error checking connector {connector.id}: {e}")
+
+    async def _claim_connector(self, db, connector_id: UUID) -> bool:
+        """Take the cross-replica sync lease for a connector.
+
+        A single conditional UPDATE, so exactly one replica wins however many
+        race. A claim older than SYNC_CLAIM_STALE_MINUTES is reclaimable, which
+        is what stops a replica that was killed mid-sync from stranding the
+        connector until someone notices.
+        """
+        stale_before = utcnow() - timedelta(minutes=SYNC_CLAIM_STALE_MINUTES)
+        result = await db.execute(
+            update(Connector)
+            .where(
+                and_(
+                    Connector.id == connector_id,
+                    or_(
+                        Connector.sync_claimed_at.is_(None),
+                        Connector.sync_claimed_at < stale_before,
+                    ),
+                )
+            )
+            .values(sync_claimed_at=utcnow())
+        )
+        await db.commit()
+        return (result.rowcount or 0) > 0
+
+    async def _release_connector(self, connector_id: UUID) -> None:
+        """Drop the lease so a failed sync can be retried at its next interval.
+
+        Best effort: if this does not happen the claim simply expires.
+        """
+        try:
+            async with AsyncSessionLocal() as db:
+                await db.execute(
+                    update(Connector)
+                    .where(Connector.id == connector_id)
+                    .values(sync_claimed_at=None)
+                )
+                await db.commit()
+        except Exception:
+            logger.exception("Could not release the sync claim for connector %s", connector_id)
 
     def _is_due_for_sync(self, connector: Connector, now: datetime) -> bool:
         """Check if a connector is due for sync based on its interval."""
@@ -189,6 +283,7 @@ class ConnectorSyncScheduler:
             logger.error(f"Auto-sync failed for connector {connector_id}: {e}")
         finally:
             self._in_flight.discard(connector_id)
+            await self._release_connector(connector_id)
 
 
 # Global scheduler instance

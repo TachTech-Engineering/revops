@@ -179,11 +179,21 @@ class UnifiConnector(DataSourceConnector):
             },
         )
 
+    async def _pending_count(self) -> int:
+        """Staged syslog messages for this connector awaiting a sync."""
+        from app.db.session import AsyncSessionLocal
+        from app.services import syslog_event_buffer
+
+        async with AsyncSessionLocal() as db:
+            return await syslog_event_buffer.count_pending(db, self.connector_id)
+
     async def test_connection(self) -> ConnectionTestResult:
         """Test that syslog receiver is running and ready."""
         try:
-            syslog_receiver = get_syslog_receiver()
-            buffer_size = syslog_receiver.get_buffer_size(self.connector_id)
+            # Staged rows awaiting a sync, not this process's memory: with
+            # several replicas the local buffer is empty on most of them, so
+            # reporting it would show "0 buffered" on a busy connector.
+            buffer_size = await self._pending_count()
 
             # Re-register handler if needed
             self._register_syslog_handler()
@@ -216,21 +226,52 @@ class UnifiConnector(DataSourceConnector):
         limit: int = 100,
         cursor: str | None = None,
     ) -> tuple[list[NormalizedAlert], str | None]:
-        """Fetch alerts from the syslog buffer."""
+        """Fetch alerts from the durable syslog buffer.
+
+        Claimed from ``syslog_ingest_events`` rather than from this process's
+        memory: datagrams are load-balanced across replicas while the sync runs
+        on whichever replica gets there first, so a process-local buffer is
+        drained by nobody. Same reasoning as UniFiSyslogConnector.
+        """
         try:
-            syslog_receiver = get_syslog_receiver()
-            messages = syslog_receiver.get_buffered_messages(self.connector_id, limit)
+            from app.db.session import AsyncSessionLocal
+            from app.services import syslog_event_buffer
+            from app.services.connectors.data_sources.unifi_syslog import SYSLOG_DRAIN_BATCH
+            from app.services.syslog_receiver import SyslogReceiverService
+
+            # Keep this replica listening even when another runs the syncs.
+            self._register_syslog_handler()
+
+            async with AsyncSessionLocal() as db:
+                claimed = await syslog_event_buffer.claim_events(
+                    db, self.connector_id, max(limit, SYSLOG_DRAIN_BATCH)
+                )
+                await db.commit()
+            messages = [SyslogReceiverService.from_payload(c.payload) for c in claimed]
 
             normalized_alerts = []
             for msg in messages:
-                # Filter by timestamp
-                if msg.timestamp < since:
-                    continue
-
-                # Parse and normalize the message
+                # Deliberately NOT filtered against `since` -- see
+                # UniFiSyslogConnector.fetch_alerts. Anything sitting in a
+                # durable queue is older than the last sync by definition, so
+                # that filter silently discarded the entire backlog. Claiming
+                # a message is the delivery guarantee; a claimed message is
+                # always processed.
                 alert = self._normalize_syslog_message(msg)
                 if alert:
                     normalized_alerts.append(alert)
+
+            # Close out the lease. An unclosed lease goes stale and the rows
+            # are re-claimed forever; see syslog_event_buffer.mark_processed.
+            try:
+                async with AsyncSessionLocal() as db:
+                    await syslog_event_buffer.mark_processed(db, [c.id for c in claimed])
+                    await db.commit()
+            except Exception:
+                logger.exception(
+                    "Could not mark %s syslog row(s) processed; they will be retried",
+                    len(claimed),
+                )
 
             logger.info(
                 f"UniFi syslog: processed {len(normalized_alerts)} alerts "

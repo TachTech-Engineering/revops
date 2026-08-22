@@ -114,8 +114,7 @@ class PantherDataSourceConnector(DataSourceConnector):
                     return ConnectionTestResult(
                         success=False,
                         message=(
-                            "GraphQL error: "
-                            f"{data['errors'][0].get('message', 'Unknown error')}"
+                            f"GraphQL error: {data['errors'][0].get('message', 'Unknown error')}"
                         ),
                         latency_ms=latency_ms,
                     )

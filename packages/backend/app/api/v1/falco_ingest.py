@@ -19,8 +19,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.time_utils import utcnow
 from app.db import get_db
 from app.db.models import Connector, ConnectorCategory, ConnectorStatus
+from app.services import log_store
 from app.services.encryption import get_encryption_service
 from app.services.falco_event_buffer import count_pending, push_events
 
@@ -115,6 +117,26 @@ async def ingest_falco_alerts(
         organization_id=connector.organization_id,
         events=events,
     )
+    # Retain the raw lines too: once an event is turned into an alert (or
+    # filtered out by min_priority / rule_filter) this is the only copy that
+    # exists -- nothing upstream holds Falco events for us.
+    await log_store.store_events(
+        db,
+        [
+            log_store.LogEvent(
+                organization_id=connector.organization_id,
+                connector_id=connector_id,
+                source_type="falco",
+                event_time=utcnow(),
+                message=str(event.get("output") or event.get("rule") or "")[:100_000],
+                host=str(event.get("hostname") or "")[:255] or None,
+                severity=str(event.get("priority") or "")[:20] or None,
+                attributes=event,
+            )
+            for event in events
+        ],
+    )
+
     pending = await count_pending(db, connector_id)
     await db.commit()
 
