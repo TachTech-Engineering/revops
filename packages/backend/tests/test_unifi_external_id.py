@@ -24,18 +24,7 @@ from app.services.connectors.data_sources.unifi_syslog import (
 TS = datetime(2026, 8, 17, 12, 0, 0)
 
 
-# The normalizer only raises alerts for security-relevant lines now, so these
-# tests -- which are about external_id determinism, not classification -- wrap
-# whatever they are given in a firewall-block shape so an alert comes back.
-def _alertable(message: str) -> str:
-    return (
-        f"[WAN_IN-block] IN=eth0 OUT=eth1 SRC=203.0.113.9 DST=10.0.0.5 "
-        f"PROTO=TCP SPT=1 DPT=22 {message}"
-    )
-
-
 def _msg(message: str, *, ts: datetime = TS, source_ip: str = "10.0.0.1", host: str = "udm"):
-    message = _alertable(message)
     return SimpleNamespace(
         message=message,
         raw=message,
@@ -120,10 +109,19 @@ def test_two_distinct_messages_in_the_same_second_stay_distinct():
     assert a.external_id != b.external_id
 
 
+# A plain line that classifies as firewall_block, so it normalizes to an
+# alert. Unclassifiable chatter ("link down") is stored in the raw log store
+# but is deliberately NOT an alert since the raw-log-events change.
+FIREWALL_LINE = (
+    "[WAN_LOCAL-default-D] IN=eth8 OUT= MAC=aa:bb:cc:dd:ee:ff "
+    "SRC=203.0.113.9 DST=192.0.2.1 LEN=60 PROTO=TCP SPT=51515 DPT=22"
+)
+
+
 def test_same_message_from_different_devices_stays_distinct():
     c = _connector()
-    a = c._normalize_syslog_message(_msg("link down", source_ip="10.0.0.1", host="sw-1"))
-    b = c._normalize_syslog_message(_msg("link down", source_ip="10.0.0.2", host="sw-2"))
+    a = c._normalize_syslog_message(_msg(FIREWALL_LINE, source_ip="10.0.0.1", host="sw-1"))
+    b = c._normalize_syslog_message(_msg(FIREWALL_LINE, source_ip="10.0.0.2", host="sw-2"))
     assert a.external_id != b.external_id
 
 
@@ -131,12 +129,21 @@ def test_syslog_id_is_not_random():
     """Guards against a regression to uuid: two normalizations of one message
     must agree."""
     c = _connector()
-    ids = {c._normalize_syslog_message(_msg("same line")).external_id for _ in range(5)}
+    ids = {
+        c._normalize_syslog_message(_msg(FIREWALL_LINE)).external_id for _ in range(5)
+    }
     assert len(ids) == 1
 
 
 def test_syslog_id_is_prefixed_and_bounded():
     c = _connector()
-    alert = c._normalize_syslog_message(_msg("anything"))
+    alert = c._normalize_syslog_message(_msg(FIREWALL_LINE))
     assert alert.external_id.startswith("unifi-syslog-")
     assert len(alert.external_id) <= 500
+
+
+def test_unclassifiable_line_is_not_an_alert():
+    """Routine chatter is stored/searchable in the raw log store but must not
+    become an alert (the raw-log-events behavior)."""
+    c = _connector()
+    assert c._normalize_syslog_message(_msg("link down")) is None

@@ -3,10 +3,12 @@
 #
 # Usage: ./scripts/gke-deploy.sh <staging|production> <image-tag>
 #
-# <image-tag> is the tag pushed by Cloud Build (the short commit SHA, or
-# any tag present in the registry). It is required: deploying without
-# pinning a tag re-applies whatever tag the overlay was last set to and
-# the rollout silently no-ops.
+# <image-tag> is the tag pushed by Cloud Build (the short commit SHA). It is
+# required: deploying without pinning a tag re-applies whatever tag the
+# overlay was last set to and the rollout silently no-ops.
+#
+# The tag must be a commit on origin/main (set ALLOW_UNPUSHED_TAG=1 to
+# override in an emergency) -- see the guardrail below for why.
 
 set -euo pipefail
 
@@ -33,6 +35,39 @@ if [ -z "$TAG" ]; then
     echo "Pass the tag that Cloud Build pushed (it tags every build with the short commit SHA)." >&2
     usage >&2
     exit 1
+fi
+
+# Guardrail: refuse to deploy a commit that is not on origin/main.
+#
+# On 2026-08-20 production was deployed from a checkout whose commits were
+# never pushed; when that machine's state was lost, the running code (and its
+# alembic migrations) existed nowhere but inside the image, and the next
+# deploy from main aborted against an unknown DB revision. Recovering it meant
+# extracting source from the image. This check makes that mistake loud.
+#
+# Note this cannot verify what is inside the image itself (gcloud builds
+# submit uploads the working tree, not the commit), so keep the tree clean
+# when building. Escape hatch for true emergencies: ALLOW_UNPUSHED_TAG=1.
+if [ "${ALLOW_UNPUSHED_TAG:-}" != "1" ]; then
+    if ! git -C "$REPO_ROOT" fetch origin main --quiet; then
+        echo "ERROR: could not fetch origin/main to verify tag '$TAG' is pushed." >&2
+        echo "Fix connectivity or, if you accept deploying unverified code, re-run with ALLOW_UNPUSHED_TAG=1." >&2
+        exit 1
+    fi
+    if ! git -C "$REPO_ROOT" cat-file -e "${TAG}^{commit}" 2>/dev/null; then
+        echo "ERROR: tag '$TAG' does not resolve to a commit in this clone." >&2
+        echo "Deploy tags must be the short SHA of a pushed commit; a tag nobody can" >&2
+        echo "resolve later is unrecoverable if this machine is lost." >&2
+        echo "Override (emergencies only): ALLOW_UNPUSHED_TAG=1" >&2
+        exit 1
+    fi
+    if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$TAG" origin/main 2>/dev/null; then
+        echo "ERROR: commit '$TAG' is not on origin/main." >&2
+        echo "Push it first (git push origin main); deploying unpushed commits strands" >&2
+        echo "the running code and its migrations inside the image." >&2
+        echo "Override (emergencies only): ALLOW_UNPUSHED_TAG=1" >&2
+        exit 1
+    fi
 fi
 
 if ! command -v kustomize >/dev/null 2>&1; then

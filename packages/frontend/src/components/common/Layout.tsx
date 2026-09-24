@@ -32,6 +32,9 @@ import {
   Plug,
   GitBranch,
   KeyRound,
+  Cloud,
+  Boxes,
+  Route,
   ScrollText,
 } from 'lucide-react'
 import { RootState } from '../../store'
@@ -75,6 +78,15 @@ const navSections: NavSection[] = [
     ],
   },
   {
+    id: 'cloud-security',
+    label: 'Cloud Security',
+    icon: Cloud,
+    items: [
+      { path: '/assets', label: 'Assets', icon: Boxes },
+      { path: '/attack-paths', label: 'Attack Paths', icon: Route },
+    ],
+  },
+  {
     id: 'automation',
     label: 'Automation',
     icon: GitBranch,
@@ -91,7 +103,7 @@ const navSections: NavSection[] = [
     items: [
       { path: '/queries', label: 'Query Explorer', icon: Database },
       { path: '/ioc-search', label: 'IOC Search', icon: Search },
-      { path: '/log-search', label: 'Log Search', icon: ScrollText },
+      { path: '/logs', label: 'Raw Logs', icon: ScrollText },
       { path: '/threat-intel', label: 'Threat Intel', icon: Shield },
       { path: '/threat-hunting', label: 'Threat Hunting', icon: Crosshair },
     ],

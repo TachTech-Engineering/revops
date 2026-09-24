@@ -15,6 +15,7 @@ from app.api.v1.router import api_router
 from app.config import settings
 from app.db import get_db, init_db
 from app.jobs.connector_sync import start_connector_sync_scheduler, stop_connector_sync_scheduler
+from app.jobs.cve_feed_sync import start_cve_feed_sync, stop_cve_feed_sync
 from app.services.encryption_service import validate_encryption_config
 from app.services.escalation_service import (
     start_escalation_scheduler,
@@ -89,6 +90,10 @@ async def lifespan(app: FastAPI):
     escalation_task = asyncio.create_task(start_escalation_scheduler())
     logger.info("Escalation scheduler started")
 
+    # Start CVE feed sync (daily EPSS/KEV refresh for vulnerability prioritization)
+    cve_sync_task = asyncio.create_task(start_cve_feed_sync())
+    logger.info("CVE feed sync job started")
+
     # Start syslog receiver for UniFi and other syslog-based connectors
     syslog_receiver = get_syslog_receiver()
     syslog_port = getattr(settings, "syslog_port", 514)
@@ -116,6 +121,13 @@ async def lifespan(app: FastAPI):
     escalation_task.cancel()
     try:
         await escalation_task
+    except asyncio.CancelledError:
+        pass
+
+    stop_cve_feed_sync()
+    cve_sync_task.cancel()
+    try:
+        await cve_sync_task
     except asyncio.CancelledError:
         pass
 

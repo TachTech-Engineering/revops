@@ -662,6 +662,24 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_
                     )
                     total_incidents += len(incidents)
 
+                # CNAPP layer: upsert the assets these alerts concern, then
+                # re-evaluate toxic combinations on them. Contained: a failure
+                # here must never abort the alert sync itself.
+                if new_alerts:
+                    try:
+                        from app.services.asset_service import link_alerts_batch
+                        from app.services.attack_path_service import evaluate_assets
+
+                        touched_assets = await link_alerts_batch(
+                            db, new_alerts, organization_id
+                        )
+                        if touched_assets:
+                            await evaluate_assets(db, organization_id, touched_assets)
+                    except Exception:
+                        logger.exception(
+                            f"Asset/attack-path processing failed for connector {connector_id}"
+                        )
+
                 if not next_cursor:
                     break
                 cursor = next_cursor

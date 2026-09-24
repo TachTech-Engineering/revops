@@ -15,13 +15,19 @@ import pytest
 from app.core.time_utils import utcnow
 from app.db.run_migrations import SCHEMA_ADVISORY_LOCK_ID
 from app.jobs.connector_sync import MAINTENANCE_LOCK_ID, ConnectorSyncScheduler
+from app.jobs.cve_feed_sync import CVE_SYNC_LOCK_ID
 from app.services import escalation_service as escalation_module
 from app.services.escalation_service import ESCALATION_SWEEP_LOCK_ID
 
 
 def test_advisory_lock_ids_are_distinct():
     """Two sweeps sharing a lock id would silently block each other."""
-    ids = [MAINTENANCE_LOCK_ID, ESCALATION_SWEEP_LOCK_ID, SCHEMA_ADVISORY_LOCK_ID]
+    ids = [
+        MAINTENANCE_LOCK_ID,
+        ESCALATION_SWEEP_LOCK_ID,
+        SCHEMA_ADVISORY_LOCK_ID,
+        CVE_SYNC_LOCK_ID,
+    ]
     assert len(set(ids)) == len(ids)
 
 
@@ -70,14 +76,39 @@ class _StubSession:
 
 
 def _wire(monkeypatch, session, purged=0):
-    calls = {"purge": 0}
+    calls = {"purge": 0, "purge_generic": 0, "purge_syslog": 0}
 
     async def fake_purge(db, older_than_hours=24):
         calls["purge"] += 1
         return purged
 
+    async def fake_purge_generic(db, older_than_hours=24):
+        calls["purge_generic"] += 1
+        return purged
+
+    async def fake_purge_syslog(db, older_than_hours=24):
+        calls["purge_syslog"] += 1
+        return purged
+
+    async def fake_cleanup_windows(self, max_age_hours=24):
+        return 0
+
+    async def fake_ensure_partitions(db, days_ahead=2):
+        return 0
+
+    async def fake_drop_expired(db):
+        return []
+
     monkeypatch.setattr("app.db.session.AsyncSessionLocal", lambda: session)
     monkeypatch.setattr("app.services.falco_event_buffer.purge_processed", fake_purge)
+    monkeypatch.setattr("app.services.ingest_buffer.purge_processed", fake_purge_generic)
+    monkeypatch.setattr("app.services.syslog_event_buffer.purge_processed", fake_purge_syslog)
+    monkeypatch.setattr(
+        "app.services.correlation_service.CorrelationService.cleanup_expired_windows",
+        fake_cleanup_windows,
+    )
+    monkeypatch.setattr("app.services.log_store.ensure_partitions", fake_ensure_partitions)
+    monkeypatch.setattr("app.services.log_store.drop_expired_partitions", fake_drop_expired)
     return calls
 
 

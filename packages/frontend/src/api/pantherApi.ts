@@ -104,7 +104,7 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
 export const revopsApi = createApi({
   reducerPath: 'revopsApi',
   baseQuery: baseQueryWithReauth,
-  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'Settings', 'Webhook', 'UserRole', 'User', 'AuditLog', 'ScheduledReport', 'Incident', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'TrendAnalytics', 'Anomaly', 'AISettings', 'ComplianceFramework', 'ComplianceControl', 'ComplianceAssessment', 'ExecutiveMetrics', 'ThreatHunt', 'HuntResult', 'TelephonyConfig'],
+  tagTypes: ['Alert', 'Rule', 'SavedQuery', 'Settings', 'Webhook', 'UserRole', 'User', 'AuditLog', 'ScheduledReport', 'Incident', 'Case', 'EnrichmentPipeline', 'Dashboard', 'MitreMapping', 'SLAPolicy', 'Note', 'Notification', 'IOC', 'Feed', 'Connector', 'Pipeline', 'Workflow', 'WorkflowExecution', 'NormalizedAlert', 'RuleHealth', 'TriageSuggestion', 'AssetCriticality', 'NLQuery', 'AlertCluster', 'PlaybookTemplate', 'EscalationPolicy', 'TrendAnalytics', 'Anomaly', 'AISettings', 'ComplianceFramework', 'ComplianceControl', 'ComplianceAssessment', 'ExecutiveMetrics', 'ThreatHunt', 'HuntResult', 'TelephonyConfig', 'CloudAsset', 'AttackPath', 'RawLogs'],
   endpoints: (builder) => ({
     // Alerts
     listAlerts: builder.query<PaginatedResponse<AlertSummary>, AlertFilters>({
@@ -278,19 +278,6 @@ export const revopsApi = createApi({
 
     getIndicatorTypes: builder.query<IndicatorType[], void>({
       query: () => '/ioc/types',
-    }),
-
-    // Raw log search (directly-ingested sources only; Panther logs live in
-    // Snowflake and are reached through IOC search instead).
-    searchLogs: builder.query<LogSearchResponse, LogSearchParams>({
-      query: (params) => ({
-        url: '/logs/search',
-        params,
-      }),
-    }),
-
-    getLogStoreStats: builder.query<LogStoreStats, void>({
-      query: () => '/logs/stats',
     }),
 
     // Threat Intel
@@ -1856,6 +1843,110 @@ export const revopsApi = createApi({
         params,
       }),
       providesTags: ['HuntResult'],
+    }),
+
+    // ==================== CNAPP: Cloud Asset Inventory ====================
+    listCloudAssets: builder.query<CloudAssetListResponse, CloudAssetFilters>({
+      query: (params) => ({
+        url: '/assets',
+        params: {
+          ...(params.assetType && { asset_type: params.assetType }),
+          ...(params.provider && { provider: params.provider }),
+          ...(params.exposedOnly && { exposed_only: true }),
+          ...(params.search && { search: params.search }),
+          limit: params.limit,
+          offset: params.offset,
+        },
+      }),
+      providesTags: ['CloudAsset'],
+    }),
+
+    getCloudAssetSummary: builder.query<CloudAssetSummary, void>({
+      query: () => '/assets/summary',
+      providesTags: ['CloudAsset'],
+    }),
+
+    getCloudAsset: builder.query<CloudAssetDetailResponse, string>({
+      query: (id) => `/assets/${id}`,
+      providesTags: (_result, _error, id) => [{ type: 'CloudAsset', id }],
+    }),
+
+    getCloudAssetFindings: builder.query<CloudAssetFindingsResponse, { assetId: string; includeClosed?: boolean }>({
+      query: ({ assetId, includeClosed }) => ({
+        url: `/assets/${assetId}/findings`,
+        params: includeClosed ? { include_closed: true } : {},
+      }),
+      providesTags: (_result, _error, { assetId }) => [{ type: 'CloudAsset', id: assetId }],
+    }),
+
+    getCiemSummary: builder.query<CiemSummaryResponse, void>({
+      query: () => '/assets/ciem/summary',
+      // Provided under CloudAsset so the panel refetches alongside the
+      // asset summary (attack path mutations invalidate CloudAsset too).
+      providesTags: ['CloudAsset'],
+    }),
+
+    // ==================== CNAPP: Attack Path Findings ====================
+    listAttackPaths: builder.query<AttackPathListResponse, AttackPathFilters>({
+      query: (params) => ({
+        url: '/attack-paths',
+        params: {
+          status: params.status,
+          ...(params.severity && { severity: params.severity }),
+          limit: params.limit,
+          offset: params.offset,
+        },
+      }),
+      providesTags: ['AttackPath'],
+    }),
+
+    getAttackPathSummary: builder.query<AttackPathSummaryResponse, void>({
+      query: () => '/attack-paths/summary',
+      providesTags: ['AttackPath'],
+    }),
+
+    getAttackPath: builder.query<AttackPathDetail, string>({
+      query: (id) => `/attack-paths/${id}`,
+      providesTags: (_result, _error, id) => [{ type: 'AttackPath', id }],
+    }),
+
+    dismissAttackPath: builder.mutation<{ status: string }, string>({
+      query: (id) => ({
+        url: `/attack-paths/${id}/dismiss`,
+        method: 'POST',
+      }),
+      invalidatesTags: (_result, _error, id) => [{ type: 'AttackPath', id }, 'AttackPath', 'CloudAsset'],
+    }),
+
+    reopenAttackPath: builder.mutation<{ status: string }, string>({
+      query: (id) => ({
+        url: `/attack-paths/${id}/reopen`,
+        method: 'POST',
+      }),
+      invalidatesTags: (_result, _error, id) => [{ type: 'AttackPath', id }, 'AttackPath', 'CloudAsset'],
+    }),
+
+    // ==================== Raw Logs (UniFi syslog / Falco) ====================
+    searchLogs: builder.query<LogSearchResponse, LogSearchFilters>({
+      query: (params) => ({
+        url: '/logs/search',
+        params: {
+          ...(params.q && { q: params.q }),
+          ...(params.sourceType && { source_type: params.sourceType }),
+          ...(params.host && { host: params.host }),
+          ...(params.connectorId && { connector_id: params.connectorId }),
+          ...(params.start && { start: params.start }),
+          ...(params.end && { end: params.end }),
+          limit: params.limit,
+          offset: params.offset,
+        },
+      }),
+      providesTags: ['RawLogs'],
+    }),
+
+    getLogStats: builder.query<LogStoreStats, void>({
+      query: () => '/logs/stats',
+      providesTags: ['RawLogs'],
     }),
   }),
 })
@@ -3853,6 +3944,240 @@ export interface HuntResult {
   simulated: boolean
 }
 
+// ==================== CNAPP: Cloud Assets & Attack Paths ====================
+
+export type CloudAssetType =
+  | 'host'
+  | 'vm_instance'
+  | 'container'
+  | 'container_image'
+  | 'k8s_pod'
+  | 'k8s_namespace'
+  | 'k8s_cluster'
+  | 'cloud_account'
+  | 'storage_bucket'
+  | 'database'
+  | 'iam_identity'
+  | 'iam_role'
+  | 'network'
+  | 'serverless_function'
+  | 'load_balancer'
+  | 'service'
+  | 'other'
+
+export interface CloudAsset {
+  id: string
+  external_id: string
+  asset_type: CloudAssetType
+  name: string
+  provider: string
+  account_id: string | null
+  region: string | null
+  internet_exposed: boolean
+  criticality: number
+  data_classification: string | null
+  labels: Record<string, unknown>
+  attrs: Record<string, unknown>
+  sources: string[]
+  first_seen: string
+  last_seen: string
+  open_alert_count: number
+  open_attack_path_count: number
+}
+
+export interface CloudAssetFilters {
+  assetType?: string
+  provider?: string
+  exposedOnly?: boolean
+  search?: string
+  limit?: number
+  offset?: number
+}
+
+export interface CloudAssetListResponse {
+  total: number
+  assets: CloudAsset[]
+}
+
+export interface CloudAssetSummary {
+  total: number
+  by_type: Record<string, number>
+  by_provider: Record<string, number>
+  internet_exposed: number
+}
+
+export interface CloudAssetRelationship {
+  id: string
+  relationship_type: string
+  direction: string
+  related_asset: { id: string; name: string; asset_type: string }
+}
+
+export interface CloudAssetAttackPathRef {
+  id: string
+  rule_key: string
+  title: string
+  severity: string
+  status: string
+  risk_score: number
+  first_detected: string
+}
+
+export interface CloudAssetDetailResponse {
+  asset: CloudAsset
+  relationships: CloudAssetRelationship[]
+  attack_paths: CloudAssetAttackPathRef[]
+}
+
+export interface CloudAssetFinding {
+  id: string
+  source_type: string
+  title: string
+  severity: string
+  status: string
+  rule_id: string | null
+  tags: string[]
+  created_at_source: string | null
+}
+
+export interface CloudAssetFindingsResponse {
+  findings: CloudAssetFinding[]
+}
+
+export interface CiemRiskyIdentity {
+  asset_id: string
+  name: string
+  asset_type: string
+  provider: string
+  account_id: string | null
+  finding_id: string
+  title: string
+  severity: string
+  risk_score: number
+}
+
+export interface CiemSummaryResponse {
+  identity_assets: number
+  risky_identities: CiemRiskyIdentity[]
+  open_identity_findings_by_severity: Record<string, number>
+}
+
+export type AttackPathStatusFilter = 'open' | 'resolved' | 'dismissed' | 'all'
+
+export interface AttackPathFilters {
+  status?: AttackPathStatusFilter
+  severity?: string
+  limit?: number
+  offset?: number
+}
+
+export interface AttackPathFindingSummary {
+  id: string
+  rule_key: string
+  title: string
+  severity: string
+  status: string
+  risk_score: number
+  asset: {
+    id: string
+    name: string
+    asset_type: string
+    provider: string
+    internet_exposed: boolean
+  }
+  incident_id: string | null
+  evidence_count: number
+  first_detected: string
+  last_evaluated: string
+}
+
+export interface AttackPathListResponse {
+  total: number
+  findings: AttackPathFindingSummary[]
+}
+
+export interface AttackPathSummaryResponse {
+  open_by_severity: Record<string, number>
+  open_by_rule: Record<string, number>
+  by_status: Record<string, number>
+}
+
+export interface AttackPathGraphNode {
+  id: string
+  label: string
+  type: string
+  asset_id?: string | null
+}
+
+export interface AttackPathGraphEdge {
+  source: string
+  target: string
+  label?: string | null
+}
+
+export interface AttackPathEvidence {
+  id: string
+  source_type: string
+  title: string
+  severity: string
+  status: string
+  rule_id: string | null
+  tags: string[]
+}
+
+export interface AttackPathDetail extends AttackPathFindingSummary {
+  description: string | null
+  path: { nodes: AttackPathGraphNode[]; edges: AttackPathGraphEdge[] }
+  evidence: AttackPathEvidence[]
+  resolved_at: string | null
+}
+
+// ==================== Raw Logs (UniFi syslog / Falco) ====================
+
+export interface LogEntry {
+  id: string
+  event_time: string
+  received_at: string
+  source_type: string
+  connector_id: string
+  host: string | null
+  source_ip: string | null
+  severity: string | null
+  message: string
+  attributes: Record<string, unknown> | null
+}
+
+export interface LogSearchFilters {
+  q?: string
+  sourceType?: string
+  host?: string
+  connectorId?: string
+  // ISO datetime strings. Backend defaults: start = 24h ago, end = now;
+  // the window may not exceed 90 days.
+  start?: string
+  end?: string
+  // 1..1000 (log_store.MAX_SEARCH_LIMIT); backend default 100.
+  limit?: number
+  offset?: number
+}
+
+export interface LogSearchResponse {
+  results: LogEntry[]
+  total: number
+  limit: number
+  offset: number
+  start: string
+  end: string
+}
+
+export interface LogStoreStats {
+  stored_bytes: number
+  max_stored_bytes: number
+  retention_days: number
+  partitions: number
+  at_capacity: boolean
+}
+
 export const {
   useListAlertsQuery,
   useGetAlertQuery,
@@ -3876,8 +4201,6 @@ export const {
   useTestWebhookMutation,
   useSearchIOCMutation,
   useGetIndicatorTypesQuery,
-  useSearchLogsQuery,
-  useGetLogStoreStatsQuery,
   useLookupThreatIntelMutation,
   useGetThreatIntelStatusQuery,
   useListUserRolesQuery,
@@ -4100,6 +4423,20 @@ export const {
   useAddHuntQueryMutation,
   useExecuteHuntQueryMutation,
   useGetHuntResultsQuery,
+  // CNAPP: Cloud Assets & Attack Paths
+  useListCloudAssetsQuery,
+  useGetCloudAssetSummaryQuery,
+  useGetCloudAssetQuery,
+  useGetCloudAssetFindingsQuery,
+  useGetCiemSummaryQuery,
+  useListAttackPathsQuery,
+  useGetAttackPathSummaryQuery,
+  useGetAttackPathQuery,
+  useDismissAttackPathMutation,
+  useReopenAttackPathMutation,
+  // Raw Logs
+  useSearchLogsQuery,
+  useGetLogStatsQuery,
 } = revopsApi
 
 // Legacy alias for backwards compatibility

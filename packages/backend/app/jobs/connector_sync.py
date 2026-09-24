@@ -99,6 +99,7 @@ class ConnectorSyncScheduler:
         from app.db.session import AsyncSessionLocal
         from app.services.correlation_service import CorrelationService
         from app.services.falco_event_buffer import purge_processed
+        from app.services.ingest_buffer import purge_processed as purge_ingest_events
         from app.services.log_store import (
             drop_expired_partitions,
             ensure_partitions,
@@ -124,6 +125,7 @@ class ConnectorSyncScheduler:
                 logger.debug("Connector maintenance running on another replica; skipping")
                 return
             purged = await purge_processed(db)
+            purged_generic = await purge_ingest_events(db)
             # Same reaping for staged syslog: claimed rows are kept for a
             # debugging window and then dropped, or the table only grows.
             purged_syslog = await purge_syslog(db)
@@ -146,6 +148,8 @@ class ConnectorSyncScheduler:
             await db.commit()
             if purged:
                 logger.info(f"Purged {purged} consumed Falco ingest event(s)")
+            if purged_generic:
+                logger.info(f"Purged {purged_generic} consumed webhook ingest event(s)")
             if purged_syslog:
                 logger.info(f"Purged {purged_syslog} consumed syslog ingest event(s)")
             if expired_windows:
