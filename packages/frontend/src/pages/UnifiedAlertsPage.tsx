@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   Archive,
   Calendar,
+  Layers,
 } from 'lucide-react'
 import {
   useListUnifiedAlertsQuery,
@@ -114,6 +115,9 @@ export default function UnifiedAlertsPage() {
     page: 1,
     page_size: 25,
   })
+  // On by default: an event several products each reported takes one row.
+  // Turning it off gives the raw per-source list.
+  const [collapseDuplicates, setCollapseDuplicates] = useState(true)
   const [selectedAlerts, setSelectedAlerts] = useState<Set<string>>(new Set())
   const [bulkUpdateAlerts] = useBulkUpdateAlertsMutation()
 
@@ -133,6 +137,7 @@ export default function UnifiedAlertsPage() {
     page: filters.page,
     page_size: filters.page_size,
     exclude_resolved: activeTab === 'active' && !filters.status ? true : undefined,
+    collapse_duplicates: collapseDuplicates,
   })
 
   const { data: connectors } = useListConnectorsQuery({ category: 'data_source' })
@@ -329,8 +334,30 @@ export default function UnifiedAlertsPage() {
         </div>
 
         <button
+          onClick={() => {
+            setCollapseDuplicates((prev) => !prev)
+            setSelectedAlerts(new Set())
+            setFilters((prev) => ({ ...prev, page: 1 }))
+          }}
+          className={cn(
+            'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm border',
+            collapseDuplicates
+              ? 'bg-primary/10 text-primary border-primary/30'
+              : 'bg-background text-muted-foreground'
+          )}
+          title={
+            collapseDuplicates
+              ? 'Showing one row per event. Click to list every source separately.'
+              : 'Showing every source separately. Click to group duplicate reports.'
+          }
+        >
+          <Layers size={14} />
+          {collapseDuplicates ? 'Grouped' : 'Ungrouped'}
+        </button>
+
+        <button
           onClick={() => refetch()}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-muted text-muted-foreground rounded-md text-sm hover:bg-accent ml-auto"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-muted text-muted-foreground rounded-md text-sm hover:bg-accent"
         >
           <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
           Refresh
@@ -515,6 +542,18 @@ export default function UnifiedAlertsPage() {
                               <span className="flex items-center">{sourceInfo.icon}</span>
                             )}
                             <span className="text-sm">{sourceInfo.label}</span>
+                            {alert.cluster_alert_count > 1 && (
+                              <Link
+                                to={`/alerts/clusters/${alert.cluster_id}`}
+                                className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-primary/15 text-primary text-xs font-medium hover:bg-primary/25"
+                                title={`Also reported by ${alert.cluster_sources
+                                  .filter((s) => s !== alert.source_type)
+                                  .join(', ')}`}
+                              >
+                                <Layers size={11} />
+                                +{alert.cluster_alert_count - 1}
+                              </Link>
+                            )}
                           </div>
                         </td>
                         <td className="p-3">

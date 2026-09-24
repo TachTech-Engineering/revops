@@ -4,6 +4,7 @@ from app.db.models import (
     ActionType,
     # Alert Clustering
     AlertCluster,
+    AlertClusterKey,
     AlertClusterMember,
     AlertClusterStatus,
     AlertEnrichment,
@@ -204,6 +205,7 @@ __all__ = [
     # Alert Clustering
     "AlertCluster",
     "AlertClusterStatus",
+    "AlertClusterKey",
     "AlertClusterMember",
     "OrganizationAPIKeys",
     # Playbook Templates

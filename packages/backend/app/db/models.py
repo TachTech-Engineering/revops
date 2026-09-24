@@ -14,6 +14,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR, UUID
@@ -2361,6 +2362,14 @@ class AlertCluster(Base):
     # Common entities across alerts
     common_entities: Mapped[dict] = mapped_column(JSON, default=dict)
 
+    # The member alert that stands in for the cluster when the alert list is
+    # collapsed -- the most severe report of the event, ties going to the most
+    # recent. Kept here rather than derived per query so collapsing is a join
+    # against one indexed column instead of a DISTINCT ON over every member.
+    representative_alert_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+
     assignee: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
@@ -2390,6 +2399,60 @@ class AlertClusterMember(Base):
 
     __table_args__ = (
         Index("ix_cluster_members_cluster_alert", "cluster_id", "alert_id", unique=True),
+    )
+
+
+class AlertClusterKey(Base):
+    """
+    A fingerprint an incoming alert can be matched against to join a cluster.
+
+    One row per (entity, signature) pair a cluster has seen, so an alert joins
+    on *any* entity it shares with the cluster rather than only on the entity
+    that happened to name the cluster. See app.services.alert_grouping.
+
+    ``expires_at`` is the sliding grouping window: while it is set, this
+    fingerprint routes new alerts into the cluster, and each new member pushes
+    it out again. Once it lapses the row is released (set to NULL) and the next
+    alert with that fingerprint starts a fresh cluster -- the same brute force
+    against the same host next month is a new investigation, not an append to a
+    closed one. NULL rows are kept as the cluster's provenance.
+    """
+
+    __tablename__ = "alert_cluster_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id"), nullable=False, index=True
+    )
+    cluster_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("alert_clusters.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    entity_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    entity_value: Mapped[str] = mapped_column(String(255), nullable=False)
+
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        # At most one *active* cluster per fingerprint per org. Connectors sync
+        # concurrently and cross-source duplicates arrive on different
+        # connectors by definition, so two syncs racing to cluster the same
+        # event is the normal case, not an edge case. This index is what makes
+        # the loser of that race attach to the winner's cluster instead of
+        # creating a second one.
+        Index(
+            "uq_alert_cluster_keys_active",
+            "organization_id",
+            "fingerprint",
+            unique=True,
+            postgresql_where=text("expires_at IS NOT NULL"),
+        ),
+        Index("ix_alert_cluster_keys_org_fingerprint", "organization_id", "fingerprint"),
     )
 
 

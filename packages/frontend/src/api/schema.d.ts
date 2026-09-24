@@ -1741,6 +1741,12 @@ export interface paths {
         /**
          * List Unified Alerts
          * @description List alerts from all connected sources (unified view) for the current organization.
+         *
+         *     With ``collapse_duplicates`` (the default), an event that several products
+         *     each reported takes one row instead of one row per product. The row shown
+         *     is the cluster's representative -- its most severe report -- and carries
+         *     ``cluster_alert_count`` and ``cluster_sources`` so the rest are reachable.
+         *     Pass ``collapse_duplicates=false`` for the raw per-source list.
          */
         get: operations["list_unified_alerts_api_v1_connectors_alerts_unified_get"];
         put?: never;
@@ -14353,6 +14359,7 @@ export interface operations {
                 exclude_resolved?: boolean | null;
                 start_date?: string | null;
                 end_date?: string | null;
+                collapse_duplicates?: boolean;
             };
             header?: never;
             path?: never;
