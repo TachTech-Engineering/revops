@@ -304,9 +304,8 @@ async def generate_clusters(
 
         # Determine severity
         severity_rank = {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}
-        max_severity = max(
-            group_alerts, key=lambda a: severity_rank.get(a.severity.lower(), 0)
-        ).severity
+        worst = max(group_alerts, key=lambda a: severity_rank.get(a.severity.lower(), 0))
+        max_severity = worst.severity
 
         # AI Narrative
         alerts_for_llm = [
@@ -325,6 +324,10 @@ async def generate_clusters(
             "name": ai_narrative["name"],
             "summary": ai_narrative["narrative"],
             "severity": max_severity,
+            # The member that stands for the cluster when the alert list is
+            # collapsed. Without it the whole group would list individually,
+            # which is the duplication clustering exists to remove.
+            "representative_alert_id": worst.id,
             "primary_rule_id": group_alerts[0].rule_id,
             "cluster_type": "entity_based"
             if (key.startswith("ip:") or key.startswith("email:"))
@@ -362,6 +365,7 @@ async def generate_clusters(
                 first_alert_at=res["first_alert_at"],
                 last_alert_at=res["last_alert_at"],
                 common_entities=res["common_entities"],
+                representative_alert_id=res["representative_alert_id"],
             )
             db.add(cluster)
             await db.flush()

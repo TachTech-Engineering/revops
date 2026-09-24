@@ -12,7 +12,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import String, and_, cast, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,8 @@ from app.api.v1.deps import OrgAdminDep, OrgIdDep, OrgUserDep
 from app.core.time_utils import utcnow
 from app.db import get_db
 from app.db.models import (
+    AlertCluster,
+    AlertClusterMember,
     Connector,
     ConnectorCategory,
     ConnectorStatus,
@@ -114,6 +116,13 @@ class NormalizedAlertResponse(BaseModel):
     mitre_tactics: list
     mitre_techniques: list
     ingested_at: str
+
+    # Cross-source grouping. ``cluster_alert_count`` counts every product that
+    # reported this same event, so a count above 1 means the list is showing
+    # one row where several sources each raised their own alert.
+    cluster_id: UUID | None = None
+    cluster_alert_count: int = 1
+    cluster_sources: list[str] = []
 
     class Config:
         from_attributes = True
@@ -572,6 +581,7 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_
 
     from app.config import settings
     from app.db.session import AsyncSessionLocal
+    from app.services.alert_grouping_service import group_alerts
     from app.services.correlation_service import CorrelationService
 
     logger = logging.getLogger(__name__)
@@ -620,6 +630,7 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_
             cursor = connector.last_sync_cursor
             total_synced = 0
             total_incidents = 0
+            total_clusters = 0
 
             while True:
                 alerts, next_cursor = await connector_instance.fetch_alerts(
@@ -654,6 +665,16 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_
 
                 new_alerts = await _insert_alerts_skipping_duplicates(db, candidates)
                 total_synced += len(new_alerts)
+
+                # Attach the new alerts to a cross-source cluster before
+                # anything else looks at them, so an alert is never visible
+                # without the group it belongs to. This is what keeps one real
+                # event from reading as one alert per reporting product; the
+                # per-source rows all survive, because alert_status_sync needs
+                # them to push a resolution back to each originating SIEM.
+                if new_alerts:
+                    grouping = await group_alerts(db, new_alerts, organization_id)
+                    total_clusters += grouping["clusters_created"]
 
                 # Process new alerts through correlation rules
                 if new_alerts:
@@ -691,7 +712,8 @@ async def sync_connector_alerts(connector_id: UUID, organization_id: UUID, full_
 
             logger.info(
                 f"Sync completed for connector {connector_id}: "
-                f"{total_synced} alerts synced, {total_incidents} incidents created"
+                f"{total_synced} alerts synced, {total_clusters} new clusters, "
+                f"{total_incidents} incidents created"
             )
 
         except Exception as e:
@@ -794,8 +816,16 @@ async def list_unified_alerts(
     exclude_resolved: bool | None = None,
     start_date: str | None = None,
     end_date: str | None = None,
+    collapse_duplicates: bool = True,
 ) -> dict:
-    """List alerts from all connected sources (unified view) for the current organization."""
+    """List alerts from all connected sources (unified view) for the current organization.
+
+    With ``collapse_duplicates`` (the default), an event that several products
+    each reported takes one row instead of one row per product. The row shown
+    is the cluster's representative -- its most severe report -- and carries
+    ``cluster_alert_count`` and ``cluster_sources`` so the rest are reachable.
+    Pass ``collapse_duplicates=false`` for the raw per-source list.
+    """
     # Filter by organization
     query = select(NormalizedAlert).where(NormalizedAlert.organization_id == org_id)
 
@@ -823,6 +853,30 @@ async def list_unified_alerts(
             query = query.where(NormalizedAlert.created_at_source <= end_dt)
         except ValueError:
             pass
+
+    if collapse_duplicates:
+        # Hide the non-representative members of a cluster. An alert in no
+        # cluster -- anything ingested before grouping existed, or an alert
+        # grouping could not fingerprint -- has no member row and is always
+        # shown, so collapsing can never make an alert disappear entirely.
+        # The filter is applied before the count so pagination stays honest.
+        query = query.outerjoin(
+            AlertClusterMember,
+            and_(
+                AlertClusterMember.alert_id == cast(NormalizedAlert.id, String),
+                AlertClusterMember.organization_id == org_id,
+            ),
+        ).outerjoin(AlertCluster, AlertCluster.id == AlertClusterMember.cluster_id)
+        query = query.where(
+            or_(
+                AlertClusterMember.id.is_(None),
+                # A cluster with no representative cannot elect one of its
+                # members to stand for the rest, so it collapses nothing. Only
+                # clusters that name a representative hide anything.
+                AlertCluster.representative_alert_id.is_(None),
+                AlertCluster.representative_alert_id == NormalizedAlert.id,
+            )
+        )
 
     # Count total
     count_query = select(func.count()).select_from(query.subquery())
@@ -867,6 +921,24 @@ async def list_unified_alerts(
         except ValueError:
             pass
 
+    if collapse_duplicates:
+        # Count what the list actually shows, or the severity tiles disagree
+        # with the rows underneath them.
+        severity_counts_query = severity_counts_query.outerjoin(
+            AlertClusterMember,
+            and_(
+                AlertClusterMember.alert_id == cast(NormalizedAlert.id, String),
+                AlertClusterMember.organization_id == org_id,
+            ),
+        ).outerjoin(AlertCluster, AlertCluster.id == AlertClusterMember.cluster_id)
+        severity_counts_query = severity_counts_query.where(
+            or_(
+                AlertClusterMember.id.is_(None),
+                AlertCluster.representative_alert_id.is_(None),
+                AlertCluster.representative_alert_id == NormalizedAlert.id,
+            )
+        )
+
     severity_counts_query = severity_counts_query.group_by(NormalizedAlert.severity)
     severity_result = await db.execute(severity_counts_query)
     severity_rows = severity_result.all()
@@ -877,6 +949,31 @@ async def list_unified_alerts(
     query = query.offset((page - 1) * page_size).limit(page_size)
     result = await db.execute(query)
     alerts = result.scalars().all()
+
+    # Annotate the page with how many sources reported each event. One query
+    # for the page rather than a correlated subquery per row.
+    clusters_by_alert: dict[str, tuple[UUID, int, list[str]]] = {}
+    if alerts:
+        cluster_rows = await db.execute(
+            select(
+                AlertClusterMember.alert_id,
+                AlertCluster.id,
+                AlertCluster.alert_count,
+                AlertCluster.common_entities,
+            )
+            .join(AlertCluster, AlertCluster.id == AlertClusterMember.cluster_id)
+            .where(
+                AlertClusterMember.organization_id == org_id,
+                AlertClusterMember.alert_id.in_([str(a.id) for a in alerts]),
+            )
+        )
+        for member_alert_id, cluster_id, alert_count, entities in cluster_rows.all():
+            sources = entities.get("sources") if isinstance(entities, dict) else None
+            clusters_by_alert[member_alert_id] = (
+                cluster_id,
+                alert_count or 1,
+                [str(s) for s in sources] if isinstance(sources, list) else [],
+            )
 
     return {
         "items": [
@@ -897,6 +994,9 @@ async def list_unified_alerts(
                 mitre_tactics=a.mitre_tactics,
                 mitre_techniques=a.mitre_techniques,
                 ingested_at=a.ingested_at.isoformat(),
+                cluster_id=clusters_by_alert.get(str(a.id), (None, 1, []))[0],
+                cluster_alert_count=clusters_by_alert.get(str(a.id), (None, 1, []))[1],
+                cluster_sources=clusters_by_alert.get(str(a.id), (None, 1, []))[2],
             )
             for a in alerts
         ],
@@ -904,6 +1004,7 @@ async def list_unified_alerts(
         "page": page,
         "page_size": page_size,
         "severity_counts": severity_counts,
+        "collapsed": collapse_duplicates,
     }
 
 

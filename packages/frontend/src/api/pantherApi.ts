@@ -2849,6 +2849,12 @@ export interface NormalizedAlertResponse {
   mitre_techniques: string[]
   raw_data: Record<string, unknown>
   ingested_at: string
+  // Cross-source grouping. A cluster_alert_count above 1 means several
+  // products each reported this same event and the list is showing one row
+  // for all of them.
+  cluster_id: string | null
+  cluster_alert_count: number
+  cluster_sources: string[]
 }
 
 export interface NormalizedAlertListResponse {
@@ -2857,6 +2863,7 @@ export interface NormalizedAlertListResponse {
   page: number
   page_size: number
   severity_counts?: Record<string, number>
+  collapsed?: boolean
 }
 
 export interface UnifiedAlertFilters {
@@ -2869,6 +2876,9 @@ export interface UnifiedAlertFilters {
   page?: number
   page_size?: number
   exclude_resolved?: boolean
+  // Defaults to true server-side: one row per real event rather than one per
+  // reporting product. Pass false for the raw per-source list.
+  collapse_duplicates?: boolean
 }
 
 // SecOps Platform: Workflow Types

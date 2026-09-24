@@ -126,6 +126,13 @@ class Settings(BaseSettings):
     alert_sync_batch_size: int = 100
     alert_sync_max_age_days: int = 30
 
+    # Cross-source alert grouping. Alerts describing the same activity on the
+    # same entities are attached to one AlertCluster instead of surfacing once
+    # per reporting product. The window is over event time, not ingest time:
+    # how far apart two reports of one event can be and still be one event.
+    alert_grouping_enabled: bool = True
+    alert_grouping_window_hours: int = 24
+
     # Syslog Receiver (for UniFi and other syslog-based integrations)
     syslog_port: int = 5514  # Using 5514 to avoid needing elevated privileges
     syslog_bind_address: str = "0.0.0.0"
