@@ -8,17 +8,14 @@ resources:
 - hpa.yaml
 - db-backup.yaml
 
-  # Production TLS uses the pre-existing Google-managed certificate
-  # "ttrevops-ssl" (gcloud compute ssl-certificates, covers ttrevops.com,
-  # auto-renews), attached since 2026-02 via the pre-shared-cert annotation.
-  # Swap the base's ManagedCertificate wiring for it so the deploy never
-  # detaches the working cert.
-  # The base ManagedCertificate is therefore unused in production; drop it
-  # (an unattached ManagedCertificate never provisions and just reads as a
-  # perpetually "Provisioning" object).
 patches:
 - path: frontend-patch.yaml
 - path: backend-patch.yaml
+# Production TLS uses the pre-existing Google-managed certificate
+# "ttrevops-ssl" (gcloud compute ssl-certificates, covers ttrevops.com,
+# auto-renews), attached since 2026-02 via the pre-shared-cert annotation.
+# Swap the base's ManagedCertificate wiring for it so the deploy never
+# detaches the working cert.
 - patch: |-
     - op: remove
       path: /metadata/annotations/networking.gke.io~1managed-certificates
@@ -28,6 +25,9 @@ patches:
   target:
     kind: Ingress
     name: revops-ingress
+# The base ManagedCertificate is therefore unused in production; drop it
+# (an unattached ManagedCertificate never provisions and just reads as a
+# perpetually "Provisioning" object).
 - patch: |-
     $patch: delete
     apiVersion: networking.gke.io/v1
@@ -38,12 +38,12 @@ patches:
     kind: ManagedCertificate
     name: revops-cert
 
-      # Required for Twilio webhook signature validation behind the LB.
 configMapGenerator:
 - behavior: merge
   literals:
   - CORS_ORIGINS=https://ttrevops.com,https://www.ttrevops.com
   - ENVIRONMENT=production
+  # Required for Twilio webhook signature validation behind the LB.
   - PUBLIC_BASE_URL=https://ttrevops.com
   name: backend-config
 
