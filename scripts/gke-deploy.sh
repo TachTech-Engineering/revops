@@ -71,7 +71,7 @@ if [ "${ALLOW_UNPUSHED_TAG:-}" != "1" ]; then
 fi
 
 if ! command -v kustomize >/dev/null 2>&1; then
-    echo "ERROR: kustomize is required (kubectl alone cannot 'edit set image')." >&2
+    echo "ERROR: kustomize is required (kubectl alone cannot 'kustomize build')." >&2
     echo "Install: https://kubectl.docs.kubernetes.io/installation/kustomize/" >&2
     exit 1
 fi
@@ -93,12 +93,32 @@ echo "Tag:       $TAG"
 echo ""
 
 # Pin the image tags in the overlay, then apply.
+#
+# Edited with sed rather than `kustomize edit set image`, which rewrites the
+# whole file in canonical form: it keeps every comment but detaches it from the
+# entry it explains. These comments are load-bearing -- the production overlay
+# records why the deploy must not detach the working ttrevops-ssl certificate --
+# so the tag is changed in place and the formatting left alone.
+#
+# Each substitution is scoped to its own `- name: <image>` entry and rewrites
+# the first newTag: that follows it, which fits both the canonical layout
+# (name/newName/newTag) and the indented one.
 echo "1. Setting image tags in overlay..."
-(
-    cd "$OVERLAY"
-    kustomize edit set image "${BACKEND_IMAGE}=${BACKEND_IMAGE}:${TAG}"
-    kustomize edit set image "${FRONTEND_IMAGE}=${FRONTEND_IMAGE}:${TAG}"
-)
+KUSTOMIZATION="$OVERLAY/kustomization.yaml"
+for IMAGE in "$BACKEND_IMAGE" "$FRONTEND_IMAGE"; do
+    sed -i -E "\|^[[:space:]]*-?[[:space:]]*name: ${IMAGE}[[:space:]]*$|,\|newTag:| s|^([[:space:]]*newTag:[[:space:]]*).*$|\1${TAG}|" "$KUSTOMIZATION"
+done
+
+# A no-op substitution here would be silent and would deploy whatever tag the
+# overlay was last set to -- the exact failure this script exists to prevent --
+# so confirm both images actually landed on $TAG before going any further.
+PINNED=$(grep -cE "^[[:space:]]*newTag:[[:space:]]*${TAG}[[:space:]]*$" "$KUSTOMIZATION" || true)
+if [ "$PINNED" != "2" ]; then
+    echo "ERROR: expected 2 images pinned to '$TAG' in $KUSTOMIZATION, found $PINNED." >&2
+    echo "The images: block has probably changed shape, so the tag was not applied." >&2
+    echo "Deploying now would silently re-apply the previously pinned tag." >&2
+    exit 1
+fi
 
 echo ""
 echo "2. Running database migrations..."
