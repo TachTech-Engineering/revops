@@ -37,9 +37,7 @@ Three things are missing, none of which can be created from this repository:
 So the staging overlay *deletes* the Ingress, ManagedCertificate,
 FrontendConfig, and IAP BackendConfig rather than reconfiguring them. Left in,
 they would provision a billed load balancer that can never serve traffic and a
-certificate that can never validate. The syslog `LoadBalancer` Service is
-dropped for the same reason — a second forwarding rule to receive syslog
-nothing sends.
+certificate that can never validate.
 
 Add DNS and a static IP and the deletions can come back out.
 

@@ -81,10 +81,7 @@ async def render(db: AsyncSession) -> str:
     # slowly), but depth plus oldest-age would have screamed on day one.
     buffers = []
     ages = []
-    for buffer_name, table in (
-        ("syslog", "syslog_ingest_events"),
-        ("falco", "falco_ingest_events"),
-    ):
+    for buffer_name, table in (("falco", "falco_ingest_events"),):
         pending = await _scalar(
             db,
             f"SELECT count(*) FROM {table} WHERE processed_at IS NULL",  # noqa: S608

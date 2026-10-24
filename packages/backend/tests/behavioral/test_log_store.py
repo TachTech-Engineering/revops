@@ -41,7 +41,7 @@ def _event(org_id, connector_id=None, message="hello", **kw):
     return LogEvent(
         organization_id=org_id,
         connector_id=connector_id or uuid.uuid4(),
-        source_type=kw.pop("source_type", "unifi_syslog"),
+        source_type=kw.pop("source_type", "falco"),
         event_time=kw.pop("event_time", utcnow()),
         message=message,
         **kw,
@@ -113,7 +113,7 @@ async def test_full_text_and_filters(partitions):
     await log_store.store_events(
         db,
         [
-            _event(org, conn_a, "ssh login failure from 1.2.3.4", source_type="unifi_syslog"),
+            _event(org, conn_a, "ssh login failure from 1.2.3.4", source_type="falco"),
             _event(org, conn_b, "terminal shell spawned in container", source_type="falco"),
         ],
     )
@@ -180,7 +180,7 @@ async def test_size_ceiling_refuses_writes(partitions, monkeypatch):
 
 
 async def test_device_clock_skew_does_not_lose_the_line(partitions):
-    """Syslog carries the sender's clock, and skewed clocks are routine.
+    """Events carry the sender's clock, and skewed clocks are routine.
 
     A device reporting 1970 or 2035 would otherwise land outside every
     partition and be dropped. It is filed at receipt time, with the claimed

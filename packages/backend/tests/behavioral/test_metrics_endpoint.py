@@ -63,7 +63,7 @@ async def test_no_tenant_data_leaks_into_the_scrape(db_session, make_user, app_c
     db_session.add(
         Connector(
             name=secret_name,
-            connector_type="unifi_syslog",
+            connector_type="falco",
             category=ConnectorCategory.DATA_SOURCE,
             status=ConnectorStatus.CONNECTED,
             organization_id=user.org.id,
@@ -81,7 +81,7 @@ async def test_no_tenant_data_leaks_into_the_scrape(db_session, make_user, app_c
     assert str(user.org.id) not in body, "organization ids must not be exported"
     assert user.user.email not in body, "user identifiers must not be exported"
     # The connector's *type* is fine and useful; its identity is not.
-    assert "unifi_syslog" in body
+    assert "falco" in body
 
 
 async def test_a_broken_query_does_not_take_the_whole_scrape_down(db_session):
@@ -104,12 +104,12 @@ async def test_a_broken_query_does_not_take_the_whole_scrape_down(db_session):
 
 async def test_pending_depth_reflects_real_rows(db_session, make_user, app_client):
     """The number has to actually move, or the graph is decorative."""
-    from app.services import syslog_event_buffer as buf
+    from app.services import falco_event_buffer as buf
 
     user = await make_user("metrics-depth")
     connector = Connector(
         name="c",
-        connector_type="unifi_syslog",
+        connector_type="falco",
         category=ConnectorCategory.DATA_SOURCE,
         status=ConnectorStatus.CONNECTED,
         organization_id=user.org.id,
@@ -131,7 +131,7 @@ async def test_pending_depth_reflects_real_rows(db_session, make_user, app_clien
     body = (await app_client.get("/metrics")).text
 
     line = next(
-        ln for ln in body.splitlines() if ln.startswith('revops_ingest_pending{buffer="syslog"}')
+        ln for ln in body.splitlines() if ln.startswith('revops_ingest_pending{buffer="falco"}')
     )
     assert float(line.rsplit(" ", 1)[1]) >= 3
 

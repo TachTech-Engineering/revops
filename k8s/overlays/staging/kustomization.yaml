@@ -76,17 +76,6 @@ patches:
       kind: BackendConfig
       metadata:
         name: iap-config
-  # type: LoadBalancer -- would allocate a second billed forwarding rule to
-  # receive syslog nothing sends. Staging tests the app, not the listener.
-  - target:
-      kind: Service
-      name: syslog-ingress
-    patch: |-
-      $patch: delete
-      apiVersion: v1
-      kind: Service
-      metadata:
-        name: syslog-ingress
   # The services carry a production BackendConfig annotation naming iap-config;
   # namePrefix does not rewrite annotation values, and the object is gone here.
   - target:
