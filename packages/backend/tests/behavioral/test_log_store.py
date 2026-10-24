@@ -113,7 +113,7 @@ async def test_full_text_and_filters(partitions):
     await log_store.store_events(
         db,
         [
-            _event(org, conn_a, "ssh login failure from 1.2.3.4", source_type="falco"),
+            _event(org, conn_a, "ssh login failure from 1.2.3.4", source_type="trivy"),
             _event(org, conn_b, "terminal shell spawned in container", source_type="falco"),
         ],
     )
