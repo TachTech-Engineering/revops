@@ -391,8 +391,8 @@ class RawLogEvent(Base):
     """Raw log lines from sources this platform ingests directly.
 
     Panther retains its own logs in Snowflake, so this covers only the sources
-    where RevOps is the system of record -- UniFi syslog and the Falco webhook.
-    Without it those events exist nowhere once they have been turned into an
+    where RevOps is the system of record -- the Falco webhook. Without it
+    those events exist nowhere once they have been turned into an
     alert (or dropped by a filter), so there is nothing to search or re-check.
 
     Partitioned by day on ``event_time`` so retention is a DROP of whole
@@ -501,70 +501,6 @@ class FalcoIngestEvent(Base):
         # claimed_at, so index the three together.
         Index(
             "ix_falco_ingest_events_connector_claim",
-            "connector_id",
-            "claimed_at",
-            "received_at",
-        ),
-    )
-
-
-class SyslogIngestEvent(Base):
-    """Syslog messages received on the UDP/TCP listener, awaiting the sync cycle.
-
-    These were held in a process-local dict in ``syslog_receiver``. The backend
-    runs several replicas and the syslog Service load-balances datagrams across
-    all of them, but ``last_sync_at`` is a single row: whichever replica reaches
-    the connector first drained its own buffer and marked the connector synced,
-    so the replica actually holding the messages skipped its turn. Measured in
-    production on 2026-08-17, one replica held 172 buffered messages and ran no
-    drains while another ran four drains finding nothing each time. The messages
-    were never persisted -- they aged out of the in-memory cap or died with the
-    pod, taking the UniFi alerts they would have become with them, while the
-    sync reported success.
-
-    Same shape and same claim semantics as :class:`FalcoIngestEvent`: any
-    replica can drain what any other replica received. Delivery is
-    at-least-once, which is safe because the UniFi connector derives
-    ``external_id`` from a content fingerprint, so a re-processed message
-    collides with ``uq_normalized_alerts_org_connector_external``.
-    """
-
-    __tablename__ = "syslog_ingest_events"
-
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    organization_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("organizations.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    connector_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("connectors.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-    )
-    # The parsed SyslogMessage, field for field, so a drain on any replica can
-    # rebuild it without re-parsing (and without depending on the parser
-    # version that happened to be running when it arrived).
-    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
-    received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
-    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    # Set once a drain has successfully turned this row into alerts.
-    #
-    # Without it, "claimed" and "in flight" were the same thing, so a row that
-    # had been processed perfectly well looked like a crashed sync 15 minutes
-    # later and was re-claimed. Because claims are taken oldest-first, the same
-    # rows were re-processed forever while newer ones were never reached, and
-    # the retention purge never fired because each re-claim refreshed
-    # claimed_at. Observed in production 2026-08-20: rows received on 08-17
-    # still being re-claimed three days later while 23,526 newer messages had
-    # never been touched once.
-    processed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-    __table_args__ = (
-        Index(
-            "ix_syslog_ingest_events_connector_claim",
             "connector_id",
             "claimed_at",
             "received_at",

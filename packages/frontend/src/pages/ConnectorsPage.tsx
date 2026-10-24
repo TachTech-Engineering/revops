@@ -75,8 +75,6 @@ const connectorTypeLabels: Record<string, { label: string; icon: string | ReactN
   cloudflare: { label: 'Cloudflare', icon: typeIcon('cloudflare-v2.png', 'Cloudflare'), category: 'Network' },
   darktrace: { label: 'Darktrace', icon: typeIcon('darktrace.png', 'Darktrace'), category: 'Network' },
   vectra: { label: 'Vectra', icon: typeIcon('vectra.png', 'Vectra'), category: 'Network' },
-  unifi_api: { label: 'UniFi Network', icon: typeIcon('ubiquiti.png', 'UniFi Network'), category: 'Network' },
-  unifi_syslog: { label: 'UniFi Network (Syslog)', icon: typeIcon('ubiquiti.png', 'UniFi Network (Syslog)'), category: 'Network' },
   // Action Connectors
   jira: { label: 'Jira', icon: typeIcon('jira.png', 'Jira') },
   slack: { label: 'Slack', icon: typeIcon('slack.png', 'Slack') },

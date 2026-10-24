@@ -49,7 +49,6 @@ const sourceTypeConfig: Record<string, { color: string; label: string }> = {
   falco: { color: 'bg-teal-500/20 text-teal-400', label: 'Falco' },
   prowler: { color: 'bg-purple-500/20 text-purple-400', label: 'Prowler' },
   trivy: { color: 'bg-sky-500/20 text-sky-400', label: 'Trivy' },
-  unifi_syslog: { color: 'bg-indigo-500/20 text-indigo-400', label: 'UniFi Syslog' },
 }
 
 export function SourceTypeBadge({ sourceType }: { sourceType: string }) {

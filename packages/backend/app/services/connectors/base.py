@@ -378,10 +378,6 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     # Vulnerability Management
     from app.services.connectors.data_sources.trivy import TrivyConnector
 
-    # UniFi Network
-    from app.services.connectors.data_sources.unifi_api import UniFiAPIConnector
-    from app.services.connectors.data_sources.unifi_syslog import UniFiSyslogConnector
-
     # SIEM
     registry.register_data_source("panther", PantherDataSourceConnector)
     registry.register_data_source("google_secops", GoogleSecOpsConnector)
@@ -405,9 +401,6 @@ def _register_all_connectors(registry: ConnectorRegistry) -> None:
     registry.register_data_source("entra_id", EntraIDConnector)
     # Network Security
     registry.register_data_source("cloudflare", CloudflareConnector)
-    # UniFi Network
-    registry.register_data_source("unifi_api", UniFiAPIConnector)
-    registry.register_data_source("unifi_syslog", UniFiSyslogConnector)
 
     # Import and register action connectors
     from app.services.connectors.actions.crowdstrike import CrowdStrikeActionConnector

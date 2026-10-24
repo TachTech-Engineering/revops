@@ -73,9 +73,6 @@ const sourceIcons: Record<string, React.ReactNode> = {
   cloudflare: toastIcon('cloudflare-v2.png', 'Cloudflare'),
   darktrace: toastIcon('darktrace.png', 'Darktrace'),
   vectra: toastIcon('vectra.png', 'Vectra'),
-  unifi: toastIcon('ubiquiti.png', 'UniFi Network'),
-  unifi_api: toastIcon('ubiquiti.png', 'UniFi Network'),
-  unifi_syslog: toastIcon('ubiquiti.png', 'UniFi Network'),
 }
 
 interface Toast {

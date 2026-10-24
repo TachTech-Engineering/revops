@@ -46,7 +46,7 @@ Supported integrations organized by category:
 | **Runtime Security** | Falco (webhook push via http_output or Falcosidekick) |
 | **Vulnerability Management** | Trivy (webhook push from CI jobs, cron scans, or trivy-operator) |
 | **Identity** | Okta, Microsoft Entra ID, CrowdStrike Identity Protection |
-| **Network** | Cloudflare, UniFi Network |
+| **Network** | Cloudflare |
 
 ### Cloud Security (CNAPP)
 The correlation layer that turns Prowler (posture) + Falco (runtime) + Trivy

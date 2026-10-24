@@ -1,7 +1,7 @@
 """
 Raw log search.
 
-Covers the sources RevOps ingests directly (UniFi syslog, the Falco webhook).
+Covers the sources RevOps ingests directly (the Falco webhook).
 Panther-sourced logs live in Snowflake and are searched through the IOC search
 endpoint instead.
 
@@ -68,7 +68,7 @@ async def search_logs(
     org_id: OrgIdDep,
     db: Annotated[AsyncSession, Depends(get_db)],
     q: str | None = Query(None, description="Full-text search over the message"),
-    source_type: str | None = Query(None, description="e.g. unifi_syslog, falco"),
+    source_type: str | None = Query(None, description="e.g. falco"),
     host: str | None = Query(None),
     connector_id: UUID | None = Query(None),
     start: datetime | None = Query(None, description="Inclusive; defaults to 24h ago"),

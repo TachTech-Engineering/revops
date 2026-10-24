@@ -4,8 +4,8 @@ connection with the app-defined 4401 (unauthorized) code -- never leave it open.
 
 The no-token path in authenticate_websocket accepts, then immediately closes with
 4401 BEFORE any Redis subscriber is started or any DB session is opened, so this
-test needs no external infra. To avoid the full app's lifespan (init_db, syslog
-receiver, connector scheduler), we mount only the websocket router on a minimal
+test needs no external infra. To avoid the full app's lifespan (init_db, connector
+scheduler), we mount only the websocket router on a minimal
 FastAPI app -- exercising the real endpoint + authenticate_websocket code.
 """
 

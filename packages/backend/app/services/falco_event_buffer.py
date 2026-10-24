@@ -167,7 +167,12 @@ async def claim_events(db, connector_id: UUID, limit: int = 100) -> list[FalcoEv
 
 
 async def mark_processed(db, ids: list[UUID]) -> int:
-    """Close out events a drain has successfully handled. See the syslog twin."""
+    """Close out events a drain has successfully handled.
+
+    Until this is set the row is only *leased*, and a lease that goes stale is
+    indistinguishable from a sync that died -- which is how the same rows ended
+    up being re-processed indefinitely.
+    """
     ids = [i for i in ids if i is not None]
     if not ids:
         return 0

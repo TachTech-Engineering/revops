@@ -38,7 +38,7 @@ spec:
           # (1000), so appuser is deterministically 1000:1000. Pinning the
           # numeric uid also lets the kubelet satisfy runAsNonRoot (a bare
           # runAsNonRoot with a non-numeric image USER cannot be verified).
-          # uvicorn binds :8000 and syslog :5514 (all unprivileged), so no
+          # uvicorn binds :8000 (unprivileged), so no
           # capabilities are required -- drop them all. seccomp comes from the pod.
           securityContext:
             runAsNonRoot: true
@@ -51,12 +51,6 @@ spec:
           ports:
             - containerPort: 8000
               name: http
-            - containerPort: 5514
-              protocol: UDP
-              name: syslog-udp
-            - containerPort: 5514
-              protocol: TCP
-              name: syslog-tcp
           envFrom:
             - configMapRef:
                 name: backend-config

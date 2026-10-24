@@ -51,9 +51,6 @@ const dataSourceCategories: Record<string, string> = {
   cloudflare: 'Network',
   darktrace: 'Network',
   vectra: 'Network',
-  unifi: 'Network',
-  unifi_api: 'Network',
-  unifi_syslog: 'Network',
 }
 
 const categoryOrder = ['SIEM', 'EDR', 'XDR', 'Cloud Security', 'Identity', 'Email Security', 'Network', 'Other']
