@@ -80,9 +80,6 @@ const sourceTypeConfig: Record<string, { label: string; icon: string | ReactNode
   cloudflare: { label: 'Cloudflare', icon: sourceIcon('cloudflare-v2.png', 'Cloudflare'), category: 'Network' },
   darktrace: { label: 'Darktrace', icon: sourceIcon('darktrace.png', 'Darktrace'), category: 'Network' },
   vectra: { label: 'Vectra', icon: sourceIcon('vectra.png', 'Vectra'), category: 'Network' },
-  unifi: { label: 'UniFi Network', icon: sourceIcon('ubiquiti.png', 'UniFi Network'), category: 'Network' },
-  unifi_api: { label: 'UniFi Network', icon: sourceIcon('ubiquiti.png', 'UniFi Network'), category: 'Network' },
-  unifi_syslog: { label: 'UniFi Network (Syslog)', icon: sourceIcon('ubiquiti.png', 'UniFi Network (Syslog)'), category: 'Network' },
 }
 
 type AlertTab = 'active' | 'resolved'

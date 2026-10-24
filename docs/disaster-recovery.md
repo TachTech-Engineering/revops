@@ -28,8 +28,7 @@ back to generating.
 
 Backups are dumps taken at a point in time, not continuous. Expect to lose up
 to 24 hours of alerts. The raw log store (`raw_log_events`) has 14-day
-retention and is not separately protected; syslog staged in
-`syslog_ingest_events` but not yet drained is lost with the cluster.
+retention and is not separately protected.
 
 ## Restoring
 
