@@ -33,7 +33,6 @@ from app.services.connectors.data_sources.prowler import ProwlerConnector
 from app.services.connectors.data_sources.sentinel import SentinelConnector
 from app.services.connectors.data_sources.sentinelone import SentinelOneConnector
 from app.services.connectors.data_sources.splunk import SplunkConnector
-from app.services.connectors.data_sources.unifi import UnifiConnector
 
 __all__ = [
     # SIEM
@@ -57,5 +56,4 @@ __all__ = [
     "EntraIDConnector",
     # Network Security
     "CloudflareConnector",
-    "UnifiConnector",
 ]

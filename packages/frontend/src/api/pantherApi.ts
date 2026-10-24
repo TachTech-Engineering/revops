@@ -1926,7 +1926,7 @@ export const revopsApi = createApi({
       invalidatesTags: (_result, _error, id) => [{ type: 'AttackPath', id }, 'AttackPath', 'CloudAsset'],
     }),
 
-    // ==================== Raw Logs (UniFi syslog / Falco) ====================
+    // ==================== Raw Logs (Falco) ====================
     searchLogs: builder.query<LogSearchResponse, LogSearchFilters>({
       query: (params) => ({
         url: '/logs/search',
@@ -4132,7 +4132,7 @@ export interface AttackPathDetail extends AttackPathFindingSummary {
   resolved_at: string | null
 }
 
-// ==================== Raw Logs (UniFi syslog / Falco) ====================
+// ==================== Raw Logs (Falco) ====================
 
 export interface LogEntry {
   id: string

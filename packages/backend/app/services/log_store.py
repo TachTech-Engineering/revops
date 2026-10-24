@@ -2,7 +2,7 @@
 Raw log storage and search.
 
 Covers the sources RevOps ingests directly and is the system of record for --
-UniFi syslog and the Falco webhook. Panther retains its own logs in Snowflake
+the Falco webhook. Panther retains its own logs in Snowflake
 (see the IOC search path), so those are deliberately not duplicated here.
 
 Three properties matter more than features:
@@ -99,7 +99,7 @@ async def organization_for_connector(db: AsyncSession, connector_id: UUID) -> UU
 def _partitionable(event: LogEvent) -> tuple[datetime, dict[str, Any] | None]:
     """Pin an event to a time a partition actually exists for.
 
-    Syslog timestamps come from the sending device's clock, and skewed or
+    Event timestamps come from the sending device's clock, and skewed or
     unset clocks are routine -- a device reporting 1970 or 2035 would land
     outside every partition and the line would be dropped. Such an event is
     filed at receipt time instead, with the value the device claimed preserved

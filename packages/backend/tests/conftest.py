@@ -2,8 +2,8 @@
 Shared test fixtures.
 
 IMPORTANT: the app's lifespan (app.main.lifespan) initializes the database,
-starts the connector-sync scheduler, and binds a syslog receiver. Tests must
-never run it. Starlette's TestClient only executes the lifespan when it is
+and starts the connector-sync, escalation, and CVE feed schedulers. Tests
+must never run it. Starlette's TestClient only executes the lifespan when it is
 entered as a context manager (``with TestClient(app):``), so we deliberately
 construct the client WITHOUT entering it. Each request then runs through the
 ASGI app directly with no startup/shutdown events.

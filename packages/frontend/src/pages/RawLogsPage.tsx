@@ -22,7 +22,6 @@ const TIME_PRESETS: { value: string; label: string; hours: number }[] = [
 // Snowflake and are searched via IOC Search instead).
 const SOURCE_TYPES: { value: string; label: string }[] = [
   { value: '', label: 'All Sources' },
-  { value: 'unifi_syslog', label: 'UniFi Syslog' },
   { value: 'falco', label: 'Falco' },
 ]
 
@@ -120,7 +119,7 @@ export default function RawLogsPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Raw Logs</h1>
           <p className="text-muted-foreground mt-1">
-            Full-text search over directly ingested logs (UniFi syslog, Falco)
+            Full-text search over directly ingested logs (Falco)
           </p>
         </div>
       </div>

@@ -1,18 +1,16 @@
 """
 DB-free regression tests for the 2026-08-13 reliability backlog.
 
-Covers the pure logic behind items 10-14 and 17: syslog timestamp parsing
-(every fractional-second width), correlation rule evaluation order, feed retry
-backoff, the connector-sync in-flight guard, case-number sequencing, and the
-Redis listener reconnect schedule. Nothing here touches a database or a socket.
+Covers the pure logic behind items 11-14 and 17: correlation rule evaluation
+order, feed retry backoff, the connector-sync in-flight guard, case-number
+sequencing, and the Redis listener reconnect schedule. Nothing here touches a
+database or a socket.
 """
 
 import asyncio
 import uuid
-from datetime import datetime
 from types import SimpleNamespace
 
-import pytest
 from sqlalchemy.sql.dml import Update
 
 from app.services.case_service import (
@@ -27,76 +25,6 @@ from app.services.feed_service import (
     compute_retry_delay_minutes,
 )
 from app.services.notification_service import NotificationService
-from app.services.syslog_receiver import SyslogReceiverService, parse_syslog_timestamp
-
-# --------------------------------------------------------------------------
-# Item 10: UniFi syslog timestamps
-# --------------------------------------------------------------------------
-
-# Every fractional-second width UniFi/RFC 5424 devices emit. The old
-# fromisoformat(ts[:26]) was width dependent and returned a tz-AWARE datetime
-# for the 3-digit case, which is the standard UniFi CEF format.
-_ISO_WIDTHS = [
-    ("2024-01-15T12:34:56Z", 0),
-    ("2024-01-15T12:34:56.1Z", 100000),
-    ("2024-01-15T12:34:56.12Z", 120000),
-    ("2024-01-15T12:34:56.123Z", 123000),
-    ("2024-01-15T12:34:56.123456Z", 123456),
-    ("2024-01-15T12:34:56.123456789Z", 123456),  # sub-microsecond truncated
-]
-
-
-@pytest.mark.parametrize(("ts_str", "expected_microsecond"), _ISO_WIDTHS)
-def test_iso_timestamps_parse_naive_utc_at_every_fraction_width(ts_str, expected_microsecond):
-    parsed = parse_syslog_timestamp(ts_str)
-
-    assert parsed.tzinfo is None, f"{ts_str} produced a tz-aware datetime"
-    assert (parsed.year, parsed.month, parsed.day) == (2024, 1, 15)
-    assert (parsed.hour, parsed.minute, parsed.second) == (12, 34, 56)
-    assert parsed.microsecond == expected_microsecond
-
-
-@pytest.mark.parametrize(("ts_str", "_expected"), _ISO_WIDTHS)
-def test_parsed_timestamps_compare_against_naive_datetimes(ts_str, _expected):
-    """The exact comparison unifi_syslog.fetch_alerts does against `since`.
-
-    It used to raise TypeError *after* get_buffered_messages had already
-    drained the buffer, so the messages were lost for good.
-    """
-    since = datetime(2024, 1, 1, 0, 0, 0)
-    assert parse_syslog_timestamp(ts_str) > since
-
-
-def test_explicit_offset_is_converted_to_utc_not_just_stripped():
-    parsed = parse_syslog_timestamp("2024-01-15T12:34:56.123+02:00")
-    assert parsed.tzinfo is None
-    assert parsed.hour == 10 and parsed.minute == 34
-
-
-def test_rfc3164_timestamp_assumes_current_year():
-    parsed = parse_syslog_timestamp("Jan  5 12:34:56")
-    assert parsed.tzinfo is None
-    assert (parsed.month, parsed.day, parsed.hour) == (1, 5, 12)
-
-
-@pytest.mark.parametrize("ts_str", ["", "   ", None, "not-a-timestamp", "2024-13-45T99:99:99Z"])
-def test_missing_or_unparseable_timestamp_falls_back_to_naive_now(ts_str):
-    parsed = parse_syslog_timestamp(ts_str)
-    assert parsed.tzinfo is None
-
-
-def test_unifi_cef_message_is_buffered_with_a_naive_timestamp():
-    receiver = SyslogReceiverService()
-    raw = (
-        "Jan  5 12:34:56 2024-01-15T12:34:56.123Z DK Dream Machine Pro "
-        "CEF:0|Ubiquiti|UniFi OS|4.0|1001|Threat Detected|"
-    )
-    parsed = receiver._parse_message(raw, "192.0.2.10", 514)
-
-    assert parsed is not None
-    assert parsed.timestamp.tzinfo is None
-    assert parsed.timestamp < datetime(2024, 1, 15, 12, 34, 57)
-
 
 # --------------------------------------------------------------------------
 # Item 11: correlation rules must all be evaluated
@@ -290,7 +218,7 @@ async def test_long_running_sync_is_not_spawned_twice(monkeypatch):
     connector = SimpleNamespace(
         id=uuid.uuid4(),
         organization_id=uuid.uuid4(),
-        name="unifi",
+        name="falco",
         sync_interval_minutes=1,
         last_sync_at=None,  # never synced -> always due
     )

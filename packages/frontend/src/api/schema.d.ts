@@ -17051,7 +17051,7 @@ export interface operations {
             query?: {
                 /** @description Full-text search over the message */
                 q?: string | null;
-                /** @description e.g. unifi_syslog, falco */
+                /** @description e.g. falco */
                 source_type?: string | null;
                 host?: string | null;
                 connector_id?: string | null;

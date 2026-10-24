@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     default_llm_model: str = "claude-sonnet-5"
     default_llm_provider: str = "anthropic"
 
-    # Raw log retention for directly-ingested sources (UniFi syslog, Falco).
+    # Raw log retention for directly-ingested sources (the Falco webhook).
     # Retention is enforced by dropping whole day partitions; lower this before
     # raising log_store.MAX_STORED_BYTES if the volume is under pressure.
     log_retention_days: int = 14
@@ -125,10 +125,6 @@ class Settings(BaseSettings):
     # Connector Framework - Alert Sync
     alert_sync_batch_size: int = 100
     alert_sync_max_age_days: int = 30
-
-    # Syslog Receiver (for UniFi and other syslog-based integrations)
-    syslog_port: int = 5514  # Using 5514 to avoid needing elevated privileges
-    syslog_bind_address: str = "0.0.0.0"
 
     # Logging
     log_level: str = "INFO"

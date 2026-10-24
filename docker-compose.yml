@@ -16,8 +16,6 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
-      - "514:514/udp"   # Syslog UDP (UniFi)
-      - "514:514/tcp"   # Syslog TCP (UniFi)
     environment:
       - PANTHER_API_HOST=${PANTHER_API_HOST}
       - PANTHER_API_TOKEN=${PANTHER_API_TOKEN}

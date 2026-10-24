@@ -29,8 +29,8 @@ MAINTENANCE_LOCK_ID = 0x524D4E54
 CORRELATION_WINDOW_MAX_AGE_HOURS = 24
 
 # A sync claim older than this is assumed to belong to a replica that died
-# mid-sync and becomes reclaimable. Matches the staleness window the Falco and
-# syslog staging buffers use.
+# mid-sync and becomes reclaimable. Matches the staleness window the Falco
+# staging buffer uses.
 SYNC_CLAIM_STALE_MINUTES = 15
 
 
@@ -105,7 +105,6 @@ class ConnectorSyncScheduler:
             ensure_partitions,
             retention_days,
         )
-        from app.services.syslog_event_buffer import purge_processed as purge_syslog
 
         async with AsyncSessionLocal() as db:
             # pg_try_advisory_XACT_lock, not the session-scoped variant:
@@ -126,9 +125,6 @@ class ConnectorSyncScheduler:
                 return
             purged = await purge_processed(db)
             purged_generic = await purge_ingest_events(db)
-            # Same reaping for staged syslog: claimed rows are kept for a
-            # debugging window and then dropped, or the table only grows.
-            purged_syslog = await purge_syslog(db)
 
             # Expired correlation windows. This lived in a correlation_cleanup_job
             # module exposing an APScheduler config that nothing ever constructed,
@@ -150,8 +146,6 @@ class ConnectorSyncScheduler:
                 logger.info(f"Purged {purged} consumed Falco ingest event(s)")
             if purged_generic:
                 logger.info(f"Purged {purged_generic} consumed webhook ingest event(s)")
-            if purged_syslog:
-                logger.info(f"Purged {purged_syslog} consumed syslog ingest event(s)")
             if expired_windows:
                 logger.info(f"Reaped {expired_windows} expired correlation window(s)")
             if created or dropped:

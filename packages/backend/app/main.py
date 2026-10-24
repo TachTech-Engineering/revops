@@ -21,7 +21,6 @@ from app.services.escalation_service import (
     start_escalation_scheduler,
     stop_escalation_scheduler,
 )
-from app.services.syslog_receiver import get_syslog_receiver
 
 # Configure logging from settings (default INFO)
 _log_level = getattr(logging, settings.log_level.upper(), logging.INFO)
@@ -31,43 +30,6 @@ logging.getLogger("panther_sdk").setLevel(_log_level)
 logging.getLogger("httpx").setLevel(max(_log_level, logging.INFO))
 
 logger = logging.getLogger(__name__)
-
-
-async def register_syslog_handlers(syslog_receiver) -> None:
-    """Register syslog handlers for all syslog-type connectors in the database."""
-    from sqlalchemy import select
-
-    from app.db.models import Connector
-    from app.db.session import AsyncSessionLocal
-
-    syslog_connector_types = ["unifi_syslog"]
-
-    try:
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(
-                select(Connector).where(
-                    Connector.connector_type.in_(syslog_connector_types),
-                    Connector.sync_enabled.is_(True),
-                )
-            )
-            connectors = result.scalars().all()
-
-            for connector in connectors:
-                source_ips = connector.config.get("source_ips", []) if connector.config else []
-                syslog_receiver.register_handler(
-                    connector_id=connector.id,
-                    callback=None,  # Use buffering
-                    source_ips=source_ips if source_ips else None,
-                    hostname_patterns=None,
-                    app_name_patterns=None,
-                )
-                logger.info(
-                    f"Registered syslog handler for connector {connector.name} ({connector.id})"
-                )
-
-            logger.info(f"Registered {len(connectors)} syslog handlers")
-    except Exception as e:
-        logger.error(f"Failed to register syslog handlers: {e}")
 
 
 @asynccontextmanager
@@ -94,18 +56,6 @@ async def lifespan(app: FastAPI):
     cve_sync_task = asyncio.create_task(start_cve_feed_sync())
     logger.info("CVE feed sync job started")
 
-    # Start syslog receiver for UniFi and other syslog-based connectors
-    syslog_receiver = get_syslog_receiver()
-    syslog_port = getattr(settings, "syslog_port", 514)
-    try:
-        await syslog_receiver.start(udp_port=syslog_port, tcp_port=syslog_port)
-        logger.info(f"Syslog receiver started on port {syslog_port}")
-
-        # Register handlers for all syslog-type connectors
-        await register_syslog_handlers(syslog_receiver)
-    except Exception as e:
-        logger.warning(f"Could not start syslog receiver: {e} (may require elevated privileges)")
-
     yield
 
     # Shutdown
@@ -130,9 +80,6 @@ async def lifespan(app: FastAPI):
         await cve_sync_task
     except asyncio.CancelledError:
         pass
-
-    # Stop syslog receiver
-    await syslog_receiver.stop()
 
 
 app = FastAPI(
