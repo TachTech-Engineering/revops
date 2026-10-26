@@ -4,9 +4,13 @@
 #
 # Creates:
 #   - GCS bucket gs://<project>-db-backups (uniform access, public access
-#     prevention, 30-day lifecycle delete rule)
+#     prevention, object versioning, 30-day lifecycle: live objects, plus
+#     noncurrent versions 30 days after they go noncurrent)
+#   - A second bucket gs://<project>-db-backups-dr in a different region
+#     (DR_REGION, default us-east1) with the same settings; the CronJob writes
+#     every dump to both
 #   - GSA revops-db-backup@<project> with roles/storage.objectCreator on the
-#     bucket only (write-only: a compromised pod cannot read old backups)
+#     buckets only (write-only: a compromised pod cannot read old backups)
 #   - Workload Identity binding for the db-backup KSA in the prod namespace
 #
 # IDEMPOTENT: safe to re-run; it only creates what is missing.
@@ -24,36 +28,50 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/gke-env.sh"
 
 BUCKET="gs://${PROJECT_ID}-db-backups"
+DR_REGION="${DR_REGION:-us-east1}"
+DR_BUCKET="gs://${PROJECT_ID}-db-backups-dr"
 BACKUP_GSA="revops-db-backup@${PROJECT_ID}.iam.gserviceaccount.com"
 BACKUP_KSA="db-backup"           # k8s/overlays/production/db-backup.yaml
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 
 echo "=== DB backup setup (project: $PROJECT_ID) ==="
 
-echo ""
-echo "1. Ensuring bucket $BUCKET..."
-if ! gcloud storage buckets describe "$BUCKET" --project="$PROJECT_ID" >/dev/null 2>&1; then
-    gcloud storage buckets create "$BUCKET" \
-        --project="$PROJECT_ID" \
-        --location="$REGION" \
-        --uniform-bucket-level-access \
-        --public-access-prevention
-else
-    echo "  - Bucket already exists."
-fi
+ensure_bucket() {
+    local bucket="$1" location="$2"
+    echo ""
+    echo "  Ensuring bucket $bucket ($location)..."
+    if ! gcloud storage buckets describe "$bucket" --project="$PROJECT_ID" >/dev/null 2>&1; then
+        gcloud storage buckets create "$bucket" \
+            --project="$PROJECT_ID" \
+            --location="$location" \
+            --uniform-bucket-level-access \
+            --public-access-prevention
+    else
+        echo "  - Bucket already exists."
+    fi
+    # Versioning keeps overwritten/deleted dumps recoverable; the second rule
+    # stops those noncurrent versions from accumulating forever.
+    gcloud storage buckets update "$bucket" --project="$PROJECT_ID" --versioning
+    gcloud storage buckets update "$bucket" --project="$PROJECT_ID" \
+        --lifecycle-file="$LIFECYCLE_JSON"
+}
 
-echo ""
-echo "2. Setting ${RETENTION_DAYS}-day lifecycle delete rule..."
 LIFECYCLE_JSON="$(mktemp)"
+trap 'rm -f "$LIFECYCLE_JSON"' EXIT
 cat > "$LIFECYCLE_JSON" <<EOF
-{"rule": [{"action": {"type": "Delete"}, "condition": {"age": ${RETENTION_DAYS}}}]}
+{"rule": [
+  {"action": {"type": "Delete"}, "condition": {"age": ${RETENTION_DAYS}, "isLive": true}},
+  {"action": {"type": "Delete"}, "condition": {"daysSinceNoncurrentTime": ${RETENTION_DAYS}}}
+]}
 EOF
-gcloud storage buckets update "$BUCKET" --project="$PROJECT_ID" \
-    --lifecycle-file="$LIFECYCLE_JSON"
-rm -f "$LIFECYCLE_JSON"
 
 echo ""
-echo "3. Ensuring GSA $BACKUP_GSA..."
+echo "1. Ensuring buckets (versioned, ${RETENTION_DAYS}-day lifecycle)..."
+ensure_bucket "$BUCKET" "$REGION"
+ensure_bucket "$DR_BUCKET" "$DR_REGION"
+
+echo ""
+echo "2. Ensuring GSA $BACKUP_GSA..."
 if ! gcloud iam service-accounts describe "$BACKUP_GSA" --project="$PROJECT_ID" >/dev/null 2>&1; then
     gcloud iam service-accounts create "${BACKUP_GSA%%@*}" \
         --project="$PROJECT_ID" \
@@ -63,15 +81,17 @@ else
 fi
 
 echo ""
-echo "4. Granting roles/storage.objectCreator on the bucket only..."
-gcloud storage buckets add-iam-policy-binding "$BUCKET" \
-    --project="$PROJECT_ID" \
-    --member="serviceAccount:$BACKUP_GSA" \
-    --role="roles/storage.objectCreator" >/dev/null
-echo "  - granted."
+echo "3. Granting roles/storage.objectCreator on the buckets only..."
+for b in "$BUCKET" "$DR_BUCKET"; do
+    gcloud storage buckets add-iam-policy-binding "$b" \
+        --project="$PROJECT_ID" \
+        --member="serviceAccount:$BACKUP_GSA" \
+        --role="roles/storage.objectCreator" >/dev/null
+    echo "  - granted on $b."
+done
 
 echo ""
-echo "5. Binding Workload Identity (${PROD_NAMESPACE}/${BACKUP_KSA} -> GSA)..."
+echo "4. Binding Workload Identity (${PROD_NAMESPACE}/${BACKUP_KSA} -> GSA)..."
 gcloud iam service-accounts add-iam-policy-binding "$BACKUP_GSA" \
     --project="$PROJECT_ID" \
     --role="roles/iam.workloadIdentityUser" \

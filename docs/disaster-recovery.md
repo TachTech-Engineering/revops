@@ -6,15 +6,17 @@ What is backed up, where it lives, and how to bring RevOps back.
 
 | What | Where | Cadence | Retention |
 |---|---|---|---|
-| Database dump (`pg_dump -Fc`) | `gs://revops-486917-db-backups/YYYY/MM/` | daily, 03:00 America/Chicago (`db-backup` CronJob) | 30 days live; deleted or overwritten dumps kept 30 more as noncurrent versions (bucket versioning + lifecycle) |
+| Database dump (`pg_dump -Fc`) | `gs://revops-486917-db-backups/YYYY/MM/` (us-central1) and a copy in `gs://revops-486917-db-backups-dr/YYYY/MM/` (us-east1) | daily, 03:00 America/Chicago (`db-backup` CronJob) | 30 days live; deleted or overwritten dumps kept 30 more as noncurrent versions (bucket versioning + lifecycle) |
 | Secret material | Google Secret Manager, project `revops-486917` | on change, via `./scripts/backup-cluster-secrets.sh` | all versions kept |
 
-The bucket has object versioning on, with two lifecycle rules: delete live
+Both buckets have object versioning on, with two lifecycle rules: delete live
 objects at 30 days, delete noncurrent versions 30 days after they go
 noncurrent. To recover a dump that was deleted or overwritten, list versions
 with `gcloud storage ls -a gs://revops-486917-db-backups/YYYY/MM/` and copy the
 one you need by its `#generation` suffix. There is no retention lock, so
-someone with permission to delete object versions can still remove them.
+someone with permission to delete object versions can still remove them. The
+`-dr` bucket is in another region but the same GCP project, so it protects
+against a regional outage, not against loss of the project.
 
 Secret Manager ids: `database-url`, `database-password`, `jwt-secret-key`,
 `panther-api-host`, `panther-api-token`, `encryption-key`.

@@ -5,9 +5,10 @@
 # managed by kustomize (see k8s/base/postgres/postgres-deployment.yaml).
 #
 # GCP prerequisites (bucket, GSA, Workload Identity binding) are provisioned
-# by scripts/gke-backup-setup.sh. The bucket has a 30-day lifecycle delete
-# rule; the GSA can only CREATE objects (write-only), so a compromised pod
-# cannot read or delete existing backups.
+# by scripts/gke-backup-setup.sh. Every dump goes to two buckets in different
+# regions (primary + "-dr"); both are versioned with a 30-day lifecycle. The
+# GSA can only CREATE objects (write-only), so a compromised pod cannot read
+# or delete existing backups.
 #
 # Restore: see the header of scripts/gke-backup-setup.sh.
 apiVersion: v1
@@ -92,8 +93,10 @@ spec:
               command: ["sh", "-ec"]
               args:
                 - |
-                  gsutil cp /backup/*.dump \
-                    "gs://revops-486917-db-backups/$(date -u +%Y/%m)/"
+                  # Both uploads must succeed (-e): a failing copy fails the Job.
+                  MONTH="$(date -u +%Y/%m)"
+                  gsutil cp /backup/*.dump "gs://revops-486917-db-backups/${MONTH}/"
+                  gsutil cp /backup/*.dump "gs://revops-486917-db-backups-dr/${MONTH}/"
                   echo "upload complete"
               env:
                 # gsutil writes state under $HOME; the image default is /root,
